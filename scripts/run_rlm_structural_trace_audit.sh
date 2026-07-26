@@ -8,6 +8,8 @@ task_profile="${REDCO_TASK_PROFILE:-single}"
 max_total_tokens="${REDCO_MAX_TOTAL_TOKENS:-4096}"
 tool_patch_mode="${REDCO_RLM_TOOL_PATCH_MODE:-all_turns}"
 forward_required_tool_choice_env="${REDCO_FORWARD_REQUIRED_TOOL_CHOICE_ENV:-0}"
+inference_config="${REDCO_INFERENCE_CONFIG:-configs/stage-b/rlm-trace-audit-inference.toml}"
+prime_strict_env_guard="${REDCO_PRIME_STRICT_ENV_GUARD:-0}"
 rlm_worktree="/tmp/redco-rlm-structural"
 rlm_tool_root="/tmp/vf-rlm"
 verifiers_worktree="/tmp/redco-verifiers-structural"
@@ -45,6 +47,21 @@ test "$(
 test "$(
   sha256sum patches/verifiers-rlm-structural-trace.patch | cut -d ' ' -f 1
 )" = "95db874f84fdd1487399d6ee77b11f1726e7ff27c14d0626a1a7e6f2c664b577"
+test -f "$inference_config"
+if test "$prime_strict_env_guard" = "1"; then
+  test "$(
+    sha256sum patches/prime-rl-strict-tool-env-guard.patch | cut -d ' ' -f 1
+  )" = "1c52102bf79741d8a1791733397de26d7319b907531317c22d5ec1e6cd29c001"
+  if git -C external/prime-rl apply --check \
+    "$repo_root/patches/prime-rl-strict-tool-env-guard.patch"
+  then
+    git -C external/prime-rl apply \
+      "$repo_root/patches/prime-rl-strict-tool-env-guard.patch"
+  else
+    git -C external/prime-rl apply --reverse --check \
+      "$repo_root/patches/prime-rl-strict-tool-env-guard.patch"
+  fi
+fi
 
 rm -rf "$rlm_worktree" "$rlm_tool_root" "$verifiers_worktree" \
   "$verifiers_environment"
@@ -82,7 +99,7 @@ traces="$run_root/live/traces.jsonl"
 
 CUDA_VISIBLE_DEVICES=0 \
   "$uv_bin" run --frozen --project external/prime-rl \
-  inference @ configs/stage-b/rlm-trace-audit-inference.toml \
+  inference @ "$inference_config" \
   >"$inference_log" 2>&1 &
 inference_pid=$!
 
@@ -109,6 +126,9 @@ done
 if test "$ready" != "1"; then
   tail -n 100 "$inference_log"
   exit 1
+fi
+if test "$prime_strict_env_guard" = "1"; then
+  grep -Fx "REDCO_STRICT_TOOL_CALLING_ENV=1" "$inference_log"
 fi
 
 (

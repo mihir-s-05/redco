@@ -4,7 +4,7 @@
   "passed": false,
   "multi_child_return_trace_gate_cleared": false,
   "gate_gb_cleared": false,
-  "classification": "required_tool_choice_not_effective",
+  "classification": "malformed_provider_response_to_required_tool_choice",
   "source": {
     "trace_id": "915eb2203a2345a4bcea6eb1b9aa704c",
     "trace_sha256": "025fc7e5b68413a38dc23c6bbd397f2d65a524d5480ab5eb5a51c7b7b0b01ab5",
@@ -21,8 +21,9 @@
     ],
     "root_depth_0_turn_0_observed": true,
     "patched_condition_deployed": true,
+    "outgoing_tool_choice_observed": "required",
     "effective_required_tool_generation_observed": false,
-    "remaining_uncertainty": "The native trace does not expose outgoing request kwargs, so it cannot distinguish a false patch condition from vLLM/Hermes failing to enforce tool_choice=required."
+    "remaining_uncertainty": "The native trace proves that tool_choice=required was relayed upstream. The shell-exported strict-tool environment value was not recorded inside the inference process, so this run cannot distinguish a lost strict-mode setting from a vLLM/Hermes structural-grammar enforcement defect."
   },
   "observation": {
     "model_calls": 1,
@@ -81,5 +82,5 @@
     "upload_snapshot": "runs/stage-b/rlm-multi-child-return-forwarded-trace-attempts/pod-upload-8fe30ec.tar"
   },
   "decision": "Do not retry and do not implement empirical branch replay from this trace.",
-  "next_action": "Add CPU-testable instrumentation that records the actual RLM request tool_choice and relevant environment values. Before further GPU use, validate required-tool behavior directly against the pinned vLLM/Hermes request path."
+  "next_action": "Put VLLM_ENFORCE_STRICT_TOOL_CALLING=1 in a frozen inference config, assert it inside the inference process before serving, and preregister at most one direct pinned-vLLM confirmation. The native trace already proves the outgoing tool_choice and root depth/turn."
 }
