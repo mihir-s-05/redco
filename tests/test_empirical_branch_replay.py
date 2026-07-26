@@ -6,8 +6,10 @@ from redco.analysis.empirical_branch_replay import (
     _chat_tools,
     _openai_messages,
     build_replay_indices,
+    derive_lossless_render_boundary,
     execute_cached_arm,
     replace_unique,
+    splice_lossless_rendered_suffix,
 )
 from redco.env.policy_cache import (
     CachedPolicyAction,
@@ -220,3 +222,42 @@ def test_chat_tools_preserves_already_wrapped_openai_tools() -> None:
     }
 
     assert _chat_tools([wrapped]) == [wrapped]
+
+
+def test_lossless_render_boundary_reconstructs_noncanonical_history() -> None:
+    recorded_static_prefix = (1, 2)
+    recorded_prompt = (1, 2, 8, 9)
+    canonical_original = (1, 3, 4, 8, 9)
+
+    boundary = derive_lossless_render_boundary(
+        recorded_prompt=recorded_prompt,
+        recorded_static_prefix=recorded_static_prefix,
+        canonical_render=canonical_original,
+    )
+    branch = splice_lossless_rendered_suffix(
+        recorded_static_prefix=recorded_static_prefix,
+        canonical_original=canonical_original,
+        canonical_branch=(1, 3, 4, 7, 6),
+        boundary=boundary,
+    )
+
+    assert boundary.recorded_static_prefix_tokens == 2
+    assert boundary.canonical_suffix_start_tokens == 3
+    assert boundary.exact_common_suffix_tokens == 2
+    assert branch == (1, 2, 7, 6)
+
+
+def test_lossless_render_splice_rejects_changed_history() -> None:
+    boundary = derive_lossless_render_boundary(
+        recorded_prompt=(1, 2, 8, 9),
+        recorded_static_prefix=(1, 2),
+        canonical_render=(1, 3, 4, 8, 9),
+    )
+
+    with pytest.raises(ValueError, match="before the affected suffix"):
+        splice_lossless_rendered_suffix(
+            recorded_static_prefix=(1, 2),
+            canonical_original=(1, 3, 4, 8, 9),
+            canonical_branch=(1, 7, 4, 8, 9),
+            boundary=boundary,
+        )

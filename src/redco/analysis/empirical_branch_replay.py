@@ -83,6 +83,13 @@ class ReproducibilityAudit:
 
 
 @dataclass(frozen=True, slots=True)
+class LosslessRenderBoundary:
+    recorded_static_prefix_tokens: int
+    canonical_suffix_start_tokens: int
+    exact_common_suffix_tokens: int
+
+
+@dataclass(frozen=True, slots=True)
 class EmpiricalReplayReport:
     schema_version: int
     generated_at_utc: str
@@ -93,7 +100,9 @@ class EmpiricalReplayReport:
     alternatives_per_target: int
     target_count: int
     paired_branches: int
-    authoritative_renderer_preflight_exact: bool
+    canonical_renderer_prompt_exact: bool
+    lossless_hybrid_preflight_exact: bool
+    render_boundary: LosslessRenderBoundary
     distinct_candidate_actions_per_target: bool
     deterministic_terminal_mismatches: int
     reward_mismatches: int
@@ -383,6 +392,57 @@ def replace_unique(text: str, old: str, new: str) -> str:
     return text.replace(old, new, 1)
 
 
+def derive_lossless_render_boundary(
+    *,
+    recorded_prompt: tuple[int, ...],
+    recorded_static_prefix: tuple[int, ...],
+    canonical_render: tuple[int, ...],
+) -> LosslessRenderBoundary:
+    if not recorded_static_prefix:
+        raise ValueError("recorded static prefix must be non-empty")
+    if recorded_prompt[: len(recorded_static_prefix)] != recorded_static_prefix:
+        raise ValueError("recorded static prefix does not prefix recorded prompt")
+    common_suffix = 0
+    while (
+        common_suffix < len(recorded_prompt)
+        and common_suffix < len(canonical_render)
+        and recorded_prompt[-(common_suffix + 1)]
+        == canonical_render[-(common_suffix + 1)]
+    ):
+        common_suffix += 1
+    recorded_suffix_start = len(recorded_prompt) - common_suffix
+    canonical_suffix_start = len(canonical_render) - common_suffix
+    if recorded_suffix_start != len(recorded_static_prefix):
+        raise ValueError(
+            "exact common suffix does not begin at the recorded static boundary"
+        )
+    reconstructed = (
+        recorded_static_prefix + canonical_render[canonical_suffix_start:]
+    )
+    if reconstructed != recorded_prompt:
+        raise ValueError("lossless hybrid did not reconstruct recorded prompt")
+    return LosslessRenderBoundary(
+        recorded_static_prefix_tokens=len(recorded_static_prefix),
+        canonical_suffix_start_tokens=canonical_suffix_start,
+        exact_common_suffix_tokens=common_suffix,
+    )
+
+
+def splice_lossless_rendered_suffix(
+    *,
+    recorded_static_prefix: tuple[int, ...],
+    canonical_original: tuple[int, ...],
+    canonical_branch: tuple[int, ...],
+    boundary: LosslessRenderBoundary,
+) -> tuple[int, ...]:
+    split = boundary.canonical_suffix_start_tokens
+    if len(recorded_static_prefix) != boundary.recorded_static_prefix_tokens:
+        raise ValueError("recorded static prefix length changed")
+    if canonical_branch[:split] != canonical_original[:split]:
+        raise ValueError("branch changed tokens before the affected suffix")
+    return recorded_static_prefix + canonical_branch[split:]
+
+
 def run_empirical_replay(
     *,
     trace_path: Path,
@@ -429,6 +489,14 @@ def run_empirical_replay(
         copy.deepcopy(_message(nodes[node_index]))
         for node_index in message_path
     ])
+    recorded_static_prefix = tuple(
+        token_id
+        for node_index in message_path[:-1]
+        for token_id in _integer_tuple(
+            nodes[node_index].get("token_ids"),
+            f"trace.nodes[{node_index}].token_ids",
+        )
+    )
     tools = _chat_tools(raw_trace.get("tools"))
     if final_call.event_seed is None:
         raise ValueError("final call has no event seed")
@@ -439,10 +507,11 @@ def run_empirical_replay(
         temperature=temperature,
         max_tokens=768,
     )
-    if rendered_original != final_call.prompt_token_ids:
-        raise RuntimeError(
-            "authoritative chat renderer did not reproduce the recorded prompt"
-        )
+    render_boundary = derive_lossless_render_boundary(
+        recorded_prompt=final_call.prompt_token_ids,
+        recorded_static_prefix=recorded_static_prefix,
+        canonical_render=rendered_original,
+    )
 
     policy_node_ids_by_call: dict[int, str] = {}
     for node in trace.graph.nodes.values():
@@ -519,12 +588,18 @@ def run_empirical_replay(
                 original_child_text,
                 candidate_text,
             )
-            branch_prompt = client.render_chat(
+            canonical_branch_prompt = client.render_chat(
                 branch_messages,
                 tools,
                 seed=continuation_seed,
                 temperature=temperature,
                 max_tokens=768,
+            )
+            branch_prompt = splice_lossless_rendered_suffix(
+                recorded_static_prefix=recorded_static_prefix,
+                canonical_original=rendered_original,
+                canonical_branch=canonical_branch_prompt,
+                boundary=render_boundary,
             )
             if branch_prompt == final_call.prompt_token_ids:
                 raise RuntimeError("candidate action did not change the final prompt")
@@ -690,7 +765,11 @@ def run_empirical_replay(
         alternatives_per_target=alternatives_per_target,
         target_count=len(target_calls),
         paired_branches=len(pairs),
-        authoritative_renderer_preflight_exact=True,
+        canonical_renderer_prompt_exact=(
+            rendered_original == final_call.prompt_token_ids
+        ),
+        lossless_hybrid_preflight_exact=True,
+        render_boundary=render_boundary,
         distinct_candidate_actions_per_target=distinct_candidates,
         deterministic_terminal_mismatches=terminal_mismatches,
         reward_mismatches=reward_mismatches,
