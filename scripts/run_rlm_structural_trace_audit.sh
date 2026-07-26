@@ -88,14 +88,15 @@ if test "$ready" != "1"; then
   exit 1
 fi
 
-VLLM_API_KEY=EMPTY \
-  UV_PROJECT_ENVIRONMENT="$verifiers_environment" \
-  "$uv_bin" run --frozen --no-dev --python 3.12 \
-  --project "$verifiers_worktree" \
-  --with-editable "$repo_root/environments/redco_rlm_trace_v1" \
-  python -m redco_rlm_trace_v1.run_audit \
-  --output-dir "$repo_root/$run_root/live" \
-  >"$control_log" 2>&1
+(
+  cd "$verifiers_worktree"
+  VLLM_API_KEY=EMPTY \
+    UV_PROJECT_ENVIRONMENT="$verifiers_environment" \
+    "$uv_bin" run --frozen --no-dev --python 3.12 \
+    --with-editable "$repo_root/environments/redco_rlm_trace_v1" \
+    python -m redco_rlm_trace_v1.run_audit \
+    --output-dir "$repo_root/$run_root/live"
+) >"$control_log" 2>&1
 
 test -s "$traces"
 "$uv_bin" run --frozen python -m redco.analysis.verifiers_trace_audit \
