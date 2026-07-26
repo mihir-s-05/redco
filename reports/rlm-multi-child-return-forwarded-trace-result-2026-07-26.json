@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "completed": true,
+  "passed": false,
+  "multi_child_return_trace_gate_cleared": false,
+  "gate_gb_cleared": false,
+  "classification": "required_tool_choice_not_effective",
+  "source": {
+    "trace_id": "915eb2203a2345a4bcea6eb1b9aa704c",
+    "trace_sha256": "025fc7e5b68413a38dc23c6bbd397f2d65a524d5480ab5eb5a51c7b7b0b01ab5",
+    "trace_audit_signed_payload_sha256": "01eadab68f3a9e2d3bb3cec82d718abcd1ed7fdee842419e50f1a13be50f8747"
+  },
+  "runtime_contract": {
+    "max_total_tokens_required": 8192,
+    "max_total_tokens_observed_in_config": 8192,
+    "verifier_harness_forward_env_required": [
+      "RLM_FORCE_TOOL_CHOICE_REQUIRED"
+    ],
+    "verifier_harness_forward_env_observed": [
+      "RLM_FORCE_TOOL_CHOICE_REQUIRED"
+    ],
+    "root_depth_0_turn_0_observed": true,
+    "patched_condition_deployed": true,
+    "effective_required_tool_generation_observed": false,
+    "remaining_uncertainty": "The native trace does not expose outgoing request kwargs, so it cannot distinguish a false patch condition from vLLM/Hermes failing to enforce tool_choice=required."
+  },
+  "observation": {
+    "model_calls": 1,
+    "root_policy_calls": 1,
+    "recursive_policy_calls": 0,
+    "prompt_tokens": 1180,
+    "generated_tokens": 102,
+    "finish_reason": "stop",
+    "stop_condition": "agent_completed",
+    "reward": 0.0,
+    "sampled_action": "The model emitted the intended IPython payload but omitted the final outer JSON brace before </tool_call>.",
+    "trace_audit_passed": false,
+    "provenance_report_generated": false,
+    "recorded_raf_projection_generated": false
+  },
+  "mandatory_checks": {
+    "rendered_harness_forward_env_exact": true,
+    "all_episodes_and_traces_successful": true,
+    "minimum_model_calls": false,
+    "minimum_root_policy_turns": false,
+    "required_root_turn_indices": false,
+    "minimum_recursive_model_calls": false,
+    "structural_model_call_coverage": true,
+    "exact_recursive_parent_coverage": false,
+    "minimum_exact_cross_component_links": false,
+    "cross_component_fallbacks": true,
+    "unresolved_cross_component_links": true,
+    "minimum_eligible_subcall_targets": false,
+    "minimum_targets_with_exact_key_reusable_suffix_events": false,
+    "minimum_conservative_no_cache_generated_token_work_fraction": false,
+    "projection_requires_broader_trace": false,
+    "aggregate_reported_tokens": true,
+    "stop_condition_must_not_equal_max_total_tokens": true
+  },
+  "preregistration": {
+    "path": "configs/stage-b/rlm-multi-child-return-forwarded-trace-preregistration.json",
+    "commit": "8fe30ec",
+    "retry_policy_respected": true,
+    "automatic_retries": 0,
+    "post_observation_changes": 0
+  },
+  "resource_use": {
+    "pod_id": "47425130943b437ebac7e615874058f3",
+    "gpu": "1x A6000 48GB",
+    "provider": "massedcompute",
+    "price_usd_per_hour": 0.54,
+    "duration_minutes_reported": 7,
+    "cost_usd": 0.0541,
+    "cumulative_project_compute_usd": 3.0546,
+    "wallet_balance_usd": 46.9454,
+    "active_prime_pods": 0,
+    "persistent_prime_disks": 0
+  },
+  "local_artifacts": {
+    "run": "runs/stage-b/rlm-multi-child-return-forwarded-trace",
+    "upload_snapshot": "runs/stage-b/rlm-multi-child-return-forwarded-trace-attempts/pod-upload-8fe30ec.tar"
+  },
+  "decision": "Do not retry and do not implement empirical branch replay from this trace.",
+  "next_action": "Add CPU-testable instrumentation that records the actual RLM request tool_choice and relevant environment values. Before further GPU use, validate required-tool behavior directly against the pinned vLLM/Hermes request path."
+}
