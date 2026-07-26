@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from redco.analysis.empirical_branch_replay import (
+    _chat_tools,
     _openai_messages,
     build_replay_indices,
     execute_cached_arm,
@@ -183,3 +184,39 @@ def test_openai_messages_normalizes_verifiers_tool_calls_without_mutation() -> N
             ],
         }
     ]
+
+
+def test_chat_tools_wraps_each_raw_function_definition() -> None:
+    raw_tools = [
+        {
+            "name": "ipython",
+            "description": "Execute code",
+            "parameters": {"type": "object"},
+        }
+    ]
+
+    normalized = _chat_tools(raw_tools)
+
+    assert normalized == [
+        {
+            "type": "function",
+            "function": {
+                "name": "ipython",
+                "description": "Execute code",
+                "parameters": {"type": "object"},
+            },
+        }
+    ]
+    assert raw_tools[0]["name"] == "ipython"
+
+
+def test_chat_tools_preserves_already_wrapped_openai_tools() -> None:
+    wrapped = {
+        "type": "function",
+        "function": {
+            "name": "ipython",
+            "parameters": {"type": "object"},
+        },
+    }
+
+    assert _chat_tools([wrapped]) == [wrapped]

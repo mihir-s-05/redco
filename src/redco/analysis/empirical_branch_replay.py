@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import time
+import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -247,11 +248,18 @@ class TokenInferenceClient:
             },
             method="POST",
         )
-        with urllib.request.urlopen(
-            request,
-            timeout=self.timeout_seconds,
-        ) as response:
-            decoded = json.loads(response.read())
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=self.timeout_seconds,
+            ) as response:
+                response_body = response.read()
+        except urllib.error.HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"POST {path} failed with HTTP {exc.code}: {error_body}"
+            ) from exc
+        decoded = json.loads(response_body)
         if not isinstance(decoded, dict):
             raise TypeError(f"{path} response must be an object")
         return decoded
@@ -745,12 +753,28 @@ def _message(node: dict[str, Any]) -> dict[str, Any]:
 
 
 def _chat_tools(value: Any) -> list[dict[str, Any]]:
-    if isinstance(value, dict):
-        return [{"type": "function", "function": value}]
-    tools = _object_list(value, "trace.tools")
-    if not tools:
+    raw_tools = (
+        [value]
+        if isinstance(value, dict)
+        else _object_list(value, "trace.tools")
+    )
+    if not raw_tools:
         raise ValueError("trace.tools must be non-empty")
-    return tools
+    normalized: list[dict[str, Any]] = []
+    for tool in raw_tools:
+        if tool.get("type") == "function" and isinstance(
+            tool.get("function"),
+            dict,
+        ):
+            normalized.append(copy.deepcopy(tool))
+        else:
+            normalized.append(
+                {
+                    "type": "function",
+                    "function": copy.deepcopy(tool),
+                }
+            )
+    return normalized
 
 
 def _openai_messages(
