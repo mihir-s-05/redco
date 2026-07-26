@@ -15,6 +15,8 @@ from redco.analysis.ga_micro import (
 def _write_run(root: Path, name: str, shift: float = 0.0) -> None:
     run = root / name
     (run / "run_default").mkdir(parents=True)
+    trace_dir = run / "run_default" / "rollouts" / "step_1" / "train" / "effective"
+    trace_dir.mkdir(parents=True)
     trainer = [
         {"optim/grad_norm": 0.9 + shift},
         {
@@ -36,6 +38,10 @@ def _write_run(root: Path, name: str, shift: float = 0.0) -> None:
     )
     (run / "run_default" / "metrics.jsonl").write_text(
         json.dumps(orchestrator) + "\n",
+        encoding="utf-8",
+    )
+    (trace_dir / "traces.jsonl").write_text(
+        json.dumps({"name": name, "shift": shift}) + "\n",
         encoding="utf-8",
     )
 
