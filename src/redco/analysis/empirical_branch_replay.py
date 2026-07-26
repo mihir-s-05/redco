@@ -247,7 +247,7 @@ class TokenInferenceClient:
         )
 
     def _post(self, path: str, payload: dict[str, object]) -> dict[str, Any]:
-        body = canonical_json(payload)
+        body = _request_json(payload)
         request = urllib.request.Request(
             f"{self.base_url}{path}",
             data=body,
@@ -272,6 +272,16 @@ class TokenInferenceClient:
         if not isinstance(decoded, dict):
             raise TypeError(f"{path} response must be an object")
         return decoded
+
+
+def _request_json(payload: dict[str, object]) -> bytes:
+    """Serialize an API request without reordering prompt-bearing objects."""
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
 
 def build_replay_indices(
@@ -402,19 +412,16 @@ def derive_lossless_render_boundary(
         raise ValueError("recorded static prefix must be non-empty")
     if recorded_prompt[: len(recorded_static_prefix)] != recorded_static_prefix:
         raise ValueError("recorded static prefix does not prefix recorded prompt")
-    common_suffix = 0
-    while (
-        common_suffix < len(recorded_prompt)
-        and common_suffix < len(canonical_render)
-        and recorded_prompt[-(common_suffix + 1)]
-        == canonical_render[-(common_suffix + 1)]
+    exact_suffix = recorded_prompt[len(recorded_static_prefix) :]
+    if not exact_suffix:
+        raise ValueError("recorded affected suffix must be non-empty")
+    canonical_suffix_start = len(canonical_render) - len(exact_suffix)
+    if (
+        canonical_suffix_start < 0
+        or canonical_render[canonical_suffix_start:] != exact_suffix
     ):
-        common_suffix += 1
-    recorded_suffix_start = len(recorded_prompt) - common_suffix
-    canonical_suffix_start = len(canonical_render) - common_suffix
-    if recorded_suffix_start != len(recorded_static_prefix):
         raise ValueError(
-            "exact common suffix does not begin at the recorded static boundary"
+            "canonical render does not preserve the exact recorded affected suffix"
         )
     reconstructed = (
         recorded_static_prefix + canonical_render[canonical_suffix_start:]
@@ -424,7 +431,7 @@ def derive_lossless_render_boundary(
     return LosslessRenderBoundary(
         recorded_static_prefix_tokens=len(recorded_static_prefix),
         canonical_suffix_start_tokens=canonical_suffix_start,
-        exact_common_suffix_tokens=common_suffix,
+        exact_common_suffix_tokens=len(exact_suffix),
     )
 
 

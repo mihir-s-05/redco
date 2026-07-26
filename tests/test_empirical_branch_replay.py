@@ -5,6 +5,7 @@ import pytest
 from redco.analysis.empirical_branch_replay import (
     _chat_tools,
     _openai_messages,
+    _request_json,
     build_replay_indices,
     derive_lossless_render_boundary,
     execute_cached_arm,
@@ -47,6 +48,25 @@ def _call(
         call_kind="policy",
         parent_session_id=None,
         parent_turn_index=None,
+    )
+
+
+def test_request_json_preserves_nested_schema_order() -> None:
+    payload: dict[str, object] = {
+        "tools": [
+            {
+                "parameters": {
+                    "type": "object",
+                    "properties": {"code": {"type": "string"}},
+                    "required": ["code"],
+                }
+            }
+        ]
+    }
+
+    assert _request_json(payload) == (
+        b'{"tools":[{"parameters":{"type":"object","properties":'
+        b'{"code":{"type":"string"}},"required":["code"]}}]}'
     )
 
 
@@ -245,6 +265,17 @@ def test_lossless_render_boundary_reconstructs_noncanonical_history() -> None:
     assert boundary.canonical_suffix_start_tokens == 3
     assert boundary.exact_common_suffix_tokens == 2
     assert branch == (1, 2, 7, 6)
+
+
+def test_lossless_boundary_does_not_overextend_matching_suffix() -> None:
+    boundary = derive_lossless_render_boundary(
+        recorded_prompt=(1, 2, 3, 4, 8, 9),
+        recorded_static_prefix=(1, 2, 3),
+        canonical_render=(7, 2, 3, 4, 8, 9),
+    )
+
+    assert boundary.canonical_suffix_start_tokens == 3
+    assert boundary.exact_common_suffix_tokens == 3
 
 
 def test_lossless_render_splice_rejects_changed_history() -> None:
