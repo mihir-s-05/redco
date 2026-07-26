@@ -16,6 +16,14 @@ Tier 0 is CPU-only and intentionally independent of prime-rl:
 - deterministic full-suffix and graph-sliced replay;
 - enumerable synthetic credit probes.
 
+The deterministic Gate GB campaign is executable with:
+
+```console
+uv run python -m redco.analysis.gate_gb
+```
+
+It persists its machine-readable report under `runs/stage-b/`.
+
 Prime-rl integration and paid GPU execution require an explicit manual checkpoint.
 
 ## Development

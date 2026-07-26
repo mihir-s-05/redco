@@ -66,3 +66,68 @@ def spurious_correlation() -> FiniteCreditProbe:
 
     return FiniteCreditProbe("spurious_correlation", actions, reward)
 
+
+def control_flow_trap() -> FiniteCreditProbe:
+    """Only the action that opens the planted branch can reach reward."""
+    actions = ("skip_branch", "open_branch")
+
+    def reward(action: str, exogenous_seed: int) -> float:
+        planted_branch_is_live = exogenous_seed % 3 != 0
+        return float(action == "open_branch" and planted_branch_is_live)
+
+    return FiniteCreditProbe("control_flow_trap", actions, reward)
+
+
+def aliasing_trap() -> FiniteCreditProbe:
+    """Reward immutable copying while a hidden-alias mutation corrupts evidence."""
+    actions = ("mutate_alias", "copy_then_mutate")
+
+    def reward(action: str, _: int) -> float:
+        return float(action == "copy_then_mutate")
+
+    return FiniteCreditProbe("aliasing_trap", actions, reward)
+
+
+def observation_trap() -> FiniteCreditProbe:
+    """Changing a prompt-visible artifact must change the downstream policy state."""
+    actions = ("reuse_stale_prompt", "render_changed_prompt")
+
+    def reward(action: str, _: int) -> float:
+        return float(action == "render_changed_prompt")
+
+    return FiniteCreditProbe("observation_trap", actions, reward)
+
+
+def side_effect_ordering_trap() -> FiniteCreditProbe:
+    """The write must be committed before the dependent read."""
+    actions = ("read_before_write", "write_before_read")
+
+    def reward(action: str, _: int) -> float:
+        return float(action == "write_before_read")
+
+    return FiniteCreditProbe("side_effect_ordering_trap", actions, reward)
+
+
+def resource_dependency_trap() -> FiniteCreditProbe:
+    """A declared resource version is part of the replay dependency closure."""
+    actions = ("stale_resource", "versioned_resource")
+
+    def reward(action: str, exogenous_seed: int) -> float:
+        resource_available = exogenous_seed % 5 != 0
+        return float(action == "versioned_resource" and resource_available)
+
+    return FiniteCreditProbe("resource_dependency_trap", actions, reward)
+
+
+def standard_credit_probes() -> tuple[FiniteCreditProbe, ...]:
+    """Return the fixed CPU probe suite used before any model training."""
+    return (
+        planted_needle(chunk_count=8, needle_chunk=5),
+        redundancy(),
+        spurious_correlation(),
+        control_flow_trap(),
+        aliasing_trap(),
+        observation_trap(),
+        side_effect_ordering_trap(),
+        resource_dependency_trap(),
+    )

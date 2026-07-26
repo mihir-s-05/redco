@@ -29,7 +29,9 @@ class TypedCommand:
     output: str
     params: tuple[tuple[str, JsonValue], ...] = ()
     control_dependencies: tuple[str, ...] = ()
+    call_dependencies: tuple[str, ...] = ()
     ordering_dependencies: tuple[str, ...] = ()
+    observation_dependencies: tuple[str, ...] = ()
     resource_dependencies: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -47,7 +49,9 @@ class TypedCommand:
     def explicit_event_dependencies(self) -> tuple[str, ...]:
         return (
             self.control_dependencies
+            + self.call_dependencies
             + self.ordering_dependencies
+            + self.observation_dependencies
             + self.resource_dependencies
         )
 

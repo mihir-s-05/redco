@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from redco.env.tasks.credit_probes import planted_needle, redundancy, spurious_correlation
+from redco.env.tasks.credit_probes import (
+    planted_needle,
+    redundancy,
+    spurious_correlation,
+    standard_credit_probes,
+)
 
 
 def test_planted_needle_has_enumerable_ground_truth() -> None:
@@ -21,3 +26,17 @@ def test_redundancy_and_spurious_probes_separate_causation() -> None:
         {"spurious_absent": 0.0, "spurious_present": 0.0}
     )
 
+
+def test_standard_probe_suite_covers_dependency_traps() -> None:
+    probes = standard_credit_probes()
+    names = {probe.name for probe in probes}
+
+    assert len(probes) == 8
+    assert {
+        "control_flow_trap",
+        "aliasing_trap",
+        "observation_trap",
+        "side_effect_ordering_trap",
+        "resource_dependency_trap",
+    } <= names
+    assert all(probe.q_values(range(1, 101)) for probe in probes)

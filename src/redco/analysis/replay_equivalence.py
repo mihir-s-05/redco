@@ -30,6 +30,7 @@ class EquivalenceReport:
     full_suffix_events: int
     sliced_suffix_events: int
     mean_sliced_work_fraction: float
+    dependency_edge_counts: dict[str, int]
 
     @property
     def passed(self) -> bool:
@@ -55,9 +56,28 @@ def run_randomized_equivalence(
     failures: list[EquivalenceFailure] = []
     full_work: list[int] = []
     sliced_work: list[int] = []
+    dependency_edge_counts = {
+        "dataflow": 0,
+        "control": 0,
+        "call": 0,
+        "side_effect": 0,
+        "observation": 0,
+        "resource": 0,
+    }
 
     for program_index in range(program_count):
         program = _random_program(rng, events_per_program)
+        for command in program.commands:
+            dependency_edge_counts["dataflow"] += sum(
+                input_name not in program.initial_state for input_name in command.inputs
+            )
+            dependency_edge_counts["control"] += len(command.control_dependencies)
+            dependency_edge_counts["call"] += len(command.call_dependencies)
+            dependency_edge_counts["side_effect"] += len(command.ordering_dependencies)
+            dependency_edge_counts["observation"] += len(
+                command.observation_dependencies
+            )
+            dependency_edge_counts["resource"] += len(command.resource_dependencies)
         engine = ReplayEngine(program)
         for _ in range(interventions_per_program):
             target = rng.choice(program.commands)
@@ -103,6 +123,7 @@ def run_randomized_equivalence(
         full_suffix_events=full_total,
         sliced_suffix_events=sliced_total,
         mean_sliced_work_fraction=mean_fraction,
+        dependency_edge_counts=dependency_edge_counts,
     )
 
 
@@ -114,19 +135,29 @@ def _random_program(rng: random.Random, event_count: int) -> Program:
     }
     available = list(initial_state)
     commands: list[TypedCommand] = []
+    event_ids: list[str] = []
     for index in range(event_count):
         input_count = 1 if rng.random() < 0.4 else 2
         inputs = tuple(rng.sample(available, k=input_count))
         output = f"value^{index}"
+        explicit: list[tuple[str, ...]] = [(), (), (), (), ()]
+        if event_ids and rng.random() < 0.75:
+            explicit[rng.randrange(len(explicit))] = (rng.choice(event_ids),)
         commands.append(
             TypedCommand(
                 event_id=f"event-{index}",
                 kind=CommandKind.ADD,
                 inputs=inputs,
                 output=output,
+                control_dependencies=explicit[0],
+                call_dependencies=explicit[1],
+                ordering_dependencies=explicit[2],
+                observation_dependencies=explicit[3],
+                resource_dependencies=explicit[4],
             )
         )
         available.append(output)
+        event_ids.append(f"event-{index}")
     return Program(
         initial_state=initial_state,
         commands=tuple(commands),
@@ -153,4 +184,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

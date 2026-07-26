@@ -6,6 +6,7 @@ from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
 
+from redco.contracts import ActualEvaluationCost, canonical_json
 from redco.env.commands import JsonValue, TypedCommand, execute_command
 
 
@@ -52,9 +53,24 @@ class ExecutionResult:
     state: dict[str, JsonValue]
     restored_prefix_event_ids: tuple[str, ...]
     reexecuted_suffix_event_ids: tuple[str, ...]
+    reused_suffix_event_ids: tuple[str, ...] = ()
 
     def terminal(self, output_name: str) -> JsonValue:
         return self.state[output_name]
+
+    @property
+    def state_bytes(self) -> bytes:
+        """Canonical graph-visible state used by the deterministic oracle."""
+        return canonical_json(self.state)
+
+    @property
+    def actual_cost(self) -> ActualEvaluationCost:
+        """CPU Tier-0 work meter; model-specific meters are added by the caller."""
+        return ActualEvaluationCost(
+            cpu_seconds=0.0,
+            wall_seconds=0.0,
+            storage_bytes=len(self.state_bytes),
+        )
 
 
 class DeterministicExecutor:
@@ -124,6 +140,11 @@ class ReplayEngine:
             state=state,
             restored_prefix_event_ids=tuple(restored_prefix),
             reexecuted_suffix_event_ids=tuple(reexecuted_suffix),
+            reused_suffix_event_ids=tuple(
+                command.event_id
+                for command in self.program.commands[target_index + 1 :]
+                if command.event_id not in selected_events
+            ),
         )
 
 
