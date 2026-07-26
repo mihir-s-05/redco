@@ -1,0 +1,77 @@
+{
+  "added_events": 10892,
+  "alternative_action_generated_tokens": 129933,
+  "alternatives_per_program": 3,
+  "baseline_generated_tokens": 479260,
+  "campaign_seed": 20260726,
+  "deterministic_failures": 0,
+  "empirical_real_trace_status": "pending_recorded_or_live_rlm_traces",
+  "failures": [],
+  "full_downstream_generated_tokens": 919849,
+  "full_suffix_events": 31502,
+  "full_work_by_role": {
+    "environment": {
+      "cpu_units": 36021,
+      "events": 19495,
+      "generated_tokens": 0,
+      "judge_calls": 0
+    },
+    "judge": {
+      "cpu_units": 0,
+      "events": 3000,
+      "generated_tokens": 169857,
+      "judge_calls": 3000
+    },
+    "root_policy": {
+      "cpu_units": 0,
+      "events": 3000,
+      "generated_tokens": 241078,
+      "judge_calls": 0
+    },
+    "subcall_policy": {
+      "cpu_units": 0,
+      "events": 6007,
+      "generated_tokens": 508914,
+      "judge_calls": 0
+    }
+  },
+  "generated_at_utc": "2026-07-26T06:42:22Z",
+  "mean_sliced_event_fraction": 0.4678940440364589,
+  "modeled_full_policy_token_raf": 3.1904227350498684,
+  "modeled_sliced_policy_token_raf": 3.0722843550473646,
+  "paired_branches": 3000,
+  "passed_rlm_shaped_cpu_proxy": true,
+  "programs": 1000,
+  "removed_events": 11220,
+  "report_sha256": "75c054165051a504028c343cb73a85cc6e77f83887b146f3c6c2cc11a329f147",
+  "schema_version": 1,
+  "sliced_downstream_generated_tokens": 863230,
+  "sliced_suffix_events": 15892,
+  "sliced_work_by_role": {
+    "environment": {
+      "cpu_units": 14874,
+      "events": 7934,
+      "generated_tokens": 0,
+      "judge_calls": 0
+    },
+    "judge": {
+      "cpu_units": 0,
+      "events": 2000,
+      "generated_tokens": 113238,
+      "judge_calls": 2000
+    },
+    "root_policy": {
+      "cpu_units": 0,
+      "events": 2000,
+      "generated_tokens": 241078,
+      "judge_calls": 0
+    },
+    "subcall_policy": {
+      "cpu_units": 0,
+      "events": 3958,
+      "generated_tokens": 508914,
+      "judge_calls": 0
+    }
+  },
+  "topology_divergences": 2000
+}

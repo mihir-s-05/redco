@@ -75,7 +75,7 @@ every node affects every future prompt (no slicing savings), the correct fallbac
 a simpler C3-style turn-level credit method for RLMs — still novel, much simpler —
 rather than continuing into the critic and structural phases.
 
-### Implementation checkpoint — 2026-07-25
+### Implementation checkpoint — through 2026-07-26
 
 - The Tier-0 CPU campaign passed 10,000/10,000 deterministic sliced-vs-full
   comparisons, but only for value replacements on a static synthetic command
@@ -90,10 +90,15 @@ rather than continuing into the critic and structural phases.
 - A subsequent CPU producer-equivalence gate executes config dispatch,
   `finalize_group`, advantage/routing stamping, trainer packing, and serialization
   under both `grpo` and `redco_noop`; the resulting trainer bytes are exact-equal.
-- Before Stage C, implement and pass end-to-end replay equivalence for
-  branch-specific dynamic topology (different turns, calls, and artifacts) and
-  measure RAF on representative RLM traces. The current `TopologyDivergence`
-  record is not an implementation of that behavior.
+- A bounded dynamic-topology engine now materializes different branch event and
+  artifact sets, removes stale original-branch artifacts, and shares exact-key
+  policy-action reuse across full and sliced replay. An RLM-shaped CPU proxy
+  passed 3,000/3,000 paired branches, including 2,000 topology divergences.
+- The proxy's modeled policy-token RAF is 3.07× (versus 3.19× for full suffix),
+  far above the hoped-for overhead. This is a warning, not an empirical RLM
+  result: before Stage C, ingest recorded or live verifiers RLM traces, measure
+  actual prompt provenance and costs, and complete the stochastic reward and
+  same-prompt/same-seed model audits.
 
 ---
 
@@ -307,12 +312,14 @@ with one value overwritten." Notation: each branch is its own dynamic execution
 
     (G_{i,m}, R_{i,m}) = Exec_{π_b}(S_v, a_i, U_m).
 
-**Current implementation boundary (2026-07-25):** Tier-0 replay currently
-performs value replacement on a static typed-command topology. It detects and can
-record topology divergence, but it does not yet construct and compare independent
-branch-specific graphs when an intervention changes turns, calls, or artifacts.
-That missing behavior is a blocking Stage-B item, not covered by the 10,000-pair
-campaign.
+**Current implementation boundary (2026-07-26):** the original 10,000-pair
+campaign remains a static-topology result. A separate dynamic engine now
+materializes mutually exclusive branch commands, added/removed artifacts, and
+exact-key downstream policy reuse; its RLM-shaped proxy passed 3,000 paired
+branches. The engine currently consumes bounded ordered command templates rather
+than arbitrary events emitted by a live verifiers RLM environment. Recorded/live
+trace ingestion, actual prompt-provenance coverage, stochastic reward equivalence,
+and measured GPU/wall-clock/storage RAF therefore remain blocking Stage-B work.
 
 **Cost note:** cached-action reuse in step 4 reduces the cost of *both* replay modes
 relative to naive continuation resampling; it is not credited to graph slicing.

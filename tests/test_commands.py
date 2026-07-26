@@ -37,3 +37,17 @@ def test_typed_commands_fail_closed_on_bad_types() -> None:
 
     with pytest.raises(TypeError, match="chunk_size"):
         execute_command(command, {"context": "abc"})
+
+
+def test_list_concat_preserves_order() -> None:
+    command = TypedCommand(
+        "merge",
+        CommandKind.LIST_CONCAT,
+        ("left", "right"),
+        "merged^0",
+    )
+
+    assert execute_command(
+        command,
+        {"left": [1, 2], "right": [3, {"value": True}]},
+    ) == [1, 2, 3, {"value": True}]

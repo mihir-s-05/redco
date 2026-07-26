@@ -14,6 +14,7 @@ class CommandKind(StrEnum):
     PARTITION = "partition"
     SELECT = "select"
     CONCAT = "concat"
+    LIST_CONCAT = "list_concat"
     ADD = "add"
     CONTAINS = "contains"
     IF_ELSE = "if_else"
@@ -82,6 +83,11 @@ def execute_command(command: TypedCommand, state: Mapping[str, JsonValue]) -> Js
         case CommandKind.CONCAT:
             separator = _require_string(command.parameter("separator", ""), "separator")
             return separator.join(_require_string(value, "concat input") for value in values)
+        case CommandKind.LIST_CONCAT:
+            flattened: list[JsonValue] = []
+            for value in values:
+                flattened.extend(_require_list(value, "list_concat input"))
+            return flattened
         case CommandKind.ADD:
             return sum(_require_number(value, "add input") for value in values)
         case CommandKind.CONTAINS:

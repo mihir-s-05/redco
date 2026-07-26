@@ -53,3 +53,4 @@ def test_topology_divergence_records_added_and_removed_nodes() -> None:
     assert divergence.added_node_ids == ("call-3", "call-4")
     assert divergence.removed_node_ids == ("call-2",)
     assert divergence.topology_delta == 1
+    assert divergence.diverged

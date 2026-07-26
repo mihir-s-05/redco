@@ -74,12 +74,22 @@ class TopologyDivergence:
     def topology_delta(self) -> int:
         return len(self.branch_node_ids) - len(self.original_node_ids)
 
+    @property
+    def diverged(self) -> bool:
+        return self.original_node_ids != self.branch_node_ids
+
 
 class PolicyActionCache:
     """Reuse only when prompt, checkpoint, decoding config, and seed all match."""
 
     def __init__(self) -> None:
         self._actions: dict[PolicyCallKey, tuple[int, ...]] = {}
+
+    def fork(self) -> PolicyActionCache:
+        """Copy the frozen action table for an isolated replay branch."""
+        branch = PolicyActionCache()
+        branch._actions = dict(self._actions)
+        return branch
 
     def record(self, action: CachedPolicyAction) -> None:
         existing = self._actions.get(action.key)
