@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "status": "frozen_before_amended_live_observation",
+  "amends": "configs/stage-b/rlm-multi-child-trace-preregistration.json",
+  "reason": "The first rollout generated the requested multiline IPython payload, but the model emitted literal newlines inside the JSON tool-call argument. The tool-call parser therefore did not create an IPython call, and the rollout ended with only the root policy call.",
+  "observed_failed_attempt": {
+    "pod_id": "863fe7b981384119b8cc021c38a9b62d",
+    "stage_reached": "first root policy action",
+    "rollouts_started": 1,
+    "traces_recorded": 1,
+    "model_calls": 1,
+    "recursive_model_calls": 0,
+    "trace_source_sha256": "5ef12f714c768fe667887869c6cdd6bcf4f06abc11a37cd0b7c9c931af1d43ab",
+    "trace_audit_report_sha256": "86684d39622a2c77c05d7dc948aa6a9dce9d436f560b0122d499fb523d8ef8f3",
+    "wallet_cost_usd": 0.0777,
+    "local_artifact_root": "runs/stage-b/rlm-multi-child-trace-attempts/attempt-1-invalid-multiline-tool-call"
+  },
+  "single_execution_change": {
+    "field": "multi-child prompt serialization",
+    "old": "Request a multiline Python block containing a loop and four awaited rlm calls.",
+    "new": "Request one semicolon-delimited Python statement using asyncio.gather for the same four rlm calls, so the generated JSON tool argument contains no literal line breaks.",
+    "prompt_protocol": "forced-four-child-recursion-v2"
+  },
+  "unchanged": [
+    "model and frozen model state",
+    "four child prompts and combined expected marker",
+    "sampling seed and temperature",
+    "completion and total-token limits",
+    "RLM and verifiers commits and patch hashes",
+    "all mandatory checks and exact thresholds",
+    "resource price and runtime caps",
+    "artifact and termination policy"
+  ],
+  "interpretation": {
+    "pass": "The trace is suitable for preregistering an empirical branch-pair replay implementation and campaign.",
+    "fail": "Stop and revise the trace workload; do not implement or spend on empirical branch replay."
+  }
+}

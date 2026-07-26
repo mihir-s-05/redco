@@ -3,7 +3,7 @@ from typing import Literal
 import verifiers.v1 as vf
 
 PROMPT_PROTOCOL = "forced-recursion-v2"
-MULTI_CHILD_PROMPT_PROTOCOL = "forced-four-child-recursion-v1"
+MULTI_CHILD_PROMPT_PROTOCOL = "forced-four-child-recursion-v2"
 
 
 class RedcoRlmTraceData(vf.TaskData):
@@ -80,15 +80,16 @@ class RedcoRlmTraceTaskset(vf.Taskset[RedcoRlmTraceTask, RedcoRlmTraceConfig]):
                 prompts = [
                     f"Return only the marker {marker}" for marker in markers
                 ]
+                one_line_call = (
+                    "import asyncio; child_results = await asyncio.gather("
+                    f"*(rlm(p) for p in {prompts!r})); "
+                    'print("|".join(item.answer for item in child_results))'
+                )
                 prompt = (
                     "This is a recursive map-reduce instrumentation protocol. "
                     "Your first action MUST be one IPython tool call. In that call, "
-                    "execute this exact block before doing anything else:\n"
-                    f"child_prompts = {prompts!r}\n"
-                    "child_results = []\n"
-                    "for child_prompt in child_prompts:\n"
-                    "    child_results.append(await rlm(child_prompt))\n"
-                    "print('|'.join(item.answer for item in child_results))\n"
+                    "execute this exact single-line Python statement before doing "
+                    f"anything else: {one_line_call}\n"
                     "Do not answer until all four recursive calls return. Then "
                     f"return exactly this combined marker: {answer}"
                 )
