@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "completed": true,
+  "passed": false,
+  "representative_micro_gate_executed": false,
+  "gate_gb_cleared": false,
+  "classification": "noninjective_tokenizer_roundtrip_precondition",
+  "source": {
+    "trace_id": "18614ffa018f4ab7a78337657d09c19a",
+    "trace_sha256": "e3e9a4ca37ed0e44d0647cc3f5b45dcad83350f29d479f5fb391505a33fceea1"
+  },
+  "observation": {
+    "strict_provider_guard_marker_observed": true,
+    "detokenize_requests": 1,
+    "tokenize_requests": 1,
+    "sampled_model_calls": 0,
+    "candidate_action_generations": 0,
+    "downstream_generations": 0,
+    "paired_branches": 0,
+    "report_generated": false,
+    "failure": "Detokenizing the recorded 1,934-token returning-root prompt and tokenizing the resulting text did not reproduce the same token IDs."
+  },
+  "interpretation": {
+    "cause": "The tokenizer vocabulary contains text-equivalent tokenizations, including duplicate newline representations. Decode followed by encode is therefore not an injective identity on recorded token IDs.",
+    "what_failed": "The preregistered reconstruction precondition.",
+    "what_did_not_fail": "No replay pair, sampled continuation, reward comparison, or slicing comparison was attempted.",
+    "corrected_contract": "Locate the exact character span in the detokenized prompt, preserve every recorded token outside that span, tokenize only the replacement child text, and require the spliced token sequence to detokenize to the exact intended branch prompt."
+  },
+  "preregistration": {
+    "path": "configs/stage-b/rlm-empirical-branch-replay-preregistration.json",
+    "commit": "30ceee3",
+    "automatic_retries": 0,
+    "post_observation_changes": 0
+  },
+  "resource_use": {
+    "pod_id": "769f9fcb11bd433f889d25fd10faa5b4",
+    "gpu": "1x A6000 48GB",
+    "provider": "massedcompute",
+    "price_usd_per_hour": 0.54,
+    "duration_minutes_reported": 9,
+    "cost_usd": 0.0721,
+    "cumulative_project_compute_usd": 3.2507,
+    "cumulative_terminated_pods": 16,
+    "wallet_balance_usd": 46.7493,
+    "active_prime_pods": 0,
+    "persistent_prime_disks": 0
+  },
+  "local_artifacts": {
+    "root": "runs/stage-b/rlm-empirical-branch-replay-attempts/pod-769f9fcb11bd433f889d25fd10faa5b4",
+    "control_log_sha256": "fe4ff2469e07b95ac8c50569dd309760dd658ec4ba7efe5c6277e3933b8b4901",
+    "inference_log_sha256": "bb6b1f986be2282aabc1d8334e86066aeff4a5b361138f8ae9634cf76da2d820",
+    "resource_log_sha256": "2f7f2a8fd92cc3a3e6570db7d9243f4fe22dba9ece40dc2644556cec0afd9568"
+  },
+  "operational_notes": {
+    "package_manager": "uv",
+    "pip_used": false,
+    "ssh_key": "Prime CLI configured C:/Users/mihir/.ssh/id_rsa",
+    "artifacts_synced_before_termination": true
+  },
+  "decision": "Do not count this as a replay result and do not retry the frozen workload.",
+  "next_action": "Implement and CPU-test lossless bounded token splicing, then freeze a new no-retry micro-campaign."
+}
