@@ -19,7 +19,7 @@ the train client so the trace contains exact token IDs:
 
 ```bash
 cd external/prime-rl/deps/verifiers
-UV_PROJECT_ENVIRONMENT=/tmp/redco-verifiers-env uv run --frozen --python 3.12 \
+UV_PROJECT_ENVIRONMENT=/tmp/redco-verifiers-env uv run --frozen --no-dev --python 3.12 \
   --with-editable /path/to/redco/environments/redco_rlm_trace_v1 \
   python -m redco_rlm_trace_v1.run_audit \
   --output-dir /path/to/redco/runs/stage-b/rlm-trace-audit/live

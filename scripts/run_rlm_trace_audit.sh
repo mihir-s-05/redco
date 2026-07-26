@@ -51,7 +51,7 @@ VLLM_API_KEY=EMPTY \
   bash -c '
     cd "$1/external/prime-rl/deps/verifiers"
     UV_PROJECT_ENVIRONMENT=/tmp/redco-verifiers-env \
-      "$2" run --frozen --python 3.12 \
+      "$2" run --frozen --no-dev --python 3.12 \
       --with-editable "$1/environments/redco_rlm_trace_v1" \
       python -m redco_rlm_trace_v1.run_audit \
       --output-dir "$1/runs/stage-b/rlm-trace-audit/live"
