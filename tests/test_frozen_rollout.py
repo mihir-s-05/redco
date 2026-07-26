@@ -210,7 +210,7 @@ def test_stock_noise_calibration_freezes_double_observed_maximum(
     assert result["equivalence_margins"]["adapter_l2"] == 2 * 28e-4
 
 
-def test_noop_confirmation_applies_frozen_pairwise_bounds(
+def test_frozen_trainer_confirmation_applies_pairwise_noise_bounds(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "confirmation"
@@ -271,7 +271,7 @@ def test_noop_confirmation_applies_frozen_pairwise_bounds(
     )
 
     passing = evaluate_confirmation(root, bounds_path, root / "result.json")
-    assert passing["passed_noop_integration_gate"]
+    assert passing["passed_frozen_trainer_noise_transfer_gate"]
     assert all(pair["passed"] for pair in passing["pairs"].values())
 
     failing_metrics = root / "pair-s5104" / "redco" / "metrics.jsonl"
@@ -288,5 +288,5 @@ def test_noop_confirmation_applies_frozen_pairwise_bounds(
         encoding="utf-8",
     )
     failing = evaluate_confirmation(root, bounds_path, root / "result.json")
-    assert not failing["passed_noop_integration_gate"]
+    assert not failing["passed_frozen_trainer_noise_transfer_gate"]
     assert not failing["pairs"]["pair-s5104"]["exact_metrics_passed"]

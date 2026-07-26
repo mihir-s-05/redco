@@ -1,6 +1,13 @@
 {
-  "schema_version": 1,
-  "status": "passed_noop_integration_gate",
+  "schema_version": 2,
+  "status": "invalid_for_noop_integration__passed_frozen_trainer_noise_transfer_gate",
+  "corrected_interpretation": {
+    "erratum_date": "2026-07-25",
+    "noop_integration_established": false,
+    "passed_frozen_trainer_noise_transfer_gate": true,
+    "reason": "Only prime_rl.trainer.rl.train ran on a stock-produced frozen batch; the orchestrator algorithm selection in orch.toml never executed.",
+    "raw_artifacts_modified": false
+  },
   "confirmation_commit": "fcf3c72d773b3c9831a6fe62273db69207f1f872",
   "bounds_sha256": "afa85e9ee70138d1f7521e5685e5aa7f936300c674872590a40d667f9c66baad",
   "source_batch_sha256": "93cd7e67073d5965e41213cc214735bdf89e600f2082f3a69b6eaba063bd6c45",

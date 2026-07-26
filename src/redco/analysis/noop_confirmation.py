@@ -1,4 +1,9 @@
-"""Prepare and evaluate unseen stock/ReDCO-no-op trainer pairs."""
+"""Prepare and evaluate frozen-trainer noise-transfer pairs.
+
+The frozen batch is produced before this evaluator runs, so the trainer-only
+comparison does not execute either orchestrator algorithm.  It can validate
+the transfer of stock-derived numerical bounds, but not no-op integration.
+"""
 
 from __future__ import annotations
 
@@ -96,7 +101,7 @@ def prepare(
         pairs[name] = pair_payload
 
     payload: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "prepared_unseen",
         "source_run": source_run.as_posix(),
         "source_batch_sha256": source_hash,
@@ -230,15 +235,15 @@ def evaluate(root: Path, bounds_path: Path, output: Path) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": 1,
         "status": (
-            "passed_noop_integration_gate"
+            "passed_frozen_trainer_noise_transfer_gate"
             if passed
-            else "failed_noop_integration_gate"
+            else "failed_frozen_trainer_noise_transfer_gate"
         ),
         "bounds_sha256": _sha256(bounds_path),
         "source_batch_sha256": source_hash,
         "pair_count": len(pair_results),
         "pairs": pair_results,
-        "passed_noop_integration_gate": passed,
+        "passed_frozen_trainer_noise_transfer_gate": passed,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(canonical_json(payload) + b"\n")
@@ -269,7 +274,11 @@ def main() -> int:
         return 0
     result = evaluate(args.root, args.bounds, args.output)
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 0 if result["passed_noop_integration_gate"] else 1
+    return (
+        0
+        if result["passed_frozen_trainer_noise_transfer_gate"]
+        else 1
+    )
 
 
 if __name__ == "__main__":

@@ -132,3 +132,114 @@ diff --git a/tests/unit/orchestrator/test_advantage.py b/tests/unit/orchestrator
  def test_max_rl_mean_normalized():
      # mean 0.25: the success gets (1 - 0.25)/0.25 = 3, failures (0 - 0.25)/0.25 = -1
      assert _max_rl(_make_group(rewards=[1.0, 0.0, 0.0, 0.0])) == pytest.approx([3.0, -1.0, -1.0, -1.0])
+diff --git a/tests/unit/orchestrator/test_redco_noop_integration.py b/tests/unit/orchestrator/test_redco_noop_integration.py
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/orchestrator/test_redco_noop_integration.py
+@@ -0,0 +1,102 @@
++import asyncio
++import hashlib
++from pathlib import Path
++from typing import Any
++
++import msgspec
++import pytest
++
++from prime_rl.configs.orchestrator import OrchestratorConfig
++from prime_rl.orchestrator.algo import build_algorithm
++from prime_rl.orchestrator.algo.grpo import GRPOAlgorithm
++from prime_rl.orchestrator.algo.redco_noop import RedcoNoopAlgorithm
++from prime_rl.trainer.batch import prepare_batch
++from prime_rl.trainer.utils import build_bin_cost
++from prime_rl.transport.filesystem import FileSystemTrainingBatchSender
++from prime_rl.transport.types import TrainingBatch
++from tests.unit.orchestrator.test_advantage import _make_group
++
++
++def _produce_trainer_bytes(
++    algorithm_type: str,
++    length_penalty: dict[str, Any] | None,
++) -> tuple[TrainingBatch, bytes, bytes, object]:
++    """Run config dispatch through scoring, wire stamping, packing, and encoding."""
++    algorithm_payload: dict[str, Any] = {"type": algorithm_type}
++    if length_penalty is not None:
++        algorithm_payload["length_penalty"] = length_penalty
++    config = OrchestratorConfig(algo=algorithm_payload)
++    algorithm = build_algorithm(config.algo, policy_pool=None)
++    group = _make_group(
++        rewards=[1.0, 0.0, 0.25, 0.75],
++        completion_lengths=[2, 5, 3, 7],
++        num_turns=[1, 2, 1, 3],
++    )
++
++    # This is the non-virtual producer path driven by TrainSink: score the
++    # group, broadcast advantages, and stamp component routing on each sample.
++    asyncio.run(algorithm.finalize_group(group))
++    samples = [sample for rollout in group for sample in rollout.samples]
++    for sample in samples:
++        sample.temperatures = [1.0] * len(sample.token_ids)
++    training_batch = TrainingBatch(examples=samples, step=1)
++
++    # Compare the orchestrator-to-packer wire records independently of the
++    # packed trainer file, so a compensating packer bug cannot hide a mismatch.
++    training_batch_bytes = msgspec.msgpack.encode(training_batch)
++    micro_batch_grid = prepare_batch(
++        rollouts=samples,
++        seq_len=64,
++        num_train_workers=1,
++        idxs=[0] * len(samples),
++        num_loras=1,
++        bin_cost=build_bin_cost(None),
++    )
++    # FileSystemMicroBatchSender writes exactly this encoding to rank_0.bin.
++    trainer_bytes = msgspec.msgpack.encode(micro_batch_grid[0])
++    return training_batch, training_batch_bytes, trainer_bytes, algorithm
++
++
++@pytest.mark.parametrize(
++    "length_penalty",
++    [
++        None,
++        {
++            "type": "linear",
++            "num_output_tokens_weight": 0.25,
++            "num_input_tokens_weight": 0.1,
++            "num_turns_weight": 0.1,
++        },
++    ],
++    ids=["plain", "linear-length-penalty"],
++)
++def test_redco_noop_produces_byte_identical_trainer_batch(
++    tmp_path: Path,
++    length_penalty: dict[str, Any] | None,
++) -> None:
++    stock_batch, stock_wire, stock_bytes, stock_algorithm = _produce_trainer_bytes(
++        "grpo", length_penalty
++    )
++    redco_batch, redco_wire, redco_bytes, redco_algorithm = _produce_trainer_bytes(
++        "redco_noop", length_penalty
++    )
++
++    assert type(stock_algorithm) is GRPOAlgorithm
++    assert type(redco_algorithm) is RedcoNoopAlgorithm
++    assert stock_wire == redco_wire
++    assert stock_bytes == redco_bytes
++    assert hashlib.sha256(stock_bytes).digest() == hashlib.sha256(
++        redco_bytes
++    ).digest()
++
++    stock_sender = FileSystemTrainingBatchSender(tmp_path / "stock-rollouts")
++    redco_sender = FileSystemTrainingBatchSender(tmp_path / "redco-rollouts")
++    asyncio.run(stock_sender.send(stock_batch))
++    asyncio.run(redco_sender.send(redco_batch))
++    stock_rollout = next((tmp_path / "stock-rollouts").rglob("train_rollouts.bin"))
++    redco_rollout = next((tmp_path / "redco-rollouts").rglob("train_rollouts.bin"))
++    assert stock_rollout.read_bytes() == redco_rollout.read_bytes()
++
++    stock_path = tmp_path / "stock" / "rank_0.bin"
++    redco_path = tmp_path / "redco" / "rank_0.bin"
++    stock_path.parent.mkdir()
++    redco_path.parent.mkdir()
++    stock_path.write_bytes(stock_bytes)
++    redco_path.write_bytes(redco_bytes)
++    assert stock_path.read_bytes() == redco_path.read_bytes()

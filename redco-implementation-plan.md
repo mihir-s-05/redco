@@ -75,6 +75,26 @@ every node affects every future prompt (no slicing savings), the correct fallbac
 a simpler C3-style turn-level credit method for RLMs — still novel, much simpler —
 rather than continuing into the critic and structural phases.
 
+### Implementation checkpoint — 2026-07-25
+
+- The Tier-0 CPU campaign passed 10,000/10,000 deterministic sliced-vs-full
+  comparisons, but only for value replacements on a static synthetic command
+  topology. This establishes substrate soundness for that scope, not the full
+  dynamic-branch replay contract below.
+- The campaign's 2.05× aggregate event-work reduction is synthetic
+  instrumentation evidence, not a production RAF result. Representative RLM
+  traces must still demonstrate the affected-work fraction required by §8.
+- The frozen GPU trainer pairs validated stock-noise margin transfer across four
+  unseen seeds. They did not execute orchestrator algorithm selection and are not
+  a no-op integration test.
+- A subsequent CPU producer-equivalence gate executes config dispatch,
+  `finalize_group`, advantage/routing stamping, trainer packing, and serialization
+  under both `grpo` and `redco_noop`; the resulting trainer bytes are exact-equal.
+- Before Stage C, implement and pass end-to-end replay equivalence for
+  branch-specific dynamic topology (different turns, calls, and artifacts) and
+  measure RAF on representative RLM traces. The current `TopologyDivergence`
+  record is not an implementation of that behavior.
+
 ---
 
 ## 1. The corrected method
@@ -286,6 +306,13 @@ Because branches diverge, the intervened execution is **not** "the original grap
 with one value overwritten." Notation: each branch is its own dynamic execution
 
     (G_{i,m}, R_{i,m}) = Exec_{π_b}(S_v, a_i, U_m).
+
+**Current implementation boundary (2026-07-25):** Tier-0 replay currently
+performs value replacement on a static typed-command topology. It detects and can
+record topology divergence, but it does not yet construct and compare independent
+branch-specific graphs when an intervention changes turns, calls, or artifacts.
+That missing behavior is a blocking Stage-B item, not covered by the 10,000-pair
+campaign.
 
 **Cost note:** cached-action reuse in step 4 reduces the cost of *both* replay modes
 relative to naive continuation resampling; it is not credited to graph slicing.
