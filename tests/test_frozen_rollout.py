@@ -13,6 +13,12 @@ from redco.analysis.frozen_rollout import (
     evaluate,
     prepare,
 )
+from redco.analysis.noop_confirmation import (
+    CONFIRMATION_SEEDS,
+)
+from redco.analysis.noop_confirmation import (
+    evaluate as evaluate_confirmation,
+)
 from redco.analysis.stock_noise import RUN_NAMES, calibrate
 
 
@@ -202,3 +208,85 @@ def test_stock_noise_calibration_freezes_double_observed_maximum(
     assert result["status"] == "frozen_for_unseen_confirmation"
     assert result["pairwise_comparisons"] == 28
     assert result["equivalence_margins"]["adapter_l2"] == 2 * 28e-4
+
+
+def test_noop_confirmation_applies_frozen_pairwise_bounds(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "confirmation"
+    bounds = {
+        "exact_invariant_metrics": ["loss/mean", "entropy/all/mean"],
+        "equivalence_margins": {
+            "grad_norm_absolute_difference": 2e-5,
+            "adapter_l2": 0.004,
+            "adapter_max_abs": 4e-5,
+        },
+    }
+    bounds_path = tmp_path / "bounds.json"
+    bounds_path.write_text(json.dumps(bounds), encoding="utf-8")
+    source_hash = sha256(b"batch").hexdigest()
+    manifest = {
+        "source_batch_sha256": source_hash,
+        "bounds_sha256": sha256(bounds_path.read_bytes()).hexdigest(),
+    }
+    root.mkdir()
+    (root / "source-manifest.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+    comparisons = []
+    for seed in CONFIRMATION_SEEDS:
+        name = f"pair-s{seed}"
+        for arm, grad_norm in (("stock", 0.25), ("redco", 0.25001)):
+            arm_root = root / name / arm
+            batch = arm_root / BATCH_RELATIVE_PATH
+            batch.parent.mkdir(parents=True)
+            batch.write_bytes(b"batch")
+            adapter = arm_root / ADAPTER_RELATIVE_PATH
+            adapter.parent.mkdir(parents=True)
+            adapter.write_bytes(arm.encode())
+            (arm_root / "metrics.jsonl").write_text(
+                json.dumps(
+                    {
+                        "step": 1,
+                        "optim/grad_norm": grad_norm,
+                        "loss/mean": 0.125,
+                        "entropy/all/mean": 0.5,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        comparisons.append(
+            {
+                "pair": name,
+                "seed": seed,
+                "l2": 0.002,
+                "max_abs": 2e-5,
+            }
+        )
+    (root / "adapter-pairwise.json").write_text(
+        json.dumps({"comparisons": comparisons}),
+        encoding="utf-8",
+    )
+
+    passing = evaluate_confirmation(root, bounds_path, root / "result.json")
+    assert passing["passed_noop_integration_gate"]
+    assert all(pair["passed"] for pair in passing["pairs"].values())
+
+    failing_metrics = root / "pair-s5104" / "redco" / "metrics.jsonl"
+    failing_metrics.write_text(
+        json.dumps(
+            {
+                "step": 1,
+                "optim/grad_norm": 0.25001,
+                "loss/mean": 0.126,
+                "entropy/all/mean": 0.5,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    failing = evaluate_confirmation(root, bounds_path, root / "result.json")
+    assert not failing["passed_noop_integration_gate"]
+    assert not failing["pairs"]["pair-s5104"]["exact_metrics_passed"]
