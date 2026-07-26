@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import time
@@ -30,6 +31,7 @@ from redco.integrations.verifiers_trace import (
     audit_trace_file,
     build_policy_cache,
     load_trace_records,
+    path_to_node,
 )
 
 
@@ -90,7 +92,7 @@ class EmpiricalReplayReport:
     alternatives_per_target: int
     target_count: int
     paired_branches: int
-    prompt_roundtrip_exact: bool
+    authoritative_renderer_preflight_exact: bool
     distinct_candidate_actions_per_target: bool
     deterministic_terminal_mismatches: int
     reward_mismatches: int
@@ -162,6 +164,29 @@ class TokenInferenceClient:
         if not isinstance(prompt, str):
             raise TypeError("detokenize.prompt must be a string")
         return prompt
+
+    def render_chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        *,
+        seed: int,
+        temperature: float,
+        max_tokens: int,
+    ) -> tuple[int, ...]:
+        payload = self._post(
+            "/v1/chat/completions/render",
+            {
+                "model": self.model,
+                "messages": messages,
+                "tools": tools,
+                "parallel_tool_calls": False,
+                "seed": seed,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            },
+        )
+        return _integer_tuple(payload.get("token_ids"), "render.token_ids")
 
     def generate(
         self,
@@ -391,13 +416,25 @@ def run_empirical_replay(
     raw_trace = native_traces[0]
     nodes = _object_list(raw_trace.get("nodes"), "trace.nodes")
     expected_terminal = _message_content(nodes[final_call.node_index])
-    original_final_prompt_text = client.detokenize(final_call.prompt_token_ids)
-    prompt_roundtrip_exact = (
-        client.tokenize(original_final_prompt_text)
-        == final_call.prompt_token_ids
+    message_path = path_to_node(nodes, final_call.node_index)[:-1]
+    root_messages = _openai_messages([
+        copy.deepcopy(_message(nodes[node_index]))
+        for node_index in message_path
+    ])
+    tools = _chat_tools(raw_trace.get("tools"))
+    if final_call.event_seed is None:
+        raise ValueError("final call has no event seed")
+    rendered_original = client.render_chat(
+        root_messages,
+        tools,
+        seed=final_call.event_seed,
+        temperature=temperature,
+        max_tokens=768,
     )
-    if not prompt_roundtrip_exact:
-        raise RuntimeError("pinned tokenizer failed the exact prompt round-trip")
+    if rendered_original != final_call.prompt_token_ids:
+        raise RuntimeError(
+            "authoritative chat renderer did not reproduce the recorded prompt"
+        )
 
     policy_node_ids_by_call: dict[int, str] = {}
     for node in trace.graph.nodes.values():
@@ -422,6 +459,7 @@ def run_empirical_replay(
     pairs: list[EmpiricalBranchPair] = []
     candidate_hashes_by_target: dict[str, set[str]] = {}
     for target in target_calls:
+        original_child_text = _message_content(nodes[target.node_index])
         target_node_id = policy_node_ids_by_call[target.call_index]
         full_indices, sliced_indices = build_replay_indices(
             target_call_index=target.call_index,
@@ -454,12 +492,32 @@ def run_empirical_replay(
             candidate_text = _clean_action_text(
                 client.detokenize(candidate.token_ids)
             )
-            branch_prompt_text = replace_unique(
-                original_final_prompt_text,
+            branch_messages = copy.deepcopy(root_messages)
+            tool_message = next(
+                (
+                    message
+                    for message in reversed(branch_messages)
+                    if message.get("role") == "tool"
+                ),
+                None,
+            )
+            if tool_message is None:
+                raise ValueError("root conversation has no tool response")
+            content = tool_message.get("content")
+            if not isinstance(content, str):
+                raise TypeError("root tool response content must be a string")
+            tool_message["content"] = replace_unique(
+                content,
                 original_child_text,
                 candidate_text,
             )
-            branch_prompt = client.tokenize(branch_prompt_text)
+            branch_prompt = client.render_chat(
+                branch_messages,
+                tools,
+                seed=continuation_seed,
+                temperature=temperature,
+                max_tokens=768,
+            )
             if branch_prompt == final_call.prompt_token_ids:
                 raise RuntimeError("candidate action did not change the final prompt")
             downstream = client.generate(
@@ -606,8 +664,7 @@ def run_empirical_replay(
     )
     sliced_fraction = sliced_visits / full_visits if full_visits else 0.0
     passed = (
-        prompt_roundtrip_exact
-        and distinct_candidates
+        distinct_candidates
         and len(pairs) == len(target_calls) * alternatives_per_target
         and terminal_mismatches == 0
         and reward_mismatches == 0
@@ -625,7 +682,7 @@ def run_empirical_replay(
         alternatives_per_target=alternatives_per_target,
         target_count=len(target_calls),
         paired_branches=len(pairs),
-        prompt_roundtrip_exact=prompt_roundtrip_exact,
+        authoritative_renderer_preflight_exact=True,
         distinct_candidate_actions_per_target=distinct_candidates,
         deterministic_terminal_mismatches=terminal_mismatches,
         reward_mismatches=reward_mismatches,
@@ -673,13 +730,67 @@ def _sum_arm_costs(arms: Any) -> ActualEvaluationCost:
 
 
 def _message_content(node: dict[str, Any]) -> str:
-    message = node.get("message")
-    if not isinstance(message, dict):
-        raise TypeError("trace node message must be an object")
+    message = _message(node)
     content = message.get("content")
     if not isinstance(content, str):
         raise TypeError("trace node message content must be a string")
     return content
+
+
+def _message(node: dict[str, Any]) -> dict[str, Any]:
+    message = node.get("message")
+    if not isinstance(message, dict):
+        raise TypeError("trace node message must be an object")
+    return message
+
+
+def _chat_tools(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        return [{"type": "function", "function": value}]
+    tools = _object_list(value, "trace.tools")
+    if not tools:
+        raise ValueError("trace.tools must be non-empty")
+    return tools
+
+
+def _openai_messages(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    normalized = copy.deepcopy(messages)
+    for message in normalized:
+        raw_calls = message.get("tool_calls")
+        if raw_calls is None:
+            continue
+        calls = _object_list(raw_calls, "message.tool_calls")
+        openai_calls: list[dict[str, Any]] = []
+        for call in calls:
+            function = call.get("function")
+            if isinstance(function, dict):
+                openai_calls.append(call)
+                continue
+            call_id = call.get("id")
+            name = call.get("name")
+            arguments = call.get("arguments")
+            if (
+                not isinstance(call_id, str)
+                or not isinstance(name, str)
+                or not isinstance(arguments, str)
+            ):
+                raise TypeError(
+                    "normalized tool calls require string id, name, and arguments"
+                )
+            openai_calls.append(
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": arguments,
+                    },
+                }
+            )
+        message["tool_calls"] = openai_calls
+    return normalized
 
 
 def _clean_action_text(text: str) -> str:

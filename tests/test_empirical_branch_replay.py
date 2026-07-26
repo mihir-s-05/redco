@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from redco.analysis.empirical_branch_replay import (
+    _openai_messages,
     build_replay_indices,
     execute_cached_arm,
     replace_unique,
@@ -137,3 +138,48 @@ def test_unique_replacement_rejects_ambiguous_input() -> None:
         replace_unique("old old", "old", "new")
     with pytest.raises(ValueError, match="non-empty"):
         replace_unique("text", "", "new")
+
+
+def test_openai_messages_normalizes_verifiers_tool_calls_without_mutation() -> None:
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call_0",
+                    "name": "ipython",
+                    "arguments": '{"code":"print(1)"}',
+                }
+            ],
+        }
+    ]
+
+    normalized = _openai_messages(messages)
+
+    assert normalized == [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call_0",
+                    "type": "function",
+                    "function": {
+                        "name": "ipython",
+                        "arguments": '{"code":"print(1)"}',
+                    },
+                }
+            ],
+        }
+    ]
+    assert messages == [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call_0",
+                    "name": "ipython",
+                    "arguments": '{"code":"print(1)"}',
+                }
+            ],
+        }
+    ]
