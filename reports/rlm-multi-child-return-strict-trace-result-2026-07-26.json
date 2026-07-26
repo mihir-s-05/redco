@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "completed": true,
+  "passed": true,
+  "multi_child_return_trace_gate_cleared": true,
+  "ready_for_empirical_branch_pair_replay": true,
+  "gate_gb_cleared": false,
+  "classification": "guarded_strict_provider_contract_completed_exact_six_call_trace",
+  "source": {
+    "trace_id": "18614ffa018f4ab7a78337657d09c19a",
+    "trace_sha256": "e3e9a4ca37ed0e44d0647cc3f5b45dcad83350f29d479f5fb391505a33fceea1",
+    "remote_trace_audit_signed_payload_sha256": "230860acf17b4b40a5222ca5308bfb242b73fd94573b0adbb1a720160f914521",
+    "local_trace_audit_signed_payload_sha256": "e4b9c29bebaf07daeaf040aa98cb04518082be4496a292b5bddcce4ba27253ab",
+    "provenance_report_signed_payload_sha256": "61bf1a7ccc810a5e2d2616d507b17bc0b25bb11c8ae3c839308eb108ae5eb59e",
+    "recorded_raf_projection_signed_payload_sha256": "5f5dfc3f2ecb97092979d613d2066d90abf13f8b4ed41dbe8f2052873bf6f9dd"
+  },
+  "provider_contract": {
+    "inference_config": "configs/stage-b/rlm-trace-audit-inference-strict.toml",
+    "strict_tool_calling_env": "1",
+    "strict_guard_env": "1",
+    "pre_ready_log_marker": "REDCO_STRICT_TOOL_CALLING_ENV=1",
+    "pre_ready_log_marker_observed": true,
+    "vllm_version": "0.24.0+cu129",
+    "tool_call_parser": "hermes",
+    "root_turn_0_sampling_tool_choice": "required",
+    "verifier_harness_forward_env": [
+      "RLM_FORCE_TOOL_CHOICE_REQUIRED"
+    ]
+  },
+  "observation": {
+    "model_calls": 6,
+    "root_policy_calls": 2,
+    "root_turn_indices": [
+      0,
+      1
+    ],
+    "recursive_policy_calls": 4,
+    "prompt_tokens": 6900,
+    "generated_tokens": 545,
+    "aggregate_reported_tokens": 7445,
+    "maximum_aggregate_tokens": 8192,
+    "finish_topology": "root -> four children -> returning root",
+    "stop_condition": "agent_completed",
+    "reward": 1.0,
+    "trace_audit_passed": true,
+    "provenance_ready_for_representative_raf": true
+  },
+  "provenance": {
+    "structural_model_call_coverage": 1.0,
+    "exact_prompt_provenance_coverage": 1.0,
+    "exact_recursive_parent_coverage": 1.0,
+    "exact_cross_component_links": 4,
+    "cross_component_fallbacks": 0,
+    "unresolved_cross_component_links": 0
+  },
+  "recorded_raf_projection": {
+    "status": "not_run_projection_only",
+    "alternatives_per_target": 3,
+    "eligible_subcall_targets": 4,
+    "targets_with_exact_key_reusable_suffix_events": 3,
+    "mean_conservative_no_cache_generated_token_work_fraction": 0.3584039730841163,
+    "minimum_conservative_no_cache_generated_token_work_fraction": 0.09651474530831099,
+    "requires_broader_trace": false
+  },
+  "mandatory_checks": {
+    "strict_env_guard_marker_before_server_ready": true,
+    "rendered_harness_forward_env_exact": true,
+    "root_turn_0_sampling_tool_choice_exact": true,
+    "all_episodes_and_traces_successful": true,
+    "minimum_model_calls": true,
+    "minimum_root_policy_turns": true,
+    "required_root_turn_indices": true,
+    "minimum_recursive_model_calls": true,
+    "structural_model_call_coverage": true,
+    "exact_recursive_parent_coverage": true,
+    "minimum_exact_cross_component_links": true,
+    "cross_component_fallbacks": true,
+    "unresolved_cross_component_links": true,
+    "minimum_eligible_subcall_targets": true,
+    "minimum_targets_with_exact_key_reusable_suffix_events": true,
+    "minimum_conservative_no_cache_generated_token_work_fraction": true,
+    "projection_requires_broader_trace": true,
+    "aggregate_reported_tokens": true,
+    "stop_condition_must_not_equal_max_total_tokens": true
+  },
+  "preregistration": {
+    "path": "configs/stage-b/rlm-multi-child-return-strict-trace-preregistration.json",
+    "commit": "15477e9",
+    "retry_policy_respected": true,
+    "live_rollouts": 1,
+    "automatic_retries": 0,
+    "post_observation_changes": 0
+  },
+  "resource_use": {
+    "pod_id": "3a1607b097b54cbf8f5397b9eace32e1",
+    "resource_id": "b1fae8",
+    "gpu": "1x A6000 48GB",
+    "provider": "massedcompute",
+    "price_usd_per_hour": 0.54,
+    "duration_minutes_reported": 15,
+    "cost_usd": 0.1240,
+    "cumulative_project_compute_usd": 3.1786,
+    "cumulative_terminated_pods": 15,
+    "wallet_balance_usd": 46.8214,
+    "active_prime_pods": 0,
+    "persistent_prime_disks": 0
+  },
+  "local_artifacts": {
+    "run": "runs/stage-b/rlm-multi-child-return-strict-trace",
+    "pod_artifact_snapshot": "runs/stage-b/rlm-multi-child-return-strict-trace-attempts/pod-artifacts-15477e9.tar",
+    "pod_artifact_snapshot_sha256": "f0ff1f7c89d4a9ee7e46b93b8c9963c32e3435fce3c0eee3a8807c3bd9d4827b"
+  },
+  "operational_notes": {
+    "package_manager": "uv",
+    "pip_used": false,
+    "downloaded_prime_private_key_accepted": false,
+    "configured_prime_cli_private_key_accepted": true,
+    "preflight_dependency_repair_consumed_model_rollout": false
+  },
+  "decision": "The exact six-call trace is accepted as the frozen source for a separately preregistered empirical branch-pair replay.",
+  "causal_interpretation": "Success with the in-process strict-mode guard strongly implicates provider strict-mode activation as the material difference from the prior malformed run. It does not by itself prove that no other operational difference contributed.",
+  "next_action": "Preregister and run empirical sliced-versus-full branch-pair replay from this exact trace. Do not claim Gate GB clearance until that comparison passes its frozen gates."
+}
