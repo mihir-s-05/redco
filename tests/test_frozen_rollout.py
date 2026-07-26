@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from redco.analysis.deterministic_replay import evaluate_stock_stage
 from redco.analysis.frozen_rollout import (
     ADAPTER_RELATIVE_PATH,
     ARMS,
@@ -117,3 +118,37 @@ def test_evaluate_requires_exact_metrics_and_adapter_bytes(
     )
     failing = evaluate(root, root / "result.json")
     assert not failing["passed_frozen_rollout_gate"]
+
+
+def test_deterministic_stage_stops_before_redco_when_stock_differs(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "deterministic"
+    for arm, grad_norm in (("stock-a", 0.25), ("stock-b", 0.250001)):
+        batch = root / arm / BATCH_RELATIVE_PATH
+        batch.parent.mkdir(parents=True)
+        batch.write_bytes(b"batch")
+        adapter = root / arm / ADAPTER_RELATIVE_PATH
+        adapter.parent.mkdir(parents=True)
+        adapter.write_bytes(arm.encode())
+        (root / arm / "metrics.jsonl").write_text(
+            json.dumps(
+                {
+                    "optim/grad_norm": grad_norm,
+                    "loss/mean": 0.125,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    from hashlib import sha256
+
+    (root / "source-manifest.json").write_text(
+        json.dumps({"source_batch_sha256": sha256(b"batch").hexdigest()}),
+        encoding="utf-8",
+    )
+    result = evaluate_stock_stage(root, root / "result.json")
+    assert not result["passed_stock_determinism_stage"]
+    assert result["conditional_stop_honored"]
+    assert not result["redco_executed"]
