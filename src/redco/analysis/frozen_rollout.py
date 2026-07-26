@@ -34,6 +34,7 @@ def prepare(
     source_run: Path,
     redco_control: Path,
     root: Path,
+    matmul_precision: str | None = None,
 ) -> dict[str, Any]:
     """Create three trainer-only arms that consume one byte-identical batch."""
     source_batch = source_run / BATCH_RELATIVE_PATH
@@ -48,6 +49,16 @@ def prepare(
     redco_text = redco_control.read_text(encoding="utf-8")
     _assert_control_pair(stock_text, redco_text)
     trainer_text = trainer_template.read_text(encoding="utf-8")
+    if matmul_precision is not None:
+        trainer_text, substitutions = re.subn(
+            r'^matmul_precision = ".*"$',
+            f'matmul_precision = "{matmul_precision}"',
+            trainer_text,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if substitutions != 1:
+            raise ValueError("expected exactly one matmul_precision setting")
 
     for arm in ARMS:
         arm_root = root / arm
@@ -72,6 +83,7 @@ def prepare(
         "source_run": source_run.as_posix(),
         "source_batch_sha256": source_hash,
         "source_batch_bytes": source_batch.stat().st_size,
+        "matmul_precision": matmul_precision,
         "arms": {
             arm: {
                 "algorithm": "redco_noop" if arm == "redco" else "grpo",
@@ -218,13 +230,22 @@ def main() -> int:
     prepare_parser.add_argument("--source-run", type=Path, required=True)
     prepare_parser.add_argument("--redco-control", type=Path, required=True)
     prepare_parser.add_argument("--root", type=Path, required=True)
+    prepare_parser.add_argument(
+        "--matmul-precision",
+        choices=("high", "highest"),
+    )
     evaluate_parser = subparsers.add_parser("evaluate")
     evaluate_parser.add_argument("--root", type=Path, required=True)
     evaluate_parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
     if args.command == "prepare":
-        result = prepare(args.source_run, args.redco_control, args.root)
+        result = prepare(
+            args.source_run,
+            args.redco_control,
+            args.root,
+            args.matmul_precision,
+        )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     result = evaluate(args.root, args.output)

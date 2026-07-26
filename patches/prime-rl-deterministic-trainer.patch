@@ -1,0 +1,25 @@
+diff --git a/src/prime_rl/trainer/rl/train.py b/src/prime_rl/trainer/rl/train.py
+--- a/src/prime_rl/trainer/rl/train.py
++++ b/src/prime_rl/trainer/rl/train.py
+@@ -73,7 +73,19 @@ from torchtitan.distributed.utils import clip_grad_norm_
+ 
+ @clean_exit
+ def train(config: TrainerConfig):
+-    torch.manual_seed(int(os.environ.get("REDCO_RUN_SEED", "0")))
++    seed = int(os.environ.get("REDCO_RUN_SEED", "0"))
++    torch.manual_seed(seed)
++    torch.cuda.manual_seed_all(seed)
++    if os.environ.get("REDCO_DETERMINISTIC", "0") == "1":
++        if "CUBLAS_WORKSPACE_CONFIG" not in os.environ:
++            raise RuntimeError(
++                "REDCO_DETERMINISTIC=1 requires CUBLAS_WORKSPACE_CONFIG "
++                "to be set before Python starts"
++            )
++        torch.use_deterministic_algorithms(True, warn_only=False)
++        torch.backends.cudnn.benchmark = False
++        torch.backends.cudnn.deterministic = True
++        torch.backends.cuda.matmul.allow_tf32 = False
++        torch.backends.cudnn.allow_tf32 = False
+ 
+     # Setup world and logger
+     world = get_world()

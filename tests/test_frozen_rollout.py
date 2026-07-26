@@ -30,7 +30,7 @@ def test_prepare_copies_one_batch_and_limits_control_difference(
     configs = source / "configs"
     configs.mkdir()
     (configs / "trainer.toml").write_text(
-        'output_dir = "old"\nmax_steps = 1\n',
+        'output_dir = "old"\nmatmul_precision = "high"\nmax_steps = 1\n',
         encoding="utf-8",
     )
     stock_control = source / "run_default" / "control" / "orch.toml"
@@ -43,7 +43,12 @@ def test_prepare_copies_one_batch_and_limits_control_difference(
     )
 
     root = tmp_path / "replay"
-    manifest = prepare(source, redco_control, root)
+    manifest = prepare(
+        source,
+        redco_control,
+        root,
+        matmul_precision="highest",
+    )
 
     hashes = {
         (root / arm / BATCH_RELATIVE_PATH).read_bytes() for arm in ARMS
@@ -52,6 +57,10 @@ def test_prepare_copies_one_batch_and_limits_control_difference(
     assert len(
         {manifest["arms"][arm]["batch_sha256"] for arm in ARMS}
     ) == 1
+    assert manifest["matmul_precision"] == "highest"
+    assert 'matmul_precision = "highest"' in (
+        root / "stock-a" / "configs" / "trainer.toml"
+    ).read_text(encoding="utf-8")
     assert 'type = "redco_noop"' in (
         root / "redco" / "run_default" / "control" / "orch.toml"
     ).read_text(encoding="utf-8")
