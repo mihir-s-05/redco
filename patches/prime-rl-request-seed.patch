@@ -1,0 +1,73 @@
+diff --git a/src/prime_rl/orchestrator/dispatcher.py b/src/prime_rl/orchestrator/dispatcher.py
+index 998ff6fd5..ae61b04ac 100644
+--- a/src/prime_rl/orchestrator/dispatcher.py
++++ b/src/prime_rl/orchestrator/dispatcher.py
+@@ -25,6 +25,7 @@
+ from __future__ import annotations
+ 
+ import asyncio
++import os
+ import uuid
+ from collections import Counter, defaultdict
+ from dataclasses import dataclass, field
+@@ -459,6 +460,13 @@ class RolloutDispatcher:
+             else:
+                 addressing = {"task_idx": group.task_idx}
+             permits = 1
++            rollout_index = group.target_rollouts - group.rollouts_to_schedule
++            run_seed = int(os.environ.get("REDCO_RUN_SEED", "0"))
++            sampling_seed = (
++                run_seed * 1_000_000
++                + group.task_idx * group.target_rollouts
++                + rollout_index
++            )
+             group.rollouts_to_schedule -= 1
+             await self.acquire(permits)
+             task = asyncio.create_task(
+@@ -466,6 +474,7 @@ class RolloutDispatcher:
+                     client=client,
+                     model_name=model_name,
+                     cache_salt=cache_salt,
++                    sampling_seed=sampling_seed,
+                     **addressing,
+                 )
+             )
+diff --git a/src/prime_rl/orchestrator/envs.py b/src/prime_rl/orchestrator/envs.py
+index 2cae9d185..51195d274 100644
+--- a/src/prime_rl/orchestrator/envs.py
++++ b/src/prime_rl/orchestrator/envs.py
+@@ -184,10 +184,16 @@ class Env:
+         get_logger().debug(f"Env server {self.name} bound at {address}")
+         return address
+ 
+-    def _sampling(self, cache_salt: str | None) -> vf.SamplingConfig:
++    def _sampling(
++        self,
++        cache_salt: str | None,
++        sampling_seed: int | None = None,
++    ) -> vf.SamplingConfig:
+         sampling = {**self.sampling_args}
+         if cache_salt is not None:
+             sampling["extra_body"] = {**sampling.get("extra_body", {}), "cache_salt": cache_salt}
++        if sampling_seed is not None:
++            sampling["seed"] = sampling_seed
+         return vf.SamplingConfig(**sampling)
+ 
+     async def run(
+@@ -197,6 +203,7 @@ class Env:
+         cache_salt: str | None,
+         task_data: dict | None = None,
+         task_idx: int | None = None,
++        sampling_seed: int | None = None,
+     ) -> list[Rollout]:
+         """Run one episode; return its typed Traces. A v1 env takes the task itself
+         (``task_data``); the legacy bridge is addressed by dataset row (``task_idx``).
+@@ -208,7 +215,7 @@ class Env:
+             task_idx=task_idx,
+             client=client,
+             model=model_name,
+-            sampling=self._sampling(cache_salt),
++            sampling=self._sampling(cache_salt, sampling_seed),
+         )
+         if not episode.traces:
+             error = episode.error

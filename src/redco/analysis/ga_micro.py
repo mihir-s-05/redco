@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import statistics
@@ -105,6 +106,18 @@ def preregister(root: Path, output: Path) -> dict[str, Any]:
         "margin_rule": "max(3 * maximum absolute stock-stock paired difference, resolution floor)",
         "resolution_floors": RESOLUTION_FLOORS,
         "pilot_pair_differences": pair_differences,
+        "pilot_artifact_sha256": {
+            name: {
+                relative: _sha256(root / name / relative)
+                for relative in (
+                    "metrics.jsonl",
+                    "run_default/metrics.jsonl",
+                    "run_default/rollouts/step_1/train/effective/traces.jsonl",
+                )
+            }
+            for seed in PILOT_SEEDS
+            for name in (f"pilot-stock-s{seed}-a", f"pilot-stock-s{seed}-b")
+        },
         "equivalence_margins": margins,
         "mandatory_conditions": {
             "error_rate": 0.0,
@@ -120,6 +133,10 @@ def preregister(root: Path, output: Path) -> dict[str, Any]:
             "trainer_torch_seed": "REDCO_RUN_SEED",
             "orchestrator_task_seed": "REDCO_RUN_SEED",
             "inference_engine_seed": "inference.seed",
+            "request_seed": (
+                "REDCO_RUN_SEED * 1_000_000 + task_idx * group_size "
+                "+ within_group_rollout_index"
+            ),
         },
     }
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -211,6 +228,10 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     ]
 
 
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _config_text(name: str, seed: int, algorithm: str) -> str:
     algo_block = (
         ""
@@ -251,6 +272,7 @@ lr = 1e-5
 [orchestrator]
 batch_size = 4
 group_size = 2
+max_inflight_rollouts = 2
 max_off_policy_steps = 0
 {algo_block}
 [orchestrator.train.sampling]
