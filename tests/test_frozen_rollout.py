@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import itertools
 import json
+from hashlib import sha256
 from pathlib import Path
 
 from redco.analysis.deterministic_replay import evaluate_stock_stage
@@ -11,6 +13,7 @@ from redco.analysis.frozen_rollout import (
     evaluate,
     prepare,
 )
+from redco.analysis.stock_noise import RUN_NAMES, calibrate
 
 
 def _control(output: str, algorithm: str) -> str:
@@ -94,8 +97,6 @@ def test_evaluate_requires_exact_metrics_and_adapter_bytes(
             + "\n",
             encoding="utf-8",
         )
-    from hashlib import sha256
-
     source_hash = sha256(b"batch").hexdigest()
     (root / "source-manifest.json").write_text(
         json.dumps({"source_batch_sha256": source_hash}),
@@ -142,8 +143,6 @@ def test_deterministic_stage_stops_before_redco_when_stock_differs(
             encoding="utf-8",
         )
 
-    from hashlib import sha256
-
     (root / "source-manifest.json").write_text(
         json.dumps({"source_batch_sha256": sha256(b"batch").hexdigest()}),
         encoding="utf-8",
@@ -152,3 +151,54 @@ def test_deterministic_stage_stops_before_redco_when_stock_differs(
     assert not result["passed_stock_determinism_stage"]
     assert result["conditional_stop_honored"]
     assert not result["redco_executed"]
+
+
+def test_stock_noise_calibration_freezes_double_observed_maximum(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "stock-noise"
+    for index, name in enumerate(RUN_NAMES):
+        batch = root / name / BATCH_RELATIVE_PATH
+        batch.parent.mkdir(parents=True)
+        batch.write_bytes(b"batch")
+        adapter = root / name / ADAPTER_RELATIVE_PATH
+        adapter.parent.mkdir(parents=True)
+        adapter.write_bytes(name.encode())
+        (root / name / "metrics.jsonl").write_text(
+            json.dumps(
+                {
+                    "step": 1,
+                    "optim/grad_norm": 0.25 + index * 1e-6,
+                    "loss/mean": 0.125,
+                    "entropy/all/mean": 0.5,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    (root / "source-manifest.json").write_text(
+        json.dumps({"source_batch_sha256": sha256(b"batch").hexdigest()}),
+        encoding="utf-8",
+    )
+    comparisons = [
+        {
+            "first": first,
+            "second": second,
+            "l2": float(index + 1) * 1e-4,
+            "max_abs": float(index + 1) * 1e-5,
+        }
+        for index, (first, second) in enumerate(
+            itertools.combinations(RUN_NAMES, 2)
+        )
+    ]
+    (root / "adapter-pairwise.json").write_text(
+        json.dumps({"comparisons": comparisons}),
+        encoding="utf-8",
+    )
+
+    result = calibrate(root, root / "bounds.json")
+    assert result["calibration_passed"]
+    assert result["status"] == "frozen_for_unseen_confirmation"
+    assert result["pairwise_comparisons"] == 28
+    assert result["equivalence_margins"]["adapter_l2"] == 2 * 28e-4
