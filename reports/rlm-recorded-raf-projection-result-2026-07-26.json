@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "completed": true,
+  "empirical_branch_replay_status": "not_run_projection_only",
+  "source_sha256": "28eeafdc8f0aaaebc4b9d54f46b4d2f34a2a1f96ea3c10684269611ede5c67ec",
+  "report_sha256": "c95bc5c5dc64261edea8470542a890dbaa9ae20d7a1ab0e00ad2b6b4ac1d357d",
+  "target_count": 1,
+  "full_suffix_policy_events": 1,
+  "sliced_affected_policy_events": 1,
+  "exact_key_reusable_policy_events": 0,
+  "conservative_no_cache_generated_token_work_fraction": 1.0,
+  "conservative_no_cache_total_token_work_fraction": 1.0,
+  "modeled_no_cache_full_policy_token_raf": 3.5697211155378485,
+  "modeled_exact_key_full_policy_token_raf": 3.5697211155378485,
+  "modeled_sliced_policy_token_raf": 3.5697211155378485,
+  "requires_broader_trace": true,
+  "next_protocol": "configs/stage-b/rlm-multi-child-trace-preregistration.json",
+  "resource_use": {
+    "execution": "cpu_only",
+    "new_prime_cost_usd": 0.0,
+    "active_prime_pods": 0,
+    "persistent_prime_disks": 0
+  }
+}

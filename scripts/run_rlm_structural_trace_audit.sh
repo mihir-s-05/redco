@@ -3,7 +3,8 @@ set -euo pipefail
 
 repo_root="${REDCO_REPO_ROOT:-/workspace/redco}"
 cd "$repo_root"
-run_root="runs/stage-b/rlm-structural-trace-audit"
+run_root="${REDCO_RUN_ROOT:-runs/stage-b/rlm-structural-trace-audit}"
+task_profile="${REDCO_TASK_PROFILE:-single}"
 rlm_worktree="/tmp/redco-rlm-structural"
 rlm_tool_root="/tmp/vf-rlm"
 verifiers_worktree="/tmp/redco-verifiers-structural"
@@ -95,7 +96,8 @@ fi
     "$uv_bin" run --frozen --no-dev --python 3.12 \
     --with-editable "$repo_root/environments/redco_rlm_trace_v1" \
     python -m redco_rlm_trace_v1.run_audit \
-    --output-dir "$repo_root/$run_root/live"
+    --output-dir "$repo_root/$run_root/live" \
+    --task-profile "$task_profile"
 ) >"$control_log" 2>&1
 
 test -s "$traces"

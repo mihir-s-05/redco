@@ -36,6 +36,7 @@ def build_config(args: argparse.Namespace) -> EvalConfig:
             "taskset": {
                 "id": "redco-rlm-trace-v1",
                 "num_tasks": args.num_tasks,
+                "profile": args.task_profile,
             },
             "agent": {
                 "max_total_tokens": args.max_total_tokens,
@@ -68,6 +69,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--num-tasks", type=int, default=1)
+    parser.add_argument(
+        "--task-profile",
+        choices=("single", "multi_child"),
+        default="single",
+    )
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--seed", type=int, default=6101)
     parser.add_argument("--max-completion-tokens", type=int, default=768)

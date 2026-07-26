@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from redco.analysis.recorded_raf import build_recorded_raf_projection
 from redco.analysis.verifiers_provenance import build_provenance_report
 from redco.contracts import PolicyNodeKind
 from redco.env.tracer import EdgeKind
@@ -257,3 +258,23 @@ def test_structural_file_report_is_ready_for_representative_raf(
     assert imported.cross_component_fallbacks == 0
     assert report["ready_for_representative_raf"]
     assert report["blocking_finding"] is None
+
+    projection = build_recorded_raf_projection(
+        path,
+        alternatives_per_target=3,
+    )
+    assert projection.target_count == 1
+    assert projection.requires_broader_trace
+    assert projection.empirical_branch_replay_status == "not_run_projection_only"
+    (target,) = projection.targets
+    assert target.target_depth == 1
+    assert target.full_suffix_policy_events == 1
+    assert target.sliced_affected_policy_events == 1
+    assert target.exact_key_reusable_policy_events == 0
+    assert target.conservative_no_cache_generated_token_work_fraction == 1.0
+    assert target.modeled_sliced_policy_token_raf == (
+        target.modeled_exact_key_full_policy_token_raf
+    )
+    assert target.modeled_sliced_policy_token_raf == (
+        target.modeled_no_cache_full_policy_token_raf
+    )

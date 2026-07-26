@@ -1,12 +1,16 @@
+from typing import Literal
+
 import verifiers.v1 as vf
 
 PROMPT_PROTOCOL = "forced-recursion-v2"
+MULTI_CHILD_PROMPT_PROTOCOL = "forced-four-child-recursion-v1"
 
 
 class RedcoRlmTraceData(vf.TaskData):
     """One deterministic trace-audit prompt."""
 
     answer: str
+    prompt_protocol: str
 
 
 class RedcoRlmTraceTask(vf.Task[RedcoRlmTraceData]):
@@ -28,7 +32,7 @@ class RedcoRlmTraceTask(vf.Task[RedcoRlmTraceData]):
         tokenized_nodes = sum(bool(node.token_ids) for node in trace.nodes)
         sampled_nodes = sum(node.sampled for node in trace.nodes)
         trace.info["redco_trace_audit"] = {
-            "prompt_protocol": PROMPT_PROTOCOL,
+            "prompt_protocol": self.data.prompt_protocol,
             "model_calls": len(trace.calls),
             "linked_model_calls": linked_calls,
             "structured_model_calls": len(structured_calls),
@@ -59,28 +63,56 @@ class RedcoRlmTraceTask(vf.Task[RedcoRlmTraceData]):
 class RedcoRlmTraceConfig(vf.TasksetConfig):
     num_tasks: int = 4
     """How many tasks to build."""
+    profile: Literal["single", "multi_child"] = "single"
+    """Trace shape requested by the instrumentation prompt."""
 
 
 class RedcoRlmTraceTaskset(vf.Taskset[RedcoRlmTraceTask, RedcoRlmTraceConfig]):
     def load(self) -> list[RedcoRlmTraceTask]:
         tasks: list[RedcoRlmTraceTask] = []
         for index in range(self.config.num_tasks):
-            answer = f"REDCO-{index:03d}"
-            prompt = (
-                "This is an instrumentation protocol, not a reasoning test. "
-                "Your first action MUST be an IPython tool call. In that call, "
-                "execute exactly this Python statement before doing anything else: "
-                f'result = await rlm("Return only the marker {answer}")\n'
-                "Then print result.answer in IPython. Do not answer the user until "
-                "that recursive call has returned. Afterward, inspect these records "
-                "and return the marker attached to the largest value: "
-                f"[('ignore', {index}), ('target', {100 + index}, '{answer}'), "
-                f"('other', {50 + index})]. End with the marker {answer}."
-            )
+            if self.config.profile == "multi_child":
+                markers = [
+                    f"REDCO-{index:03d}-{suffix}"
+                    for suffix in ("A", "B", "C", "D")
+                ]
+                answer = "|".join(markers)
+                prompts = [
+                    f"Return only the marker {marker}" for marker in markers
+                ]
+                prompt = (
+                    "This is a recursive map-reduce instrumentation protocol. "
+                    "Your first action MUST be one IPython tool call. In that call, "
+                    "execute this exact block before doing anything else:\n"
+                    f"child_prompts = {prompts!r}\n"
+                    "child_results = []\n"
+                    "for child_prompt in child_prompts:\n"
+                    "    child_results.append(await rlm(child_prompt))\n"
+                    "print('|'.join(item.answer for item in child_results))\n"
+                    "Do not answer until all four recursive calls return. Then "
+                    f"return exactly this combined marker: {answer}"
+                )
+                protocol = MULTI_CHILD_PROMPT_PROTOCOL
+            else:
+                answer = f"REDCO-{index:03d}"
+                prompt = (
+                    "This is an instrumentation protocol, not a reasoning test. "
+                    "Your first action MUST be an IPython tool call. In that call, "
+                    "execute exactly this Python statement before doing anything else: "
+                    f'result = await rlm("Return only the marker {answer}")\n'
+                    "Then print result.answer in IPython. Do not answer the user until "
+                    "that recursive call has returned. Afterward, inspect these records "
+                    "and return the marker attached to the largest value: "
+                    f"[('ignore', {index}), "
+                    f"('target', {100 + index}, '{answer}'), "
+                    f"('other', {50 + index})]. End with the marker {answer}."
+                )
+                protocol = PROMPT_PROTOCOL
             data = RedcoRlmTraceData(
                 idx=index,
                 prompt=prompt,
                 answer=answer,
+                prompt_protocol=protocol,
             )
             tasks.append(RedcoRlmTraceTask(data, self.config.task))
         return tasks
