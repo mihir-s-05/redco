@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "completed": true,
+  "passed": false,
+  "representative_micro_gate_executed": false,
+  "gate_gb_cleared": false,
+  "classification": "canonical_render_noninjective_token_boundary",
+  "source": {
+    "trace_id": "18614ffa018f4ab7a78337657d09c19a",
+    "trace_sha256": "e3e9a4ca37ed0e44d0647cc3f5b45dcad83350f29d479f5fb391505a33fceea1"
+  },
+  "observation": {
+    "strict_provider_guard_marker_observed": true,
+    "authoritative_render_requests": 1,
+    "successful_render_responses": 1,
+    "sampled_model_calls": 0,
+    "candidate_action_generations": 0,
+    "downstream_generations": 0,
+    "paired_branches": 0,
+    "report_generated": false,
+    "failure": "The schema-valid authoritative renderer returned token IDs that did not bitwise equal the trace-derived returning-root prompt."
+  },
+  "cpu_diagnosis": {
+    "recorded_prompt_tokens": 1934,
+    "canonical_render_tokens": 1935,
+    "decoded_text_exact": true,
+    "first_token_mismatch": 1274,
+    "first_text_mismatch": null,
+    "tool_name_retained_and_removed_results_equal": true,
+    "recorded_static_prefix_tokens": 1288,
+    "canonical_split_tokens": 1289,
+    "exact_common_suffix_tokens": 646,
+    "lossless_hybrid_reconstruction_exact": true
+  },
+  "diagnosis": {
+    "cause": "The trace-derived prompt preserves a noncanonical token boundary from the previously sampled assistant tool call. Re-rendering the same decoded history canonically changes one unchanged-history token boundary even though the complete decoded prompt text is identical.",
+    "what_failed": "The assumption that authoritative whole-history rendering would reproduce historical token segmentation.",
+    "what_did_not_fail": "The OpenAI schema, endpoint, decoded prompt text, replay pair logic, sampled continuation, reward comparison, and slicing comparison did not fail; no sampled request was made.",
+    "corrected_contract": "Find the longest exact common token suffix between the recorded prompt and authoritative original render. Require the recorded divergence boundary to equal the exact recorded static-history length, require replacing the canonical prefix with that recorded prefix to reconstruct the original prompt bit for bit, and for every branch require the unchanged canonical prefix to remain exact before combining the recorded prefix with the newly rendered affected suffix."
+  },
+  "preregistration": {
+    "path": "configs/stage-b/rlm-empirical-branch-replay-openai-tools-preregistration.json",
+    "commit": "b3144eb",
+    "automatic_retries": 0,
+    "post_observation_changes": 0
+  },
+  "resource_use": {
+    "pod_id": "8fd1d771b0c3449598fc7aee4d2f1a38",
+    "gpu": "1x A6000 48GB",
+    "provider": "massedcompute",
+    "price_usd_per_hour": 0.54,
+    "duration_minutes_reported": 8,
+    "cost_usd": 0.0619,
+    "cumulative_project_compute_usd": 3.3832,
+    "cumulative_terminated_pods": 18,
+    "wallet_balance_usd": 46.6168,
+    "active_prime_pods": 0,
+    "persistent_prime_disks": 0
+  },
+  "local_artifacts": {
+    "root": "runs/stage-b/rlm-empirical-branch-replay-openai-tools-attempts/pod-8fd1d771b0c3449598fc7aee4d2f1a38",
+    "control_log_sha256": "762d486ee718f8fa682f039c93cbee863eb5e632878607d9789c6e217ffe67fd",
+    "inference_log_sha256": "2476b5205ad983cfd5069d53e600b4e187d62c4a782e77eedf9c21945a6c8571",
+    "resource_log_sha256": "5d8dacda9da9876e644331d3a5f3e26626114c6badc76dc18e5262e1bde5e2cf"
+  },
+  "operational_notes": {
+    "package_manager": "uv",
+    "pip_used": false,
+    "ssh_key": "Prime CLI configured C:/Users/mihir/.ssh/id_rsa",
+    "artifacts_synced_before_termination": true
+  },
+  "decision": "Do not count this as a replay result and do not retry the frozen workload.",
+  "next_action": "Implement and CPU-test lossless recorded-prefix plus authoritative-suffix reconstruction, then freeze a distinct no-retry micro-campaign."
+}
