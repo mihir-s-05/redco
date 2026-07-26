@@ -51,6 +51,11 @@ def build_config(args: argparse.Namespace) -> EvalConfig:
                     "version": args.rlm_version,
                     "max_depth": args.max_depth,
                     "runtime": {"type": "subprocess"},
+                    "forward_env": (
+                        ["RLM_FORCE_TOOL_CHOICE_REQUIRED"]
+                        if args.forward_required_tool_choice_env
+                        else []
+                    ),
                 },
             },
         },
@@ -79,6 +84,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-completion-tokens", type=int, default=768)
     parser.add_argument("--max-total-tokens", type=int, default=4096)
     parser.add_argument("--max-depth", type=int, default=1)
+    parser.add_argument(
+        "--forward-required-tool-choice-env",
+        action="store_true",
+        help=(
+            "Forward RLM_FORCE_TOOL_CHOICE_REQUIRED into the RLM runtime "
+            "subprocess."
+        ),
+    )
     parser.add_argument("--rlm-version", default=DEFAULT_RLM_VERSION)
     parser.add_argument("--setup-timeout", type=float, default=900)
     parser.add_argument("--harness-timeout", type=float, default=600)

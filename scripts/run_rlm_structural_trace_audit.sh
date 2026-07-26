@@ -7,6 +7,7 @@ run_root="${REDCO_RUN_ROOT:-runs/stage-b/rlm-structural-trace-audit}"
 task_profile="${REDCO_TASK_PROFILE:-single}"
 max_total_tokens="${REDCO_MAX_TOTAL_TOKENS:-4096}"
 tool_patch_mode="${REDCO_RLM_TOOL_PATCH_MODE:-all_turns}"
+forward_required_tool_choice_env="${REDCO_FORWARD_REQUIRED_TOOL_CHOICE_ENV:-0}"
 rlm_worktree="/tmp/redco-rlm-structural"
 rlm_tool_root="/tmp/vf-rlm"
 verifiers_worktree="/tmp/redco-verifiers-structural"
@@ -112,14 +113,20 @@ fi
 
 (
   cd "$verifiers_worktree"
+  control_args=(
+    --output-dir "$repo_root/$run_root/live"
+    --task-profile "$task_profile"
+    --max-total-tokens "$max_total_tokens"
+  )
+  if test "$forward_required_tool_choice_env" = "1"; then
+    control_args+=(--forward-required-tool-choice-env)
+  fi
   VLLM_API_KEY=EMPTY \
     UV_PROJECT_ENVIRONMENT="$verifiers_environment" \
     "$uv_bin" run --frozen --no-dev --python 3.12 \
     --with-editable "$repo_root/environments/redco_rlm_trace_v1" \
     python -m redco_rlm_trace_v1.run_audit \
-    --output-dir "$repo_root/$run_root/live" \
-    --task-profile "$task_profile" \
-    --max-total-tokens "$max_total_tokens"
+    "${control_args[@]}"
 ) >"$control_log" 2>&1
 
 test -s "$traces"
