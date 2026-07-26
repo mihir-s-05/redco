@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "status": "frozen_before_amended_live_observation",
+  "amends": "configs/stage-b/rlm-trace-audit-preregistration.json",
+  "reason": "The first executable rollout completed successfully but the model answered the trivial marker task directly, so the preregistered recursive-model-call check failed.",
+  "observed_failed_attempt": {
+    "source_sha256": "697e4ea5baf61252b80f1b28b1772f5b3c892040e8dde3a2363eccc57599ac4d",
+    "report_sha256": "25b82b7d8ee4e31fc9eb5b423a4e730834bbfce27a3559607c1b86161ecb860b",
+    "model_calls": 1,
+    "recursive_traces": 0,
+    "passed": false
+  },
+  "single_protocol_change": {
+    "field": "task prompt",
+    "old": "Request at least one recursive call in prose.",
+    "new": "Require the first action to execute an explicit await rlm(...) statement through IPython.",
+    "prompt_protocol": "forced-recursion-v2"
+  },
+  "unchanged": [
+    "model and model state",
+    "sampling seed and temperature",
+    "completion and total-token limits",
+    "RLM commit and maximum recursion depth",
+    "all mandatory checks and exact thresholds",
+    "resource and termination policy"
+  ],
+  "interpretation": {
+    "pass": "The live trace substrate is sufficient to begin recorded-rollout provenance and RAF instrumentation.",
+    "fail": "Stop and repair trace capture or the RLM integration; do not count synthetic replay as Gate GB evidence."
+  }
+}

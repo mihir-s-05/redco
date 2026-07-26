@@ -1,5 +1,7 @@
 import verifiers.v1 as vf
 
+PROMPT_PROTOCOL = "forced-recursion-v2"
+
 
 class RedcoRlmTraceData(vf.TaskData):
     """One deterministic trace-audit prompt."""
@@ -16,6 +18,7 @@ class RedcoRlmTraceTask(vf.Task[RedcoRlmTraceData]):
         tokenized_nodes = sum(bool(node.token_ids) for node in trace.nodes)
         sampled_nodes = sum(node.sampled for node in trace.nodes)
         trace.info["redco_trace_audit"] = {
+            "prompt_protocol": PROMPT_PROTOCOL,
             "model_calls": len(trace.calls),
             "linked_model_calls": linked_calls,
             "message_nodes": len(trace.nodes),
@@ -52,10 +55,13 @@ class RedcoRlmTraceTaskset(vf.Taskset[RedcoRlmTraceTask, RedcoRlmTraceConfig]):
         for index in range(self.config.num_tasks):
             answer = f"REDCO-{index:03d}"
             prompt = (
-                "This is an RLM trace-instrumentation task. Use the available "
-                "IPython workflow and make at least one programmatic recursive "
-                "model call before answering. Inspect the following records and "
-                f"return the marker attached to the largest value: "
+                "This is an instrumentation protocol, not a reasoning test. "
+                "Your first action MUST be an IPython tool call. In that call, "
+                "execute exactly this Python statement before doing anything else: "
+                f'result = await rlm("Return only the marker {answer}")\n'
+                "Then print result.answer in IPython. Do not answer the user until "
+                "that recursive call has returned. Afterward, inspect these records "
+                "and return the marker attached to the largest value: "
                 f"[('ignore', {index}), ('target', {100 + index}, '{answer}'), "
                 f"('other', {50 + index})]. End with the marker {answer}."
             )
