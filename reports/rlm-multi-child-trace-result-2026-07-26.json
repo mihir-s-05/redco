@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "completed": true,
+  "passed": false,
+  "multi_child_trace_gate_cleared": false,
+  "generic_native_trace_audit_passed": true,
+  "gate_gb_cleared": false,
+  "source": {
+    "trace_id": "b22acfe0336d4dc4a14259acf1392f63",
+    "trace_sha256": "6a081c4dd3ffd5a61470929486a08e4f7b9c4a14c77eaaa551b463d4592ee995",
+    "trace_audit_signed_payload_sha256": "3a0403fdb59fad1ed4fa36b08977d6073526c6f63522a2c2e91b12698c47ff5e",
+    "provenance_signed_payload_sha256": "d1abef8e535be52d57cd2d5dad2c57fb77ce7f7f1fa8ea487f2cae3234071a73"
+  },
+  "mandatory_checks": {
+    "all_episodes_and_traces_successful": {
+      "required": true,
+      "observed": true,
+      "passed": true
+    },
+    "minimum_model_calls": {
+      "required": 6,
+      "observed": 5,
+      "passed": false
+    },
+    "minimum_recursive_model_calls": {
+      "required": 4,
+      "observed": 4,
+      "passed": true
+    },
+    "structural_model_call_coverage": {
+      "required": 1.0,
+      "observed": 1.0,
+      "passed": true
+    },
+    "exact_recursive_parent_coverage": {
+      "required": 1.0,
+      "observed": 1.0,
+      "passed": true
+    },
+    "minimum_exact_cross_component_links": {
+      "required": 4,
+      "observed": 0,
+      "passed": false
+    },
+    "cross_component_fallbacks": {
+      "required": 0,
+      "observed": 4,
+      "passed": false
+    },
+    "unresolved_cross_component_links": {
+      "required": 0,
+      "observed": 0,
+      "passed": true
+    },
+    "minimum_eligible_subcall_targets": {
+      "required": 4,
+      "observed": null,
+      "passed": false,
+      "reason": "Projection refused a trace that was not ready for representative RAF."
+    },
+    "minimum_targets_with_exact_key_reusable_suffix_events": {
+      "required": 1,
+      "observed": null,
+      "passed": false
+    },
+    "minimum_conservative_no_cache_generated_token_work_fraction": {
+      "required_operator": "less_than",
+      "required_value": 0.9,
+      "observed": null,
+      "passed": false
+    },
+    "projection_requires_broader_trace": {
+      "required": false,
+      "observed": null,
+      "passed": false
+    }
+  },
+  "final_attempt": {
+    "stop_condition": "max_total_tokens",
+    "reward": 0.0,
+    "model_calls": 5,
+    "root_policy_calls": 1,
+    "recursive_policy_calls": 4,
+    "prompt_tokens": 4933,
+    "generated_tokens": 490,
+    "event_graph_nodes": 26,
+    "event_graph_edges": 35,
+    "exact_prompt_provenance_coverage": 1.0,
+    "ready_for_representative_raf": false,
+    "failure_explanation": "Strict tool JSON made the four child calls parse, but aggregate recursive usage exhausted max_total_tokens before the exact next parent policy turn. Without that return turn, exact cross-component return edges cannot be constructed."
+  },
+  "attempt_history": [
+    {
+      "protocol": "forced-four-child-recursion-v1",
+      "pod_id": "863fe7b981384119b8cc021c38a9b62d",
+      "result": "failed_before_tool_execution",
+      "cause": "sampled tool-call JSON omitted the final outer brace",
+      "trace_sha256": "5ef12f714c768fe667887869c6cdd6bcf4f06abc11a37cd0b7c9c931af1d43ab",
+      "cost_usd": 0.0777
+    },
+    {
+      "protocol": "forced-four-child-recursion-v2",
+      "pod_id": "e2195421f89140ac979a889dbb2cfd97",
+      "result": "failed_before_tool_execution",
+      "cause": "single-line sampled tool-call JSON still omitted the final outer brace",
+      "trace_sha256": "61c58a38e6ff49b4764682cdb717991fd0cfa6571c9519b6e4f84a34abba1a17",
+      "cost_usd": 0.0943
+    },
+    {
+      "protocol": "forced-four-child-recursion-v2-strict-tool-json",
+      "pod_id": "967b655e6d804dd1b53319a3fb77b496",
+      "result": "four_children_recorded_but_gate_failed",
+      "cause": "aggregate recursive token budget prevented the required parent return turn",
+      "trace_sha256": "6a081c4dd3ffd5a61470929486a08e4f7b9c4a14c77eaaa551b463d4592ee995",
+      "cost_usd": 0.0741
+    }
+  ],
+  "preregistration": {
+    "original": "configs/stage-b/rlm-multi-child-trace-preregistration.json",
+    "original_commit": "131b356",
+    "amendment_1": "configs/stage-b/rlm-multi-child-trace-amendment-1.json",
+    "amendment_1_commit": "f267c32",
+    "amendment_2": "configs/stage-b/rlm-multi-child-trace-amendment-2.json",
+    "amendment_2_commit": "19bcc26"
+  },
+  "resource_use": {
+    "gpu": "1x A6000 48GB",
+    "provider": "massedcompute",
+    "price_usd_per_hour": 0.54,
+    "phase_cost_usd": 0.2461,
+    "cumulative_project_compute_usd": 2.9411,
+    "wallet_balance_usd": 47.0589,
+    "active_prime_pods": 0,
+    "persistent_prime_disks": 0
+  },
+  "local_artifacts": {
+    "final_attempt": "runs/stage-b/rlm-multi-child-trace",
+    "earlier_attempts": "runs/stage-b/rlm-multi-child-trace-attempts"
+  },
+  "decision": "Stop this synthetic workload line as frozen in amendment 2. Do not implement or spend on empirical branch replay from this trace.",
+  "next_action": "Use the final trace as a CPU regression fixture for multi-child topology and exact-parent metadata, while designing a new separately preregistered workload whose token budget and tool-choice lifetime permit an exact parent return turn."
+}
