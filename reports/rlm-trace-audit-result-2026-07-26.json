@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "passed": true,
+  "generated_at_utc": "2026-07-26T07:51:58Z",
+  "model": "Qwen/Qwen3-4B-Instruct-2507",
+  "sampling_seed": 6101,
+  "prompt_protocol": "forced-recursion-v2",
+  "counts": {
+    "episodes": 1,
+    "successful_episodes": 1,
+    "traces": 1,
+    "successful_traces": 1,
+    "model_calls": 3,
+    "linked_model_calls": 3,
+    "failed_model_calls": 0,
+    "exact_prompt_action_calls": 3,
+    "exact_key_complete_calls": 3,
+    "connected_components": 2,
+    "recursive_traces": 1,
+    "native_audit_traces": 1
+  },
+  "checks": {
+    "all_calls_linked": true,
+    "all_episodes_successful": true,
+    "all_traces_successful": true,
+    "exact_key_replay_ready": true,
+    "exact_prompt_action_coverage": true,
+    "native_task_audit_present": true,
+    "no_failed_model_calls": true,
+    "recursive_model_call_observed": true,
+    "usage_coverage": true
+  },
+  "provenance": {
+    "preregistration": "configs/stage-b/rlm-trace-audit-preregistration.json",
+    "amendment": "configs/stage-b/rlm-trace-audit-amendment-1.json",
+    "amendment_commit": "b5da752",
+    "source_sha256": "f8faa74480a1a462e6c1eb8dcb2b6a8472bf7bba9cc0264d6be4b316dd2e900e",
+    "signed_report_sha256": "8742930bb569f13bc781865695ae4792030bc262ebed1bbc1b715baf9d97b4d1",
+    "signed_report_verified_locally": true,
+    "fresh_canonical_reconstruction_matched": true
+  },
+  "resources": {
+    "pod_id": "67c03ca9b4784e51b2e595370ad1e7b5",
+    "gpu": "A6000_48GB x1",
+    "price_per_hour_usd": 0.54,
+    "created_at_utc": "2026-07-26 07:28:14",
+    "terminated_at_utc": "2026-07-26 07:52:38",
+    "duration_seconds": 1464,
+    "phase_cost_usd": 0.201,
+    "cumulative_project_cost_usd": 2.5924,
+    "active_pods_after_cleanup": 0,
+    "persistent_disks_after_cleanup": 0
+  },
+  "not_claimed": [
+    "Gate GB clearance",
+    "sliced-versus-full stochastic reward equivalence",
+    "empirical replay amplification factor",
+    "same-prompt/same-seed vLLM reproducibility",
+    "training effectiveness"
+  ]
+}
