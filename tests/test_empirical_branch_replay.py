@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+import pytest
+
+from redco.analysis.empirical_branch_replay import (
+    build_replay_indices,
+    execute_cached_arm,
+    replace_unique,
+)
+from redco.env.policy_cache import (
+    CachedPolicyAction,
+    PolicyActionCache,
+    PolicyCallKey,
+)
+from redco.env.replay import ReplayMode
+from redco.integrations.verifiers_trace import RecordedPolicyCall
+
+
+def _call(
+    index: int,
+    *,
+    prompt: tuple[int, ...],
+    action: tuple[int, ...],
+    seed: int,
+) -> RecordedPolicyCall:
+    return RecordedPolicyCall(
+        trace_id="trace",
+        call_index=index,
+        node_index=index,
+        component_root_node=0,
+        prompt_token_ids=prompt,
+        action_token_ids=action,
+        checkpoint_id="model",
+        decoding_config_hash="decode",
+        event_seed=seed,
+        prompt_tokens_reported=len(prompt),
+        completion_tokens_reported=len(action),
+        cost_reported=None,
+        wall_seconds=0.0,
+        agent_depth=0,
+        session_id="root",
+        turn_index=index,
+        call_kind="policy",
+        parent_session_id=None,
+        parent_turn_index=None,
+    )
+
+
+def test_replay_indices_isolate_descendants() -> None:
+    full, sliced = build_replay_indices(
+        target_call_index=1,
+        target_node_id="policy-1",
+        policy_node_ids_by_call={
+            0: "policy-0",
+            1: "policy-1",
+            2: "policy-2",
+            3: "policy-3",
+            4: "policy-4",
+        },
+        descendants=frozenset({"message-return", "policy-4"}),
+    )
+
+    assert full == (2, 3, 4)
+    assert sliced == (4,)
+
+
+def test_cached_arms_reach_the_same_terminal_action() -> None:
+    calls = {
+        2: _call(2, prompt=(2,), action=(20,), seed=2),
+        3: _call(3, prompt=(3,), action=(30,), seed=3),
+    }
+    branch_prompt = (3, 9)
+    branch_action = (31, 32)
+    branch_seed = 99
+    cache = PolicyActionCache()
+    for call in calls.values():
+        assert call.event_seed is not None
+        cache.record(
+            CachedPolicyAction(
+                PolicyCallKey.from_call(
+                    call.prompt_token_ids,
+                    checkpoint_id=call.checkpoint_id,
+                    decoding_config_hash=call.decoding_config_hash,
+                    event_seed=call.event_seed,
+                ),
+                call.action_token_ids,
+            )
+        )
+    cache.record(
+        CachedPolicyAction(
+            PolicyCallKey.from_call(
+                branch_prompt,
+                checkpoint_id="model",
+                decoding_config_hash="decode",
+                event_seed=branch_seed,
+            ),
+            branch_action,
+        )
+    )
+
+    full = execute_cached_arm(
+        mode=ReplayMode.FULL_SUFFIX,
+        calls_by_index=calls,
+        visited_call_indices=(2, 3),
+        final_call_index=3,
+        branch_final_prompt=branch_prompt,
+        branch_final_seed=branch_seed,
+        branch_final_decoding_config_hash="decode",
+        branch_final_action=branch_action,
+        cache=cache.fork(),
+        reward=1.0,
+    )
+    sliced = execute_cached_arm(
+        mode=ReplayMode.SLICED,
+        calls_by_index=calls,
+        visited_call_indices=(3,),
+        final_call_index=3,
+        branch_final_prompt=branch_prompt,
+        branch_final_seed=branch_seed,
+        branch_final_decoding_config_hash="decode",
+        branch_final_action=branch_action,
+        cache=cache.fork(),
+        reward=1.0,
+    )
+
+    assert full.terminal_action_sha256 == sliced.terminal_action_sha256
+    assert full.reward == sliced.reward == 1.0
+    assert full.exact_key_reused_call_indices == (2, 3)
+    assert sliced.exact_key_reused_call_indices == (3,)
+    assert full.actual_cost.generated_tokens == 0
+    assert sliced.actual_cost.generated_tokens == 0
+
+
+def test_unique_replacement_rejects_ambiguous_input() -> None:
+    assert replace_unique("before old after", "old", "new") == "before new after"
+    with pytest.raises(ValueError, match="exactly once"):
+        replace_unique("old old", "old", "new")
+    with pytest.raises(ValueError, match="non-empty"):
+        replace_unique("text", "", "new")
