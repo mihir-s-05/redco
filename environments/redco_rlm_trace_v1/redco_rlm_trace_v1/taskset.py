@@ -15,12 +15,24 @@ class RedcoRlmTraceTask(vf.Task[RedcoRlmTraceData]):
     async def finalize(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
         del runtime
         linked_calls = sum(call.node is not None for call in trace.calls)
+        structured_calls = [
+            call for call in trace.calls if getattr(call, "rlm", None) is not None
+        ]
+        exact_recursive_calls = [
+            call
+            for call in structured_calls
+            if call.rlm is not None
+            and call.rlm.parent_session_id is not None
+            and call.rlm.parent_turn is not None
+        ]
         tokenized_nodes = sum(bool(node.token_ids) for node in trace.nodes)
         sampled_nodes = sum(node.sampled for node in trace.nodes)
         trace.info["redco_trace_audit"] = {
             "prompt_protocol": PROMPT_PROTOCOL,
             "model_calls": len(trace.calls),
             "linked_model_calls": linked_calls,
+            "structured_model_calls": len(structured_calls),
+            "exact_recursive_model_calls": len(exact_recursive_calls),
             "message_nodes": len(trace.nodes),
             "tokenized_nodes": tokenized_nodes,
             "sampled_nodes": sampled_nodes,

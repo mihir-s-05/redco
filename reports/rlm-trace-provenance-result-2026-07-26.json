@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "completed": true,
+  "ready_for_representative_raf": false,
+  "source_sha256": "f8faa74480a1a462e6c1eb8dcb2b6a8472bf7bba9cc0264d6be4b316dd2e900e",
+  "signed_detailed_report_sha256": "08dea42549326f4cfa364eaffd0e4ed2a738c5eedbcf345ec630055e1520ca08",
+  "event_graph": {
+    "nodes": 15,
+    "edges": 24,
+    "exact_observation_edges": 11
+  },
+  "provenance": {
+    "rendered_prompt_tokens": 3327,
+    "mapped_prompt_tokens": 3327,
+    "exact_prompt_provenance_coverage": 1.0,
+    "recursive_components": 1,
+    "cross_component_fallbacks": 1,
+    "cross_component_fallback_rate": 1.0,
+    "unresolved_cross_component_links": 0
+  },
+  "measured_cost": {
+    "model_calls": 3,
+    "prompt_tokens": 3327,
+    "generated_tokens": 237,
+    "model_call_wall_seconds": 6.921531438827515,
+    "trace_generation_wall_seconds": 11.699668169021606,
+    "recorded_canonical_trace_bytes": 53240,
+    "judge_calls": 0,
+    "unavailable_meters": [
+      "cpu_seconds",
+      "gpu_seconds"
+    ]
+  },
+  "blocking_finding": "The serialized trace lacks explicit parent/return call IDs between recursive components, so conservative temporal call-edge fallbacks were required.",
+  "next_action": "Preserve structural recursion metadata from RLM in verifiers traces and require zero cross-component fallback before representative branch-pair RAF measurement.",
+  "resource_use": {
+    "execution": "cpu_only",
+    "active_prime_pods": 0,
+    "persistent_prime_disks": 0
+  }
+}

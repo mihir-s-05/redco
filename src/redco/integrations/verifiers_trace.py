@@ -31,6 +31,12 @@ class RecordedPolicyCall:
     completion_tokens_reported: int | None
     cost_reported: float | None
     wall_seconds: float
+    agent_depth: int | None
+    session_id: str | None
+    turn_index: int | None
+    call_kind: str | None
+    parent_session_id: str | None
+    parent_turn_index: int | None
 
     @property
     def exact_key_complete(self) -> bool:
@@ -174,7 +180,7 @@ def extract_policy_calls(trace: dict[str, Any]) -> tuple[RecordedPolicyCall, ...
         if type(node_value) is not int:
             continue
         node_index = node_value
-        path = _path_to_node(nodes, node_index)
+        path = path_to_node(nodes, node_index)
         current = nodes[node_index]
         current_tokens = _integer_list(
             current.get("token_ids"),
@@ -222,6 +228,8 @@ def extract_policy_calls(trace: dict[str, Any]) -> tuple[RecordedPolicyCall, ...
         start = _number_or_none(timing_payload.get("start")) or 0.0
         end = _number_or_none(timing_payload.get("end")) or 0.0
         model = str(call.get("model") or agent_model)
+        rlm = call.get("rlm")
+        rlm_payload = rlm if isinstance(rlm, dict) else {}
         extracted.append(
             RecordedPolicyCall(
                 trace_id=trace_id,
@@ -241,6 +249,24 @@ def extract_policy_calls(trace: dict[str, Any]) -> tuple[RecordedPolicyCall, ...
                 ),
                 cost_reported=_number_or_none(usage_payload.get("cost")),
                 wall_seconds=max(0.0, end - start) if end else 0.0,
+                agent_depth=_nonnegative_integer_or_none(
+                    rlm_payload.get("depth")
+                ),
+                session_id=_nonempty_string_or_none(
+                    rlm_payload.get("session_id")
+                ),
+                turn_index=_nonnegative_integer_or_none(
+                    rlm_payload.get("turn")
+                ),
+                call_kind=_nonempty_string_or_none(
+                    rlm_payload.get("call_kind")
+                ),
+                parent_session_id=_nonempty_string_or_none(
+                    rlm_payload.get("parent_session_id")
+                ),
+                parent_turn_index=_nonnegative_integer_or_none(
+                    rlm_payload.get("parent_turn")
+                ),
             )
         )
     return tuple(extracted)
@@ -339,7 +365,8 @@ def build_policy_cache(
     return cache
 
 
-def _path_to_node(nodes: list[dict[str, Any]], node_index: int) -> list[int]:
+def path_to_node(nodes: list[dict[str, Any]], node_index: int) -> list[int]:
+    """Return a root-to-node path, rejecting missing parents and cycles."""
     if node_index < 0 or node_index >= len(nodes):
         raise ValueError(f"call links to unavailable node {node_index}")
     reversed_path: list[int] = []
@@ -383,6 +410,14 @@ def _boolean_list(value: Any, label: str) -> list[bool]:
 
 def _integer_or_none(value: Any) -> int | None:
     return value if type(value) is int else None
+
+
+def _nonnegative_integer_or_none(value: Any) -> int | None:
+    return value if type(value) is int and value >= 0 else None
+
+
+def _nonempty_string_or_none(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
 
 
 def _number_or_none(value: Any) -> float | None:
