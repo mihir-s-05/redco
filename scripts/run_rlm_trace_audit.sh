@@ -8,6 +8,8 @@ mkdir -p "$run_root"
 
 if test -x "$HOME/.local/uv-latest/uv"; then
   uv_bin="$HOME/.local/uv-latest/uv"
+elif test -x "$HOME/.local/bin/uv"; then
+  uv_bin="$HOME/.local/bin/uv"
 else
   uv_bin="$(command -v uv)"
 fi
