@@ -23,6 +23,9 @@ test "$(
   sha256sum patches/rlm-structural-trace-headers.patch | cut -d ' ' -f 1
 )" = "589d412de4aff70ecfd52e35e474ef42c9033e5a221c7db9929ee838b24bcfb9"
 test "$(
+  sha256sum patches/rlm-required-tool-choice.patch | cut -d ' ' -f 1
+)" = "93a7456cf48d9150c83add3e3139eb8d38a936e0b87fe8adf4b766183430a673"
+test "$(
   sha256sum patches/verifiers-rlm-structural-trace.patch | cut -d ' ' -f 1
 )" = "95db874f84fdd1487399d6ee77b11f1726e7ff27c14d0626a1a7e6f2c664b577"
 
@@ -33,6 +36,8 @@ git -C "$rlm_worktree" checkout --quiet \
   56218f33796ecbe465445bc43948886354fde196
 git -C "$rlm_worktree" apply \
   "$repo_root/patches/rlm-structural-trace-headers.patch"
+git -C "$rlm_worktree" apply \
+  "$repo_root/patches/rlm-required-tool-choice.patch"
 mkdir -p "$rlm_tool_root/bin" "$rlm_tool_root/tools"
 UV_TOOL_BIN_DIR="$rlm_tool_root/bin" \
   UV_TOOL_DIR="$rlm_tool_root/tools" \

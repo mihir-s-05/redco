@@ -7,6 +7,8 @@ cd "$repo_root"
 export REDCO_REPO_ROOT="$repo_root"
 export REDCO_RUN_ROOT="runs/stage-b/rlm-multi-child-trace"
 export REDCO_TASK_PROFILE="multi_child"
+export RLM_FORCE_TOOL_CHOICE_REQUIRED="1"
+export VLLM_ENFORCE_STRICT_TOOL_CALLING="1"
 
 bash scripts/run_rlm_structural_trace_audit.sh
 
