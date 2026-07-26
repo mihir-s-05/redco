@@ -1,0 +1,52 @@
+# Identical to stock-smoke.toml except for the named no-op algorithm. Keep these
+# files mechanically aligned so any observed difference is algorithm-path-only.
+output_dir = "runs/stage-a/redco-noop-smoke"
+clean_output_dir = true
+max_steps = 1
+seq_len = 1024
+
+[deployment]
+type = "single_node"
+gpus_per_node = 2
+num_train_gpus = 1
+num_infer_gpus = 1
+
+[model]
+name = "Qwen/Qwen3-4B-Instruct-2507"
+
+[file_monitor]
+filename = "metrics.jsonl"
+
+[trainer.model]
+impl = "hf"
+
+[trainer.model.ac]
+freq = 1
+
+[trainer.model.lora]
+rank = 8
+alpha = 16
+
+[trainer.optim]
+lr = 1e-5
+
+[orchestrator]
+batch_size = 4
+group_size = 2
+max_off_policy_steps = 0
+
+[orchestrator.algo]
+type = "redco_noop"
+
+[orchestrator.train.sampling]
+max_completion_tokens = 192
+
+[[orchestrator.train.env]]
+name = "alphabet-sort"
+env.taskset = { id = "alphabet-sort-v1", min_turns = 2, max_turns = 2, min_names_per_turn = 1, max_names_per_turn = 2, task = { similarity_power = 4, power_per_turn = false } }
+env.agent.harness = { id = "null", runtime = { type = "subprocess" } }
+
+[inference]
+enable_lora = true
+gpu_memory_utilization = 0.75
+

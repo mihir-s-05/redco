@@ -1,0 +1,27 @@
+{
+  "generated_at": "2026-07-25",
+  "prime_cli": "0.6.20",
+  "prime_rl": {
+    "repository": "https://github.com/PrimeIntellect-ai/prime-rl.git",
+    "commit": "3b22dd951cad1036d1fe8dd0a0bfc40807a9b360",
+    "tag": "v0.7.1.dev65"
+  },
+  "nested_pins": {
+    "pydantic_config": "4f5ae373582ceffdbf7e6bd1998c9ad568fcc1ad",
+    "renderers": "bdb96b0c84a307e2b71c6a366c9d718c3ac7fe78",
+    "research_environments": "f5d423c3210cd438b3923da4d4e2494745c06e00",
+    "verifiers": "b13ba60da63cea91389e7575766b7270d0d11fc5"
+  },
+  "model": "Qwen/Qwen3-4B-Instruct-2507",
+  "method": "LoRA",
+  "patch": "patches/prime-rl-redco-noop.patch",
+  "resource_policy": {
+    "preferred_resource_id": "1d8048",
+    "gpu": "2x A100 80GB Spot",
+    "provider": "datacrunch",
+    "region": "FI",
+    "observed_price_usd_per_hour": 1.253,
+    "smoke_steps_per_arm": 1,
+    "terminate_after_artifact_sync": true
+  }
+}
