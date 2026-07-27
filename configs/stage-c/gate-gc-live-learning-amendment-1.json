@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-learning",
+  "amends": "configs/stage-c/gate-gc-live-learning-preregistration.json",
+  "status": "frozen_before_live_smoke",
+  "logistics_only": {
+    "parent_commit": "c68510d7b646ba89b8452eee77bafd23f2008053",
+    "file": "scripts/run_stage_c_live.sh",
+    "previous_sha256": "1efa75069cfdcdd406ede89534c95ad85f36ea3a4e0a1fcd9e17d8c5f23f2f5b",
+    "replacement_sha256": "64cae0c26a3d3a28b055b4dd420c86fdfdb87d4d6b00b57b0061cc23c9f689f4",
+    "change": "Permit sparse bundle patch verification without git metadata."
+  },
+  "unchanged": [
+    "all three arm configs",
+    "run order and shared run seed",
+    "sample counts and matched policy-call budget",
+    "bootstrap analysis and thresholds",
+    "decision rule"
+  ]
+}
