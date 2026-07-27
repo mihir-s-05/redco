@@ -292,6 +292,19 @@ def evaluate_gate_gb(
         gpu_samples_path,
         minimum_samples=minimum_gpu_samples,
     )
+    baseline_tokens = int(broad.get("baseline_generated_tokens", 0))
+    candidate_tokens = int(
+        broad.get("alternative_action_generated_tokens", 0)
+    )
+    downstream_tokens = int(broad.get("downstream_generated_tokens", 0))
+    if baseline_tokens <= 0 or not pairs:
+        raise ValueError("broad report needs positive baseline tokens and pairs")
+    average_candidate_tokens = candidate_tokens / len(pairs)
+    average_downstream_tokens = downstream_tokens / len(pairs)
+    stage_c_alternatives = 3
+    projected_stage_c_policy_token_raf = 1.0 + stage_c_alternatives * (
+        average_candidate_tokens + average_downstream_tokens
+    ) / baseline_tokens
     dynamic_full_work = cast(
         dict[str, Any],
         dynamic.get("full_work_by_role", {}),
@@ -386,6 +399,29 @@ def evaluate_gate_gb(
                     "The frozen live protocol has policy calls only; environment "
                     "and judge roles are exercised and metered in the dynamic "
                     "CPU campaign."
+                ),
+            },
+            "stage_c_n4_compute_projection": {
+                "branch_group_size": 4,
+                "alternative_branches": stage_c_alternatives,
+                "continuations_per_branch": 1,
+                "baseline_generated_tokens": baseline_tokens,
+                "average_alternative_action_generated_tokens": (
+                    average_candidate_tokens
+                ),
+                "average_regenerated_downstream_policy_tokens": (
+                    average_downstream_tokens
+                ),
+                "projected_policy_token_raf": (
+                    projected_stage_c_policy_token_raf
+                ),
+                "measured_sliced_policy_event_fraction": broad.get(
+                    "sliced_policy_event_fraction"
+                ),
+                "interpretation": (
+                    "Projection normalizes the 1,024-alternative stress campaign "
+                    "back to the Stage-C n=4 branch group. It is trace-specific "
+                    "and not a production cost forecast."
                 ),
             },
         },
