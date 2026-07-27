@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "status": "frozen_before_successful_provisioning_and_live_observation",
+  "amends": "configs/stage-b/gate-gb-broad-live-amendment-2.json",
+  "reason": "Crusoe US east returned HTTP 400 'Instance is no longer available' without allocating a pod or disk, despite remaining in the availability response. The provider exposes the identical L40S configuration at its US south-central data center.",
+  "unchanged": [
+    "all experimental settings and hashes",
+    "GPU type and count",
+    "provider",
+    "hourly price and maximum cost",
+    "vCPU and memory allocation",
+    "Prime-RL image",
+    "runtime cap",
+    "retry policy"
+  ],
+  "failed_provisioning_record": {
+    "resource_id": "0b28ef",
+    "data_center": "us-east1-a",
+    "result": "HTTP 400: Instance is no longer available",
+    "pods_allocated": 0,
+    "persistent_disks_allocated": 0,
+    "campaign_started": false,
+    "live_observations": 0
+  },
+  "data_center_substitution": {
+    "resource_id": "3644dc",
+    "cloud_id": "l40s-48gb.1x",
+    "data_center": "us-southcentral1-a",
+    "gpu": "L40S_48GB",
+    "provider": "crusoecloud",
+    "ephemeral_disk_gb": 128,
+    "ephemeral_disk_included_in_compute_price": true,
+    "price_usd_per_hour": 1.0,
+    "maximum_total_resource_cost_usd": 3.0
+  },
+  "interpretation": "Only the provider data center changes. This amendment was frozen before a pod was successfully created and before any campaign output or model response was observed."
+}
