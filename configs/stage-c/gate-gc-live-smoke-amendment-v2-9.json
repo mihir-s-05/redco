@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-smoke-v2",
+  "amends": [
+    "configs/stage-c/gate-gc-live-smoke-amendment-v2-1.json",
+    "configs/stage-c/gate-gc-live-smoke-amendment-v2-8.json"
+  ],
+  "status": "frozen_after_pre_model_import_failure_before_same_pod_relaunch",
+  "observed_import_failure": {
+    "pod_id": "fec65e0f73204c6c8be93e4d597f9ca1",
+    "cause": "The generic Ubuntu image does not include Prime's image-level flash_attn package. Prime stopped at import time when ring_flash_attn imported flash_attn.",
+    "failure_stage": "Prime trainer module import before pre_download_model",
+    "model_calls": 0,
+    "model_cache_bytes": 0,
+    "gpu_memory_mib_each": 2,
+    "output_directory_created": false,
+    "metrics_created": false,
+    "rollouts_created": false
+  },
+  "logistics_only": {
+    "file": "scripts/run_stage_c_live.sh",
+    "previous_sha256": "64cae0c26a3d3a28b055b4dd420c86fdfdb87d4d6b00b57b0061cc23c9f689f4",
+    "replacement_sha256": "af65d86daf071936f0d1bf230a410055dba6e257f8413f6ec766be6623b36170",
+    "change": "Enable Prime's flash-attn uv extra in the frozen uv run command.",
+    "locked_package": "flash-attn 2.8.3+cu128torch2.11",
+    "locked_wheel_sha256": "a16162f436286cc03ebbfb174c0853343ed98ae13c37abf1042947668ec40549",
+    "package_source": "external/prime-rl/uv.lock",
+    "package_manager": "uv",
+    "pip_prohibited": true,
+    "same_pod_relaunch_allowed": true,
+    "justification": "The failed process exited during imports before model loading, inference, rollout generation, or training."
+  },
+  "unchanged": [
+    "hardware and hourly price",
+    "model and model-facing source",
+    "environment and action mapping",
+    "seed and sample counts",
+    "optimizer and loss",
+    "decision rule and remaining cost cap",
+    "run-scoped SSH trust",
+    "zero persistent disks"
+  ]
+}

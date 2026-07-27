@@ -52,6 +52,7 @@ export UV_CACHE_DIR="${REDCO_UV_CACHE_DIR:-/workspace/.uv-cache-prime-stage-c}"
 
 timeout --signal=TERM "$timeout_seconds" \
   uv run --frozen --project external/prime-rl \
+  --extra flash-attn \
   --with-editable "$repo_root" \
   --with-editable "$repo_root/environments/redco_credit_v1" \
   --with-editable "$repo_root/external/prime-rl/deps/verifiers" \
