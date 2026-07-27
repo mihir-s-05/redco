@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-smoke-v2",
+  "amends": "configs/stage-c/gate-gc-live-smoke-amendment-v2-2.json",
+  "status": "frozen_before_resource_provisioning",
+  "reason": "MassedCompute rejected the PRIME_RL image as unsupported before creating a pod.",
+  "logistics_only": {
+    "resource_id": "ecdbb5",
+    "previous_image": "prime_rl",
+    "image": "ubuntu_22_cuda_12",
+    "package_manager": "uv",
+    "pip_prohibited": true
+  },
+  "unchanged": [
+    "hardware and hourly price",
+    "model and source hashes",
+    "environment and action mapping",
+    "seed and sample counts",
+    "optimizer and loss",
+    "decision rule",
+    "maximum smoke cost and lifetime",
+    "zero persistent disks"
+  ]
+}
