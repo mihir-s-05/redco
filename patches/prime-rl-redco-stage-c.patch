@@ -252,6 +252,22 @@ index 000000000..4dfdc91d2
 +                    "redco_branch_advantage",
 +                    record.advantages[action_span.start],
 +                )
+diff --git a/src/prime_rl/orchestrator/orchestrator.py b/src/prime_rl/orchestrator/orchestrator.py
+index 400d078f7..66fcb05be 100644
+--- a/src/prime_rl/orchestrator/orchestrator.py
++++ b/src/prime_rl/orchestrator/orchestrator.py
+@@ -380,7 +380,10 @@ class Orchestrator:
+                 self.policy.model_name = self.lora_name
+             self.policy.version = sync_version
+ 
+-        self.train_source = TrainSource(self.train_envs, seed=42)
++        self.train_source = TrainSource(
++            self.train_envs,
++            seed=int(os.environ.get("REDCO_RUN_SEED", "42")),
++        )
+         self.eval_source: EvalSource | None = (
+             EvalSource(
+                 self.eval_envs,
 diff --git a/src/prime_rl/trainer/batch.py b/src/prime_rl/trainer/batch.py
 index 4eb8ff4ba..6c7a6e0c4 100644
 --- a/src/prime_rl/trainer/batch.py
@@ -437,10 +453,40 @@ index 000000000..e6e4d5c72
 +        },
 +    )
 diff --git a/src/prime_rl/trainer/rl/train.py b/src/prime_rl/trainer/rl/train.py
-index 295d3ad15..43f64b8fd 100644
+index 295d3ad15..6a8d3c090 100644
 --- a/src/prime_rl/trainer/rl/train.py
 +++ b/src/prime_rl/trainer/rl/train.py
-@@ -315,23 +315,44 @@ def train(config: TrainerConfig):
+@@ -1,6 +1,7 @@
+ import prime_rl._compat  # noqa: F401 — patch ring_flash_attn compat before import
+ 
+ from contextlib import nullcontext
++import os
+ import time
+ from datetime import timedelta
+ 
+@@ -72,6 +73,21 @@ from torchtitan.distributed.utils import clip_grad_norm_
+ 
+ @clean_exit
+ def train(config: TrainerConfig):
++    seed = int(os.environ.get("REDCO_RUN_SEED", "0"))
++    torch.manual_seed(seed)
++    torch.cuda.manual_seed_all(seed)
++    if os.environ.get("REDCO_DETERMINISTIC", "0") == "1":
++        if "CUBLAS_WORKSPACE_CONFIG" not in os.environ:
++            raise RuntimeError(
++                "REDCO_DETERMINISTIC=1 requires CUBLAS_WORKSPACE_CONFIG "
++                "to be set before Python starts"
++            )
++        torch.use_deterministic_algorithms(True, warn_only=False)
++        torch.backends.cudnn.benchmark = False
++        torch.backends.cudnn.deterministic = True
++        torch.backends.cuda.matmul.allow_tf32 = False
++        torch.backends.cudnn.allow_tf32 = False
++
+     # Setup world and logger
+     world = get_world()
+     logger = setup_logger(
+@@ -315,23 +331,44 @@ def train(config: TrainerConfig):
          # FSDP's per-rank divide is undone after the microbatch loop via
          # fsdp_gradient_divide_factor. One batched collective keeps every rank issuing the same
          # op regardless of which components its samples carry.
