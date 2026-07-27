@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-smoke-v2",
+  "result": "fail",
+  "gate_cleared": false,
+  "learning_campaign_authorized": false,
+  "run": {
+    "date": "2026-07-27",
+    "pod_id": "fec65e0f73204c6c8be93e4d597f9ca1",
+    "hardware": "2x NVIDIA RTX 6000 Ada Generation 48 GB",
+    "price_usd_per_hour": 1.5,
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "algorithm": "redco",
+    "replay_mode": "sliced",
+    "run_seed": 7202602
+  },
+  "terminal_failure": {
+    "exception": "ValueError: clean Stage C permits one collected group per snapshot",
+    "location": "external/prime-rl/src/prime_rl/orchestrator/algo/redco.py:71",
+    "optimizer_steps": 0,
+    "metrics_jsonl_present": false,
+    "trainer_batch_present": false,
+    "adapter_present": false
+  },
+  "live_evidence": {
+    "inference_http_200_model_calls": 20,
+    "serialized_traces": 20,
+    "group_ids": 2,
+    "episodes": 4,
+    "policy_versions": [
+      0
+    ],
+    "context_records": 4,
+    "branch_records": 16,
+    "selected_pre_action_true": 20,
+    "replay_equivalent_true": 20,
+    "valid_branch_actions": 2,
+    "invalid_branch_actions": 14,
+    "distinct_rewards": [
+      0.25
+    ]
+  },
+  "diagnosis": {
+    "primary": "The integration treated one-update-per-snapshot as one-score-group-per-snapshot. Prime delivered a second ten-record group from the same policy version, and the guard rejected it.",
+    "configuration_interaction": "group_size=2 produced two episodes per group, while repeats_per_probe=2 allowed a second group. The frozen smoke expected one group containing two episodes and ten traces.",
+    "secondary": "All context and branch rewards were 0.25. Fourteen of sixteen branch replies failed the exact action-tag parser, and the two valid replies selected the same action. The zero-advantage filter therefore had no usable learning signal even before the second-group exception."
+  },
+  "frozen_verifier": {
+    "command": "uv run --frozen python -m redco.analysis.stage_c_live --run-dir runs/stage-c/gate-gc-live-smoke --output runs/stage-c/gate-gc-live-smoke/verification-report.json",
+    "exit_code": 1,
+    "result": "ValueError: expected one '**/metrics.jsonl' below runs/stage-c/gate-gc-live-smoke, found 0"
+  },
+  "artifact_integrity": {
+    "local_path": "runs/stage-c/gate-gc-live-smoke",
+    "remote_manifest_entries_verified": 27,
+    "manifest": "runs/stage-c/gate-gc-live-smoke/artifact-manifest.sha256",
+    "terminal_observation": "runs/stage-c/gate-gc-live-smoke/terminal-observation.txt",
+    "all_remote_manifest_hashes_match_local": true
+  },
+  "resource_record": {
+    "ssh_only_failed_pod_usd": 0.0074,
+    "live_smoke_pod_usd": 0.5886,
+    "stage_c_smoke_total_usd": 0.596,
+    "wallet_after_usd": 44.7503,
+    "cumulative_prime_spend_usd": 5.2497,
+    "active_pods_after": 0,
+    "persistent_disks_after": 0
+  },
+  "next_required": [
+    "Design and CPU-test snapshot lifecycle handling for multiple score groups without permitting more than one optimizer update per policy snapshot.",
+    "Fix or constrain live action serialization so branch alternatives produce parseable, diverse actions and nonzero leave-one-out signal.",
+    "Freeze a new smoke protocol before any additional model call.",
+    "Do not start the three-arm Stage C learning campaign until the replacement smoke passes."
+  ]
+}
