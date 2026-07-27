@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "status": "frozen_before_successful_provisioning_and_live_observation",
+  "amends": [
+    "configs/stage-b/gate-gb-broad-live-preregistration.json",
+    "configs/stage-b/gate-gb-broad-live-amendment-1.json"
+  ],
+  "reason": "The RTX 6000 Ada spot create request returned HTTP 500 without allocating a pod or disk; an identical provisioning retry then found the listing gone. Prime remained at zero pods, zero disks, and an unchanged wallet. No campaign process or model call began. A stable US L40S 48 GB resource is available within the previously authorized Stage-B budget.",
+  "unchanged": [
+    "source trace and source hash",
+    "model and model state",
+    "all seeds",
+    "all sample counts",
+    "all equivalence margins and confidence levels",
+    "all mandatory checks",
+    "all aggregate input hashes",
+    "all implementation hashes",
+    "one-campaign no-retry policy",
+    "three-hour hard runtime timeout"
+  ],
+  "failed_provisioning_record": {
+    "resource_id": "9908d2",
+    "first_result": "HTTP 500 during pod provisioning",
+    "second_result": "No valid GPU configuration found",
+    "pods_allocated": 0,
+    "persistent_disks_allocated": 0,
+    "wallet_change_usd": 0,
+    "campaign_started": false,
+    "live_observations": 0
+  },
+  "replacement_resource": {
+    "resource_id": "0b28ef",
+    "cloud_id": "l40s-48gb.1x",
+    "gpu": "L40S_48GB",
+    "gpu_count": 1,
+    "provider": "crusoecloud",
+    "data_center": "us-east1-a",
+    "location": "US",
+    "spot": false,
+    "price_usd_per_hour": 1.0,
+    "vcpus": 8,
+    "memory_gb": 147,
+    "ephemeral_disk_gb": 100,
+    "ephemeral_disk_included_in_compute_price": true,
+    "image": "prime_rl",
+    "maximum_runtime_hours": 3,
+    "maximum_total_resource_cost_usd": 3.0,
+    "persistent_storage": false,
+    "terminate_pod_and_ephemeral_storage_after_local_artifact_sync": true
+  },
+  "interpretation": "This amendment changes hardware and the resource ceiling only. It was frozen before a pod was successfully created and before any campaign output or model response was observed."
+}
