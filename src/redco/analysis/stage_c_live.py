@@ -152,7 +152,7 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
         branch_temperatures = [
             record.get("branch_temperature") for record in branches
         ]
-        if branch_temperatures != [4.0, 4.0, 4.0, 4.0]:
+        if branch_temperatures != [2.0, 2.0, 2.0, 2.0]:
             raise ValueError("episode did not use the frozen behavior temperature")
         parsed_actions = [record.get("parsed_action") for record in branches]
         canonical_actions = [record.get("canonical_action") for record in branches]

@@ -49,7 +49,7 @@ def _fixture(tmp_path: Path) -> Path:
                             "action_seed": index + (100 if episode == "episode-a" else 200),
                             "branch_cache_salt": f"{episode}-salt-{index}",
                             "action_token_id": 15 + index,
-                            "branch_temperature": 4.0,
+                            "branch_temperature": 2.0,
                             "parsed_action": f"alias-{index}",
                             "canonical_action": f"action-{index}",
                             "full_suffix_reward": float(index),

@@ -156,7 +156,7 @@ class RedcoCreditEnvConfig(vf.EnvConfig):
     alternative_3: vf.AgentConfig = vf.AgentConfig(max_turns=1)
     branching_enabled: bool = True
     replay_mode: Literal["full_suffix", "sliced"] = "sliced"
-    branch_temperature: float = Field(1.0, gt=0)
+    branch_temperature: float = Field(1.0, gt=0, le=2.0)
 
 
 class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
@@ -177,7 +177,8 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             f"below; do not modify it:\n<context>{context.last_reply}</context>\n"
             "Choose one allowed action. Reply with exactly one digit and no other "
             f"text. Allowed digits: {', '.join(data.actions)}. The decoder samples "
-            "one token from this finite action set."
+            "one token from the model's complete vocabulary; any other token is "
+            "retained as an invalid action and receives the failure reward."
         )
         branch_task = RedcoCreditTask(
             data.model_copy(
