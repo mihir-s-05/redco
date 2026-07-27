@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-smoke-v5",
+  "amendment": "v5.1",
+  "status": "frozen_before_repository_sync_and_before_any_model_call",
+  "frozen_at_local_date": "2026-07-27",
+  "reason": "The provisioned generic A6000 image exposes /workspace as root-owned. The ubuntu SSH user could not create /workspace/redco, so the initial mkdir and both file transfers failed before repository sync, dependency installation, GPU use, or any model call.",
+  "logistics_change": {
+    "remote_repository_root": {
+      "from": "/workspace/redco",
+      "to": "/home/ubuntu/redco"
+    },
+    "runner_environment": {
+      "REDCO_REPO_ROOT": "/home/ubuntu/redco"
+    }
+  },
+  "unchanged": [
+    "all source hashes",
+    "model and LoRA configuration",
+    "behavior action distribution",
+    "temperature",
+    "run seed",
+    "sample counts",
+    "decision rule",
+    "hardware resource",
+    "cost and lifetime caps",
+    "training timeout",
+    "one-v5-run policy",
+    "zero persistent disks"
+  ],
+  "pre_amendment_observation": {
+    "repository_files_synced": 0,
+    "dependencies_installed": false,
+    "model_calls": 0,
+    "gpu_work_started": false
+  }
+}
