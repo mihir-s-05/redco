@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from redco.env.tasks.credit_probes import (
+    credit_probe_by_name,
     planted_needle,
     redundancy,
     spurious_correlation,
@@ -40,3 +41,13 @@ def test_standard_probe_suite_covers_dependency_traps() -> None:
         "resource_dependency_trap",
     } <= names
     assert all(probe.q_values(range(1, 101)) for probe in probes)
+
+
+def test_restricted_probe_replay_is_exact_and_invalid_actions_are_scored() -> None:
+    for probe in standard_credit_probes():
+        for action in (*probe.actions, None, "invalid-action"):
+            full = probe.replay_reward(action, 7, mode="full_suffix")
+            sliced = probe.replay_reward(action, 7, mode="sliced")
+            assert sliced == full
+        assert probe.replay_reward(None, 7, mode="sliced") == 0.0
+        assert credit_probe_by_name(probe.name).actions == probe.actions

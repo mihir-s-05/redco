@@ -1,0 +1,71 @@
+max_steps = 1
+seq_len = 512
+
+[deployment]
+num_train_gpus = 1
+num_infer_gpus = 1
+
+[model]
+name = "Qwen/Qwen3-4B-Instruct-2507"
+
+[trainer.model.ac]
+freq = 1
+
+[trainer.model.lora]
+rank = 32
+alpha = 64
+
+[trainer.optim]
+lr = 1e-5
+
+[trainer.loss]
+type = "custom"
+import_path = "prime_rl.trainer.rl.redco_loss.clean_decision_loss"
+kwargs = { kl_tau = 0.001 }
+
+[orchestrator]
+batch_size = 10
+group_size = 2
+max_inflight_rollouts = 2
+max_off_policy_steps = 0
+
+[orchestrator.algo]
+type = "redco"
+branch_group_size = 4
+continuations = 1
+eta = 1
+cost_penalty = 0
+replay_mode = "sliced"
+
+[orchestrator.train.sampling]
+temperature = 0.7
+max_completion_tokens = 64
+
+[[orchestrator.train.env]]
+name = "redco-credit"
+env.id = "redco-credit-v1"
+env.taskset = { id = "redco-credit-v1", repeats_per_probe = 2, exogenous_seed_offset = 1000 }
+env.replay_mode = "sliced"
+env.context.harness = { id = "null", runtime = { type = "subprocess" } }
+env.original.harness = { id = "null", runtime = { type = "subprocess" } }
+env.alternative_1.harness = { id = "null", runtime = { type = "subprocess" } }
+env.alternative_2.harness = { id = "null", runtime = { type = "subprocess" } }
+env.alternative_3.harness = { id = "null", runtime = { type = "subprocess" } }
+
+[ckpt]
+
+[trainer.ckpt]
+weights_only = true
+
+[trainer.ckpt.weights]
+save_adapter_separately = true
+
+[inference]
+gpu_memory_utilization = 0.7
+seed = 72026
+
+[inference.model]
+max_model_len = 512
+
+[weight_broadcast]
+type = "filesystem"

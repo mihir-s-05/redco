@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from math import fsum
+from typing import Literal
 
 RewardFunction = Callable[[str, int], float]
 
@@ -34,6 +35,33 @@ class FiniteCreditProbe:
         q_values = self.q_values(exogenous_seeds)
         value = fsum(q_values.values()) / len(q_values)
         return {action: q_value - value for action, q_value in q_values.items()}
+
+    def replay_reward(
+        self,
+        action: str | None,
+        exogenous_seed: int,
+        *,
+        mode: Literal["full_suffix", "sliced"],
+    ) -> float:
+        """Execute one depth-one intervention under the Stage-C replay contract.
+
+        These restricted probes have exactly one action-dependent descendant:
+        the deterministic reward node. Full-suffix replay visits that complete
+        suffix while sliced replay visits its dynamic descendant closure; the two
+        sets coincide here. Invalid actions execute as failures with reward zero.
+        """
+        if mode not in {"full_suffix", "sliced"}:
+            raise ValueError(f"unsupported replay mode: {mode}")
+        if action not in self.actions:
+            return 0.0
+        return float(self.reward_function(action, exogenous_seed))
+
+
+def credit_probe_by_name(name: str) -> FiniteCreditProbe:
+    try:
+        return {probe.name: probe for probe in standard_credit_probes()}[name]
+    except KeyError as error:
+        raise ValueError(f"unknown credit probe: {name}") from error
 
 
 def planted_needle(*, chunk_count: int, needle_chunk: int) -> FiniteCreditProbe:
