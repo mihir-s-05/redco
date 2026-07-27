@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from redco.analysis.stage_c_live import verify_smoke
+from redco.analysis.stage_c_live import smoke_verification_report, verify_smoke
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
@@ -19,6 +19,7 @@ def _fixture(tmp_path: Path) -> Path:
         target = f"{episode}:target"
         trace_rows.append(
             {
+                "id": f"{episode}-context",
                 "agent": {"name": "context"},
                 "info": {
                     "episode_id": episode,
@@ -33,6 +34,7 @@ def _fixture(tmp_path: Path) -> Path:
         for index in range(4):
             trace_rows.append(
                 {
+                    "id": f"{episode}-branch-{index}",
                     "agent": {"name": f"branch-{index}"},
                     "info": {
                         "episode_id": episode,
@@ -44,11 +46,13 @@ def _fixture(tmp_path: Path) -> Path:
                             "selected_pre_action": True,
                             "replay_equivalent": True,
                             "checkpoint_contract": "episode-policy-version",
+                            "action_seed": index + (100 if episode == "episode-a" else 200),
                         },
                     },
                 }
             )
     _write_jsonl(rollouts / "train" / "all" / "traces.jsonl", trace_rows)
+    _write_jsonl(rollouts / "train" / "effective" / "traces.jsonl", trace_rows)
     _write_jsonl(output / "metrics.jsonl", [{"step": 1, "optim/grad_norm": 0.25}])
     (rollouts / "train_rollouts.bin").write_bytes(b"batch")
     adapter = output / "broadcasts" / "step_1" / "adapter_model.safetensors"
@@ -66,7 +70,7 @@ def test_verify_smoke_accepts_complete_snapshot(tmp_path: Path) -> None:
 
 def test_verify_smoke_rejects_replay_disagreement(tmp_path: Path) -> None:
     run_dir = _fixture(tmp_path)
-    traces = next(run_dir.glob("**/train/all/traces.jsonl"))
+    traces = next(run_dir.glob("**/train/effective/traces.jsonl"))
     rows = [json.loads(line) for line in traces.read_text().splitlines()]
     rows[1]["info"]["redco"]["replay_equivalent"] = False
     _write_jsonl(traces, rows)
@@ -76,3 +80,14 @@ def test_verify_smoke_rejects_replay_disagreement(tmp_path: Path) -> None:
         assert "replay equivalence" in str(error)
     else:
         raise AssertionError("expected replay disagreement to fail")
+
+
+def test_smoke_verification_report_records_missing_artifact_failure(
+    tmp_path: Path,
+) -> None:
+    report = smoke_verification_report(tmp_path)
+
+    assert report["status"] == "fail"
+    assert report["error"]["type"] == "ValueError"
+    assert "metrics.jsonl" in report["error"]["message"]
+    assert len(report["signed_payload_sha256"]) == 64

@@ -2,18 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import re
+from dataclasses import replace
 from typing import Literal
 
 import verifiers.v1 as vf
 from pydantic import Field
 
+from redco.contracts import SeedNamespace
 from redco.env.tasks.credit_probes import credit_probe_by_name, standard_credit_probes
 
 ACTION_PATTERN = re.compile(r"<action>\s*([^<\r\n]+?)\s*</action>", re.IGNORECASE)
+SELF_TAG_PATTERN = re.compile(
+    r"<([A-Za-z0-9_.:-]+)>\s*</\1>",
+    re.IGNORECASE,
+)
 ROUTE_PATTERN = re.compile(r"<route>\s*([^<\r\n]+?)\s*</route>", re.IGNORECASE)
 ROLE_ORDER = ("original", "alternative_1", "alternative_2", "alternative_3")
 ROUTES = ("alpha", "beta", "gamma", "delta")
 ROUTE_REWARD = {"alpha": -0.25, "beta": 0.0, "gamma": 0.25, "delta": 0.5}
+BRANCH_SEED_MASTER = "redco-stage-c-branch-v1"
 
 
 class RedcoCreditData(vf.TaskData):
@@ -27,11 +34,41 @@ class RedcoCreditData(vf.TaskData):
 def parse_action(reply: str | None, actions: tuple[str, ...]) -> str | None:
     if reply is None:
         return None
-    matches = ACTION_PATTERN.findall(reply)
-    if not matches:
+    candidates = [match.strip() for match in ACTION_PATTERN.findall(reply)]
+    candidates.extend(match.strip() for match in SELF_TAG_PATTERN.findall(reply))
+    if not candidates or any(candidate not in actions for candidate in candidates):
         return None
-    action = matches[-1].strip()
-    return action if action in actions else None
+    unique = set(candidates)
+    return next(iter(unique)) if len(unique) == 1 else None
+
+
+def branch_sampling(
+    base: vf.SamplingConfig,
+    *,
+    seed: int,
+    cache_salt_suffix: str,
+) -> vf.SamplingConfig:
+    """Return an episode-local sampling config for one branch role."""
+    raw = base.model_dump(exclude_none=True)
+    extra_body = dict(raw.pop("extra_body", None) or {})
+    parent_salt = extra_body.get("cache_salt")
+    extra_body["cache_salt"] = (
+        f"{parent_salt}:redco:{cache_salt_suffix}"
+        if parent_salt is not None
+        else f"redco:{cache_salt_suffix}"
+    )
+    raw["seed"] = seed
+    raw["extra_body"] = extra_body
+    return vf.SamplingConfig(**raw)
+
+
+def _branch_seed_namespace(context_id: str, target_node_id: str) -> SeedNamespace:
+    return SeedNamespace(
+        master_seed=BRANCH_SEED_MASTER,
+        rollout_id=context_id,
+        target_id=target_node_id,
+        replicate=1,
+    )
 
 
 def parse_route(reply: str | None) -> str | None:
@@ -125,6 +162,7 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
         context = await agents.context.run(task)
         data = task.data
         context_route = parse_route(context.last_reply)
+        target_node_id = f"{data.name}:depth-one-subcall"
         branch_prompt = (
             "You are the trainable depth-one sub-call in a deterministic "
             "credit-assignment probe. The already-sampled root context is quoted "
@@ -143,6 +181,18 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
         if not self.config.branching_enabled:
             await agents.original.run(branch_task)
             return
+        seed_namespace = _branch_seed_namespace(context.id, target_node_id)
+        for branch_index, role in enumerate(ROLE_ORDER):
+            agent = getattr(agents, role)
+            seed = seed_namespace.action_seed(branch_index + 1)
+            agent.ctx = replace(
+                agent.ctx,
+                sampling=branch_sampling(
+                    agent.ctx.sampling,
+                    seed=seed,
+                    cache_salt_suffix=f"{context.id}:{role}",
+                ),
+            )
         async with asyncio.TaskGroup() as task_group:
             for role in ROLE_ORDER:
                 task_group.create_task(getattr(agents, role).run(branch_task))
@@ -171,6 +221,7 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             raise ValueError("episode is missing a declared ReDCO branch role")
 
         target_node_id: str | None = None
+        context = by_role["context"]
         for branch_index, role in enumerate(ROLE_ORDER):
             trace = by_role[role]
             data = trace.task.data
@@ -200,6 +251,23 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             if trace.rewards.get("deterministic_reward") != expected_reward:
                 raise RuntimeError("task reward differs from replayed branch reward")
             target_node_id = f"{data.name}:depth-one-subcall"
+            expected_seed = _branch_seed_namespace(
+                context.id,
+                target_node_id,
+            ).action_seed(branch_index + 1)
+            sampling = trace.agent.sampling if trace.agent is not None else None
+            sampling_payload = (
+                sampling.model_dump(exclude_none=True)
+                if sampling is not None
+                else {}
+            )
+            if sampling_payload.get("seed") != expected_seed:
+                raise RuntimeError("branch trace did not preserve its structural seed")
+            extra_body = sampling_payload.get("extra_body")
+            if not isinstance(extra_body, dict) or not isinstance(
+                extra_body.get("cache_salt"), str
+            ):
+                raise RuntimeError("branch trace did not preserve its cache salt")
             trace.info["redco"] = {
                 "schema_version": 1,
                 "record_kind": "branch",
@@ -220,6 +288,8 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
                 "sliced_reward": sliced_reward,
                 "parsed_action": displayed_action,
                 "canonical_action": action,
+                "action_seed": expected_seed,
+                "branch_cache_salt": extra_body["cache_salt"],
                 "context_route": data.context_route,
                 "outer_weight": 1.0,
                 "checkpoint_contract": "episode-policy-version",
@@ -244,7 +314,6 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
                 2.0,
             )
 
-        context = by_role["context"]
         original_reward = by_role["original"].reward
         context.record_reward("trajectory_reward", original_reward)
         context.info["redco"] = {

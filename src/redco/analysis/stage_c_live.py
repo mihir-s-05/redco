@@ -39,8 +39,11 @@ def _single_match(run_dir: Path, pattern: str) -> Path:
 
 def verify_smoke(run_dir: Path) -> dict[str, Any]:
     metrics_path = _single_match(run_dir, "**/metrics.jsonl")
-    traces_path = _single_match(
+    all_traces_path = _single_match(
         run_dir, "**/rollouts/step_1/train/all/traces.jsonl"
+    )
+    effective_traces_path = _single_match(
+        run_dir, "**/rollouts/step_1/train/effective/traces.jsonl"
     )
     batch_path = _single_match(
         run_dir, "**/rollouts/step_1/train_rollouts.bin"
@@ -49,9 +52,41 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
         run_dir, "**/broadcasts/step_1/adapter_model.safetensors"
     )
 
-    traces = _read_jsonl(traces_path)
+    all_traces = _read_jsonl(all_traces_path)
+    traces = _read_jsonl(effective_traces_path)
     if len(traces) != 10:
-        raise ValueError(f"smoke must serialize exactly 10 traces, found {len(traces)}")
+        raise ValueError(
+            f"smoke must serialize exactly 10 effective traces, found {len(traces)}"
+        )
+    if len(all_traces) < len(traces) or len(all_traces) % 5 != 0:
+        raise ValueError("collected smoke traces must contain complete five-trace episodes")
+    effective_ids = {trace.get("id") for trace in traces}
+    all_ids = {trace.get("id") for trace in all_traces}
+    if (
+        None in effective_ids
+        or len(effective_ids) != len(traces)
+        or len(all_ids) != len(all_traces)
+        or not effective_ids <= all_ids
+    ):
+        raise ValueError("effective smoke traces are not a subset of collected traces")
+    collected_episodes: dict[str, list[dict[str, Any]]] = {}
+    for trace in all_traces:
+        info = trace.get("info")
+        if not isinstance(info, dict):
+            raise ValueError("collected trace is missing info metadata")
+        episode_id = info.get("episode_id")
+        redco = info.get("redco")
+        if (
+            not isinstance(episode_id, str)
+            or not episode_id
+            or not isinstance(redco, dict)
+        ):
+            raise ValueError("collected trace is missing its Stage C episode record")
+        if info.get("policy_version") != 0:
+            raise ValueError("collected smoke trace is not from snapshot version 0")
+        collected_episodes.setdefault(episode_id, []).append(trace)
+    if any(len(episode) != 5 for episode in collected_episodes.values()):
+        raise ValueError("collected smoke episode is not a complete five-trace group")
 
     policy_versions: set[int] = set()
     episodes: dict[str, list[dict[str, Any]]] = {}
@@ -100,6 +135,11 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
         target_ids = {record.get("target_node_id") for record in redco_records}
         if len(target_ids) != 1 or None in target_ids:
             raise ValueError("episode target identity is inconsistent")
+        action_seeds = [record.get("action_seed") for record in branches]
+        if not all(isinstance(seed, int) for seed in action_seeds):
+            raise ValueError("episode is missing a structural action seed")
+        if len(set(action_seeds)) != 4:
+            raise ValueError("episode branch action seeds are not distinct")
 
     if not all(record.get("selected_pre_action") is True for record in branch_records):
         raise ValueError("a target was not committed before its action")
@@ -126,7 +166,8 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
 
     files = {
         "metrics": metrics_path,
-        "traces": traces_path,
+        "all_traces": all_traces_path,
+        "effective_traces": effective_traces_path,
         "train_batch": batch_path,
         "adapter": adapter_path,
     }
@@ -138,6 +179,9 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
         "checks": {
             "optimizer_steps": 1,
             "policy_versions": sorted(policy_versions),
+            "collected_traces": len(all_traces),
+            "collected_episodes": len(collected_episodes),
+            "effective_traces": len(traces),
             "episodes": len(episodes),
             "branch_records": len(branch_records),
             "context_records": len(context_records),
@@ -161,14 +205,36 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
     return payload
 
 
+def smoke_verification_report(run_dir: Path) -> dict[str, Any]:
+    """Return a signed pass/fail record, including failures before artifact creation."""
+    try:
+        return verify_smoke(run_dir)
+    except Exception as error:
+        payload: dict[str, Any] = {
+            "schema_version": 1,
+            "gate": "stage-c-live-smoke",
+            "status": "fail",
+            "run_dir": run_dir.as_posix(),
+            "error": {
+                "type": type(error).__name__,
+                "message": str(error),
+            },
+        }
+        signed = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        payload["signed_payload_sha256"] = hashlib.sha256(signed).hexdigest()
+        return payload
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Verify the frozen Stage C live smoke")
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    report = verify_smoke(args.run_dir)
+    report = smoke_verification_report(args.run_dir)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    if report["status"] != "pass":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

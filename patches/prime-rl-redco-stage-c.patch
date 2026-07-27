@@ -75,10 +75,10 @@ index 8d1baa60a..c2e014d2d 100644
      "build_algorithm",
 diff --git a/src/prime_rl/orchestrator/algo/redco.py b/src/prime_rl/orchestrator/algo/redco.py
 new file mode 100644
-index 000000000..4dfdc91d2
+index 000000000..b7e844fc4
 --- /dev/null
 +++ b/src/prime_rl/orchestrator/algo/redco.py
-@@ -0,0 +1,173 @@
+@@ -0,0 +1,182 @@
 +from __future__ import annotations
 +
 +from collections import defaultdict
@@ -139,7 +139,7 @@ index 000000000..4dfdc91d2
 +    def __init__(self, config: RedcoAlgoConfig, policy_pool: InferencePool):
 +        super().__init__(config, policy_pool)
 +        self.replay_mode = config.replay_mode
-+        self._scored_policy_versions: set[int] = set()
++        self._latest_policy_version: int | None = None
 +
 +    async def score_group(self, group: list[Rollout]) -> None:
 +        policy_versions = {rollout.policy_version for rollout in group}
@@ -148,9 +148,18 @@ index 000000000..4dfdc91d2
 +        if any(rollout.off_policy_steps != 0 for rollout in group):
 +            raise ValueError("clean Stage C refuses off-policy rollouts")
 +        (policy_version,) = policy_versions
-+        if policy_version in self._scored_policy_versions:
-+            raise ValueError("clean Stage C permits one collected group per snapshot")
-+        self._scored_policy_versions.add(policy_version)
++        if (
++            self._latest_policy_version is not None
++            and policy_version < self._latest_policy_version
++        ):
++            raise ValueError(
++                "clean Stage C refuses a stale policy snapshot after version advance"
++            )
++        if (
++            self._latest_policy_version is None
++            or policy_version > self._latest_policy_version
++        ):
++            self._latest_policy_version = policy_version
 +
 +        by_episode: dict[str, list[Rollout]] = defaultdict(list)
 +        for rollout in group:
@@ -563,7 +572,7 @@ index 121da68d9..9d697fe00 100644
      run_id: str | None = None
      run_step: int | None = None
 diff --git a/tests/unit/orchestrator/test_advantage.py b/tests/unit/orchestrator/test_advantage.py
-index 153a08bc2..c6bd06774 100644
+index 153a08bc2..fac3b2bdd 100644
 --- a/tests/unit/orchestrator/test_advantage.py
 +++ b/tests/unit/orchestrator/test_advantage.py
 @@ -7,9 +7,11 @@ from prime_rl.configs.algorithm import (
@@ -578,7 +587,7 @@ index 153a08bc2..c6bd06774 100644
  from prime_rl.orchestrator.trajectories import trace_to_samples
  from prime_rl.orchestrator.types import Rollout
  
-@@ -183,6 +185,67 @@ def test_max_rl_mean_normalized():
+@@ -183,6 +185,75 @@ def test_max_rl_mean_normalized():
      assert _max_rl(_make_group(rewards=[1.0, 1.0])) == pytest.approx([0.0, 0.0])
  
  
@@ -639,7 +648,15 @@ index 153a08bc2..c6bd06774 100644
 +            assert sample.rl_weights == [0.0, 0.25, 0.25]
 +            assert sample.rl_normalizer == 0.25
 +
-+    with pytest.raises(ValueError, match="one collected group per snapshot"):
++    # Prime may collect several usable groups before one optimizer update. Reusing
++    # the current snapshot is valid; reopening it after an advance is not.
++    asyncio.run(algorithm.finalize_group(group))
++    for rollout in group:
++        rollout.policy_version = 8
++    asyncio.run(algorithm.finalize_group(group))
++    for rollout in group:
++        rollout.policy_version = 7
++    with pytest.raises(ValueError, match="stale policy snapshot"):
 +        asyncio.run(algorithm.finalize_group(group))
 +
 +
