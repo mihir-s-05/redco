@@ -47,6 +47,10 @@ def _fixture(tmp_path: Path) -> Path:
                             "replay_equivalent": True,
                             "checkpoint_contract": "episode-policy-version",
                             "action_seed": index + (100 if episode == "episode-a" else 200),
+                            "branch_cache_salt": f"{episode}-salt-{index}",
+                            "parsed_action": f"alias-{index}",
+                            "canonical_action": f"action-{index}",
+                            "full_suffix_reward": float(index),
                         },
                     },
                 }

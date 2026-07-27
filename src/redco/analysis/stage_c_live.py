@@ -120,6 +120,7 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
     if len(branch_records) != 8 or len(context_records) != 2:
         raise ValueError("smoke must contain eight branch and two context records")
 
+    episodes_with_branch_signal = 0
     for episode in episodes.values():
         redco_records = [trace["info"]["redco"] for trace in episode]
         branches = [
@@ -140,6 +141,28 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
             raise ValueError("episode is missing a structural action seed")
         if len(set(action_seeds)) != 4:
             raise ValueError("episode branch action seeds are not distinct")
+        cache_salts = [record.get("branch_cache_salt") for record in branches]
+        if not all(isinstance(salt, str) and salt for salt in cache_salts):
+            raise ValueError("episode is missing an auditable branch cache salt")
+        if len(set(cache_salts)) != 4:
+            raise ValueError("episode branch cache salts are not distinct")
+        parsed_actions = [record.get("parsed_action") for record in branches]
+        canonical_actions = [record.get("canonical_action") for record in branches]
+        if not all(isinstance(action, str) and action for action in parsed_actions):
+            raise ValueError("effective episode contains an invalid displayed action")
+        if not all(isinstance(action, str) and action for action in canonical_actions):
+            raise ValueError("effective episode contains an invalid canonical action")
+        branch_rewards = [record.get("full_suffix_reward") for record in branches]
+        if not all(
+            isinstance(reward, (int, float)) and math.isfinite(float(reward))
+            for reward in branch_rewards
+        ):
+            raise ValueError("effective episode contains an invalid branch reward")
+        if len({float(reward) for reward in branch_rewards}) > 1:
+            episodes_with_branch_signal += 1
+
+    if episodes_with_branch_signal < 1:
+        raise ValueError("effective smoke batch has no counterfactual branch signal")
 
     if not all(record.get("selected_pre_action") is True for record in branch_records):
         raise ValueError("a target was not committed before its action")
@@ -185,6 +208,7 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
             "episodes": len(episodes),
             "branch_records": len(branch_records),
             "context_records": len(context_records),
+            "episodes_with_branch_signal": episodes_with_branch_signal,
             "all_targets_precommitted": True,
             "all_replays_equivalent": True,
             "grad_norm": grad_norm,
