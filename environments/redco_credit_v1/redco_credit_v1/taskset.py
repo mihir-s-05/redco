@@ -21,6 +21,7 @@ ROLE_ORDER = ("original", "alternative_1", "alternative_2", "alternative_3")
 ROUTES = ("alpha", "beta", "gamma", "delta")
 ROUTE_REWARD = {"alpha": -0.25, "beta": 0.0, "gamma": 0.25, "delta": 0.5}
 BRANCH_SEED_MASTER = "redco-stage-c-branch-v1"
+QWEN_DIGIT_TOKEN_IDS = {str(digit): 15 + digit for digit in range(10)}
 
 
 class RedcoCreditData(vf.TaskData):
@@ -34,6 +35,9 @@ class RedcoCreditData(vf.TaskData):
 def parse_action(reply: str | None, actions: tuple[str, ...]) -> str | None:
     if reply is None:
         return None
+    exact = reply.strip()
+    if exact in actions:
+        return exact
     candidates = [match.strip() for match in ACTION_PATTERN.findall(reply)]
     candidates.extend(match.strip() for match in SELF_TAG_PATTERN.findall(reply))
     if not candidates or any(candidate not in actions for candidate in candidates):
@@ -47,8 +51,14 @@ def branch_sampling(
     *,
     seed: int,
     cache_salt_suffix: str,
+    allowed_token_ids: tuple[int, ...],
+    temperature: float,
 ) -> vf.SamplingConfig:
     """Return an episode-local sampling config for one branch role."""
+    if not allowed_token_ids or len(set(allowed_token_ids)) != len(
+        allowed_token_ids
+    ):
+        raise ValueError("branch action token ids must be non-empty and distinct")
     raw = base.model_dump(exclude_none=True)
     extra_body = dict(raw.pop("extra_body", None) or {})
     parent_salt = extra_body.get("cache_salt")
@@ -58,6 +68,9 @@ def branch_sampling(
         else f"redco:{cache_salt_suffix}"
     )
     raw["seed"] = seed
+    raw["temperature"] = temperature
+    raw["max_tokens"] = 1
+    raw["allowed_token_ids"] = list(allowed_token_ids)
     raw["extra_body"] = extra_body
     return vf.SamplingConfig(**raw)
 
@@ -114,9 +127,9 @@ class RedcoCreditTaskset(
         tasks: list[RedcoSeedTask] = []
         index = 0
         for repeat in range(self.config.repeats_per_probe):
-            for probe_index, probe in enumerate(standard_credit_probes()):
+            for probe in standard_credit_probes():
                 action_map = tuple(
-                    (f"p{probe_index}_a{action_index}", action)
+                    (str(action_index), action)
                     for action_index, action in enumerate(probe.actions)
                 )
                 prompt = (
@@ -149,6 +162,7 @@ class RedcoCreditEnvConfig(vf.EnvConfig):
     alternative_3: vf.AgentConfig = vf.AgentConfig(max_turns=1)
     branching_enabled: bool = True
     replay_mode: Literal["full_suffix", "sliced"] = "sliced"
+    branch_temperature: float = Field(1.0, gt=0)
 
 
 class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
@@ -167,10 +181,9 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             "You are the trainable depth-one sub-call in a deterministic "
             "credit-assignment probe. The already-sampled root context is quoted "
             f"below; do not modify it:\n<context>{context.last_reply}</context>\n"
-            "Choose one allowed action. Your final reply must end with exactly "
-            "<action>VALUE</action>, replacing VALUE with one of: "
-            f"{', '.join(data.actions)}. Invalid values are executed and score "
-            "zero; they are never resampled."
+            "Choose one allowed action. Reply with exactly one digit and no other "
+            f"text. Allowed digits: {', '.join(data.actions)}. The decoder samples "
+            "one token from this finite action set."
         )
         branch_task = RedcoCreditTask(
             data.model_copy(
@@ -178,11 +191,14 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             ),
             task.config,
         )
-        if not self.config.branching_enabled:
-            await agents.original.run(branch_task)
-            return
         seed_namespace = _branch_seed_namespace(context.id, target_node_id)
-        for branch_index, role in enumerate(ROLE_ORDER):
+        allowed_token_ids = tuple(
+            QWEN_DIGIT_TOKEN_IDS[action] for action in data.actions
+        )
+        sampled_roles = (
+            ROLE_ORDER if self.config.branching_enabled else ("original",)
+        )
+        for branch_index, role in enumerate(sampled_roles):
             agent = getattr(agents, role)
             seed = seed_namespace.action_seed(branch_index + 1)
             agent.ctx = replace(
@@ -191,8 +207,13 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
                     agent.ctx.sampling,
                     seed=seed,
                     cache_salt_suffix=f"{context.id}:{role}",
+                    allowed_token_ids=allowed_token_ids,
+                    temperature=self.config.branch_temperature,
                 ),
             )
+        if not self.config.branching_enabled:
+            await agents.original.run(branch_task)
+            return
         async with asyncio.TaskGroup() as task_group:
             for role in ROLE_ORDER:
                 task_group.create_task(getattr(agents, role).run(branch_task))
@@ -263,6 +284,19 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             )
             if sampling_payload.get("seed") != expected_seed:
                 raise RuntimeError("branch trace did not preserve its structural seed")
+            expected_allowed_token_ids = [
+                QWEN_DIGIT_TOKEN_IDS[action] for action in data.actions
+            ]
+            if sampling_payload.get("max_tokens") != 1 or sampling_payload.get(
+                "allowed_token_ids"
+            ) != expected_allowed_token_ids:
+                raise RuntimeError(
+                    "branch trace did not preserve its categorical action space"
+                )
+            if sampling_payload.get("temperature") != self.config.branch_temperature:
+                raise RuntimeError(
+                    "branch trace did not preserve its categorical temperature"
+                )
             extra_body = sampling_payload.get("extra_body")
             if not isinstance(extra_body, dict) or not isinstance(
                 extra_body.get("cache_salt"), str
@@ -289,6 +323,8 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
                 "parsed_action": displayed_action,
                 "canonical_action": action,
                 "action_seed": expected_seed,
+                "allowed_token_ids": expected_allowed_token_ids,
+                "branch_temperature": self.config.branch_temperature,
                 "branch_cache_salt": extra_body["cache_salt"],
                 "context_route": data.context_route,
                 "outer_weight": 1.0,

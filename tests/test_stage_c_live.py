@@ -48,6 +48,8 @@ def _fixture(tmp_path: Path) -> Path:
                             "checkpoint_contract": "episode-policy-version",
                             "action_seed": index + (100 if episode == "episode-a" else 200),
                             "branch_cache_salt": f"{episode}-salt-{index}",
+                            "allowed_token_ids": [15, 16, 17, 18],
+                            "branch_temperature": 2.0,
                             "parsed_action": f"alias-{index}",
                             "canonical_action": f"action-{index}",
                             "full_suffix_reward": float(index),
