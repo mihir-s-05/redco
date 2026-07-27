@@ -277,6 +277,40 @@ index 400d078f7..66fcb05be 100644
          self.eval_source: EvalSource | None = (
              EvalSource(
                  self.eval_envs,
+diff --git a/src/prime_rl/orchestrator/train_sink.py b/src/prime_rl/orchestrator/train_sink.py
+index 2b135ae50..9e9e94af8 100644
+--- a/src/prime_rl/orchestrator/train_sink.py
++++ b/src/prime_rl/orchestrator/train_sink.py
+@@ -45,6 +45,14 @@ def payload_tokens(rollout: Rollout) -> int:
+     return sum(len(sample.token_ids) for sample in rollout.samples) or rollout.num_total_tokens
+ 
+ 
++def rollout_temperature(rollout: Rollout, fallback: float) -> float:
++    """Resolve the actual per-trace sampling temperature used by the policy."""
++    if rollout.agent is None:
++        return fallback
++    temperature = rollout.agent.sampling.temperature
++    return fallback if temperature is None else float(temperature)
++
++
+ class TrainSink:
+     """Three-level train sink. Constructed once, fed via ``add(rollout)``."""
+ 
+@@ -211,10 +219,11 @@ class TrainSink:
+         # owns the grouping mechanics.
+         await env.algorithm.finalize_group(survivors)
+ 
+-        # The env has a single sampling temperature; fan it out per token
+-        # (context tokens are masked out, so their temperature is don't-care).
+-        temperature = env.sampling_args["temperature"]
++        # Role-specific agents may override the environment sampling config.
++        # Preserve the exact behavior temperature recorded on each trace.
++        fallback_temperature = env.sampling_args["temperature"]
+         for r in survivors:
++            temperature = rollout_temperature(r, fallback_temperature)
+             for sample in r.samples:
+                 sample.temperatures = [temperature] * len(sample.token_ids)
+ 
 diff --git a/src/prime_rl/trainer/batch.py b/src/prime_rl/trainer/batch.py
 index 4eb8ff4ba..6c7a6e0c4 100644
 --- a/src/prime_rl/trainer/batch.py
@@ -711,6 +745,29 @@ index 8b4b31f7e..a14b06971 100644
  def test_prepare_sample_uniform_rl_keeps_streams_none(make_training_example):
      micro_batch = prepare_sample(make_training_example(), seq_len=16)
  
+diff --git a/tests/unit/orchestrator/test_rollout_temperature.py b/tests/unit/orchestrator/test_rollout_temperature.py
+new file mode 100644
+index 000000000..69d7cc9cf
+--- /dev/null
++++ b/tests/unit/orchestrator/test_rollout_temperature.py
+@@ -0,0 +1,17 @@
++from types import SimpleNamespace
++
++from prime_rl.orchestrator.train_sink import rollout_temperature
++
++
++def test_rollout_temperature_prefers_recorded_agent_sampling() -> None:
++    rollout = SimpleNamespace(
++        agent=SimpleNamespace(sampling=SimpleNamespace(temperature=4.0))
++    )
++
++    assert rollout_temperature(rollout, 0.7) == 4.0
++
++
++def test_rollout_temperature_falls_back_without_agent() -> None:
++    rollout = SimpleNamespace(agent=None)
++
++    assert rollout_temperature(rollout, 0.7) == 0.7
 diff --git a/tests/unit/train/rl/test_redco_frozen_batch_cpu.py b/tests/unit/train/rl/test_redco_frozen_batch_cpu.py
 new file mode 100644
 index 000000000..a0e02040e

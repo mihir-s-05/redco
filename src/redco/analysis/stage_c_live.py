@@ -146,30 +146,22 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
             raise ValueError("episode is missing an auditable branch cache salt")
         if len(set(cache_salts)) != 4:
             raise ValueError("episode branch cache salts are not distinct")
-        allowed_token_ids = [
-            record.get("allowed_token_ids") for record in branches
-        ]
-        if not all(
-            isinstance(token_ids, list)
-            and token_ids
-            and all(isinstance(token_id, int) for token_id in token_ids)
-            and len(set(token_ids)) == len(token_ids)
-            for token_ids in allowed_token_ids
-        ):
-            raise ValueError("episode is missing its categorical action token ids")
-        if any(token_ids != allowed_token_ids[0] for token_ids in allowed_token_ids):
-            raise ValueError("episode branches do not share one categorical action space")
+        action_token_ids = [record.get("action_token_id") for record in branches]
+        if not all(isinstance(token_id, int) for token_id in action_token_ids):
+            raise ValueError("episode is missing its one-token behavior actions")
         branch_temperatures = [
             record.get("branch_temperature") for record in branches
         ]
-        if branch_temperatures != [2.0, 2.0, 2.0, 2.0]:
-            raise ValueError("episode did not use the frozen categorical temperature")
+        if branch_temperatures != [4.0, 4.0, 4.0, 4.0]:
+            raise ValueError("episode did not use the frozen behavior temperature")
         parsed_actions = [record.get("parsed_action") for record in branches]
         canonical_actions = [record.get("canonical_action") for record in branches]
-        if not all(isinstance(action, str) and action for action in parsed_actions):
-            raise ValueError("effective episode contains an invalid displayed action")
-        if not all(isinstance(action, str) and action for action in canonical_actions):
-            raise ValueError("effective episode contains an invalid canonical action")
+        if not all(
+            (isinstance(parsed, str) and parsed and isinstance(canonical, str) and canonical)
+            or (parsed is None and canonical is None)
+            for parsed, canonical in zip(parsed_actions, canonical_actions, strict=True)
+        ):
+            raise ValueError("effective episode contains inconsistent action semantics")
         branch_rewards = [record.get("full_suffix_reward") for record in branches]
         if not all(
             isinstance(reward, (int, float)) and math.isfinite(float(reward))

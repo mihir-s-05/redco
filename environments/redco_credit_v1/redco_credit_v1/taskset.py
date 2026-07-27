@@ -21,7 +21,6 @@ ROLE_ORDER = ("original", "alternative_1", "alternative_2", "alternative_3")
 ROUTES = ("alpha", "beta", "gamma", "delta")
 ROUTE_REWARD = {"alpha": -0.25, "beta": 0.0, "gamma": 0.25, "delta": 0.5}
 BRANCH_SEED_MASTER = "redco-stage-c-branch-v1"
-QWEN_DIGIT_TOKEN_IDS = {str(digit): 15 + digit for digit in range(10)}
 
 
 class RedcoCreditData(vf.TaskData):
@@ -51,15 +50,11 @@ def branch_sampling(
     *,
     seed: int,
     cache_salt_suffix: str,
-    allowed_token_ids: tuple[int, ...],
     temperature: float,
 ) -> vf.SamplingConfig:
-    """Return an episode-local sampling config for one branch role."""
-    if not allowed_token_ids or len(set(allowed_token_ids)) != len(
-        allowed_token_ids
-    ):
-        raise ValueError("branch action token ids must be non-empty and distinct")
+    """Return an exact one-token behavior-policy config for one branch role."""
     raw = base.model_dump(exclude_none=True)
+    raw.pop("allowed_token_ids", None)
     extra_body = dict(raw.pop("extra_body", None) or {})
     parent_salt = extra_body.get("cache_salt")
     extra_body["cache_salt"] = (
@@ -70,7 +65,6 @@ def branch_sampling(
     raw["seed"] = seed
     raw["temperature"] = temperature
     raw["max_tokens"] = 1
-    raw["allowed_token_ids"] = list(allowed_token_ids)
     raw["extra_body"] = extra_body
     return vf.SamplingConfig(**raw)
 
@@ -192,9 +186,6 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             task.config,
         )
         seed_namespace = _branch_seed_namespace(context.id, target_node_id)
-        allowed_token_ids = tuple(
-            QWEN_DIGIT_TOKEN_IDS[action] for action in data.actions
-        )
         sampled_roles = (
             ROLE_ORDER if self.config.branching_enabled else ("original",)
         )
@@ -207,7 +198,6 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
                     agent.ctx.sampling,
                     seed=seed,
                     cache_salt_suffix=f"{context.id}:{role}",
-                    allowed_token_ids=allowed_token_ids,
                     temperature=self.config.branch_temperature,
                 ),
             )
@@ -284,19 +274,24 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             )
             if sampling_payload.get("seed") != expected_seed:
                 raise RuntimeError("branch trace did not preserve its structural seed")
-            expected_allowed_token_ids = [
-                QWEN_DIGIT_TOKEN_IDS[action] for action in data.actions
-            ]
-            if sampling_payload.get("max_tokens") != 1 or sampling_payload.get(
-                "allowed_token_ids"
-            ) != expected_allowed_token_ids:
+            if sampling_payload.get("max_tokens") != 1:
                 raise RuntimeError(
-                    "branch trace did not preserve its categorical action space"
+                    "branch trace did not preserve its one-token action space"
                 )
+            if sampling_payload.get("allowed_token_ids") is not None:
+                raise RuntimeError("branch trace unexpectedly constrained token support")
             if sampling_payload.get("temperature") != self.config.branch_temperature:
                 raise RuntimeError(
-                    "branch trace did not preserve its categorical temperature"
+                    "branch trace did not preserve its behavior temperature"
                 )
+            sampled_action_token_ids = [
+                token_id
+                for node in trace.nodes
+                for token_id, trainable in zip(node.token_ids, node.mask, strict=True)
+                if trainable
+            ]
+            if len(sampled_action_token_ids) != 1:
+                raise RuntimeError("branch action must contain exactly one sampled token")
             extra_body = sampling_payload.get("extra_body")
             if not isinstance(extra_body, dict) or not isinstance(
                 extra_body.get("cache_salt"), str
@@ -322,8 +317,8 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
                 "sliced_reward": sliced_reward,
                 "parsed_action": displayed_action,
                 "canonical_action": action,
+                "action_token_id": sampled_action_token_ids[0],
                 "action_seed": expected_seed,
-                "allowed_token_ids": expected_allowed_token_ids,
                 "branch_temperature": self.config.branch_temperature,
                 "branch_cache_salt": extra_body["cache_salt"],
                 "context_route": data.context_route,
