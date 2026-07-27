@@ -4,6 +4,7 @@ import pytest
 
 from redco.analysis.empirical_branch_replay import (
     _chat_tools,
+    _distinct_candidate_fractions,
     _openai_messages,
     _request_json,
     build_replay_indices,
@@ -68,6 +69,25 @@ def test_request_json_preserves_nested_schema_order() -> None:
         b'{"tools":[{"parameters":{"type":"object","properties":'
         b'{"code":{"type":"string"}},"required":["code"]}}]}'
     )
+
+
+def test_distinct_candidate_fractions_are_per_target() -> None:
+    assert _distinct_candidate_fractions(
+        {
+            "target-b": {"one"},
+            "target-a": {"one", "two"},
+        },
+        alternatives_per_target=4,
+    ) == {
+        "target-a": 0.5,
+        "target-b": 0.25,
+    }
+
+    with pytest.raises(ValueError, match="must be positive"):
+        _distinct_candidate_fractions(
+            {"target": set()},
+            alternatives_per_target=0,
+        )
 
 
 def test_replay_indices_isolate_descendants() -> None:

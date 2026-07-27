@@ -6,9 +6,11 @@ import argparse
 import copy
 import hashlib
 import json
+import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -104,6 +106,9 @@ class EmpiricalReplayReport:
     lossless_hybrid_preflight_exact: bool
     render_boundary: LosslessRenderBoundary
     distinct_candidate_actions_per_target: bool
+    minimum_distinct_candidate_fraction: float
+    distinct_candidate_fraction_by_target: dict[str, float]
+    distinct_candidate_gate_passed: bool
     deterministic_terminal_mismatches: int
     reward_mismatches: int
     cached_action_mismatches: int
@@ -459,9 +464,15 @@ def run_empirical_replay(
     temperature: float,
     candidate_max_tokens: int,
     continuation_max_tokens: int,
+    minimum_distinct_candidate_fraction: float = 1.0,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> EmpiricalReplayReport:
     if alternatives_per_target < 1:
         raise ValueError("alternatives_per_target must be positive")
+    if not 0 < minimum_distinct_candidate_fraction <= 1:
+        raise ValueError(
+            "minimum_distinct_candidate_fraction must be in (0, 1]"
+        )
     source_sha = hashlib.sha256(trace_path.read_bytes()).hexdigest()
     audit = audit_trace_file(trace_path)
     provenance = import_trace_file(trace_path)
@@ -689,6 +700,11 @@ def run_empirical_replay(
                     ),
                 )
             )
+            if progress_callback is not None:
+                progress_callback(
+                    len(pairs),
+                    len(target_calls) * alternatives_per_target,
+                )
 
     if final_call.event_seed is None:
         raise ValueError("final call has no event seed")
@@ -713,9 +729,17 @@ def run_empirical_replay(
         second_generation=repro_second,
     )
 
+    distinct_candidate_fractions = _distinct_candidate_fractions(
+        candidate_hashes_by_target,
+        alternatives_per_target=alternatives_per_target,
+    )
     distinct_candidates = all(
-        len(hashes) == alternatives_per_target
-        for hashes in candidate_hashes_by_target.values()
+        fraction == 1.0
+        for fraction in distinct_candidate_fractions.values()
+    )
+    distinct_candidate_gate_passed = all(
+        fraction >= minimum_distinct_candidate_fraction
+        for fraction in distinct_candidate_fractions.values()
     )
     terminal_mismatches = sum(not pair.terminal_artifacts_exact for pair in pairs)
     reward_mismatches = sum(not pair.rewards_exact for pair in pairs)
@@ -754,7 +778,7 @@ def run_empirical_replay(
     )
     sliced_fraction = sliced_visits / full_visits if full_visits else 0.0
     passed = (
-        distinct_candidates
+        distinct_candidate_gate_passed
         and len(pairs) == len(target_calls) * alternatives_per_target
         and terminal_mismatches == 0
         and reward_mismatches == 0
@@ -778,6 +802,11 @@ def run_empirical_replay(
         lossless_hybrid_preflight_exact=True,
         render_boundary=render_boundary,
         distinct_candidate_actions_per_target=distinct_candidates,
+        minimum_distinct_candidate_fraction=(
+            minimum_distinct_candidate_fraction
+        ),
+        distinct_candidate_fraction_by_target=distinct_candidate_fractions,
+        distinct_candidate_gate_passed=distinct_candidate_gate_passed,
         deterministic_terminal_mismatches=terminal_mismatches,
         reward_mismatches=reward_mismatches,
         cached_action_mismatches=cache_mismatches,
@@ -799,8 +828,13 @@ def run_empirical_replay(
         passed_representative_micro_gate=passed,
         gate_gb_cleared=False,
         limitations=(
-            "One recorded four-child trace and a micro campaign do not satisfy "
-            "Gate GB's thousands-of-interventions requirement.",
+            (
+                "One recorded four-child trace and a micro campaign do not "
+                "satisfy Gate GB's thousands-of-interventions requirement."
+                if len(pairs) < 1_000
+                else "Thousands of interventions still cover only four "
+                "depth-one states from one recorded fixed-topology trace."
+            ),
             "Exclusive GPU service wall time is reported as a proxy; kernel-level "
             "GPU seconds are not available from the pinned endpoint.",
             "The captured protocol has fixed topology under child-output "
@@ -809,6 +843,19 @@ def run_empirical_replay(
             "reproducibility is reported separately and is not a slicing gate.",
         ),
     )
+
+
+def _distinct_candidate_fractions(
+    hashes_by_target: dict[str, set[str]],
+    *,
+    alternatives_per_target: int,
+) -> dict[str, float]:
+    if alternatives_per_target < 1:
+        raise ValueError("alternatives_per_target must be positive")
+    return {
+        target_id: len(hashes) / alternatives_per_target
+        for target_id, hashes in sorted(hashes_by_target.items())
+    }
 
 
 def _sum_arm_costs(arms: Any) -> ActualEvaluationCost:
@@ -944,6 +991,12 @@ def main() -> int:
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--candidate-max-tokens", type=int, default=192)
     parser.add_argument("--continuation-max-tokens", type=int, default=96)
+    parser.add_argument(
+        "--minimum-distinct-candidate-fraction",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument("--progress-every", type=int, default=0)
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
     args = parser.parse_args()
     source_sha = hashlib.sha256(args.input.read_bytes()).hexdigest()
@@ -960,6 +1013,19 @@ def main() -> int:
         model=audit.calls[0].checkpoint_id,
         timeout_seconds=args.timeout_seconds,
     )
+    if args.progress_every < 0:
+        raise ValueError("progress_every must be non-negative")
+
+    def progress(completed: int, total: int) -> None:
+        if args.progress_every and (
+            completed % args.progress_every == 0 or completed == total
+        ):
+            print(
+                f"REDCO_REPLAY_PROGRESS={completed}/{total}",
+                file=sys.stderr,
+                flush=True,
+            )
+
     report = run_empirical_replay(
         trace_path=args.input,
         client=client,
@@ -968,6 +1034,10 @@ def main() -> int:
         temperature=args.temperature,
         candidate_max_tokens=args.candidate_max_tokens,
         continuation_max_tokens=args.continuation_max_tokens,
+        minimum_distinct_candidate_fraction=(
+            args.minimum_distinct_candidate_fraction
+        ),
+        progress_callback=progress,
     )
     payload = report.signed_dict()
     args.output.parent.mkdir(parents=True, exist_ok=True)
