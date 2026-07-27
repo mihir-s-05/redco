@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "status": "frozen_before_provisioning_and_live_observation",
+  "amends": "configs/stage-b/gate-gb-broad-live-amendment-4.json",
+  "reason": "A new non-spot Massed Compute A6000 48 GB resource appeared within the original $0.54/hour preference. This provider and GPU class successfully supported the prior frozen-model replay runs.",
+  "unchanged": [
+    "all experimental settings and hashes",
+    "all seeds, sample counts, margins, and confidence levels",
+    "one-campaign no-retry policy",
+    "three-hour runtime cap",
+    "SSH key and artifact-sync requirements"
+  ],
+  "resource": {
+    "resource_id": "ea69b8",
+    "cloud_id": "gpu_1x_a6000",
+    "gpu": "A6000_48GB",
+    "gpu_count": 1,
+    "provider": "massedcompute",
+    "data_center": "us-central-2",
+    "location": "US",
+    "spot": false,
+    "price_usd_per_hour": 0.54,
+    "vcpus": 6,
+    "memory_gb": 48,
+    "ephemeral_disk_gb": 256,
+    "image": "ubuntu_22_cuda_12",
+    "maximum_runtime_hours": 3,
+    "maximum_total_resource_cost_usd": 1.62,
+    "persistent_storage": false
+  },
+  "pre_provision_state": {
+    "active_pods": 0,
+    "persistent_disks": 0,
+    "campaign_model_calls": 0,
+    "live_observations": 0
+  },
+  "interpretation": "Only hardware and price change. This amendment was frozen before provisioning and before any model response was observed."
+}
