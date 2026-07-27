@@ -648,6 +648,79 @@ index 8b4b31f7e..a14b06971 100644
  def test_prepare_sample_uniform_rl_keeps_streams_none(make_training_example):
      micro_batch = prepare_sample(make_training_example(), seq_len=16)
  
+diff --git a/tests/unit/train/rl/test_redco_frozen_batch_cpu.py b/tests/unit/train/rl/test_redco_frozen_batch_cpu.py
+new file mode 100644
+index 000000000..a0e02040e
+--- /dev/null
++++ b/tests/unit/train/rl/test_redco_frozen_batch_cpu.py
+@@ -0,0 +1,67 @@
++import msgspec
++import pytest
++import torch
++
++from prime_rl.trainer.batch import prepare_batch
++from prime_rl.trainer.rl.loss import LossInputs
++from prime_rl.trainer.rl.redco_loss import clean_decision_loss
++from prime_rl.trainer.utils import build_bin_cost
++from prime_rl.transport import TrainingBatch, TrainingSample
++
++
++def _branch_sample(advantage: float) -> TrainingSample:
++    return TrainingSample(
++        token_ids=[10, 11, 20, 21],
++        mask=[False, False, True, True],
++        logprobs=[0.0, 0.0, -0.3, -0.4],
++        temperatures=[0.7, 0.7, 0.7, 0.7],
++        env_name="redco-credit",
++        rl_weights=[0.0, 0.0, 0.25, 0.25],
++        advantages=[0.0, 0.0, advantage, advantage],
++        rl_normalizer=0.25,
++    )
++
++
++def test_frozen_batch_roundtrip_preserves_clean_objective() -> None:
++    original = TrainingBatch(
++        examples=[
++            _branch_sample(1.0),
++            _branch_sample(-1.0),
++            _branch_sample(0.5),
++            _branch_sample(-0.5),
++        ],
++        step=1,
++    )
++
++    payload = msgspec.msgpack.encode(original)
++    decoded = msgspec.msgpack.decode(payload, type=TrainingBatch)
++    batches = prepare_batch(
++        rollouts=decoded.examples,
++        seq_len=16,
++        num_train_workers=1,
++        idxs=[0, 0, 0, 0],
++        num_loras=1,
++        bin_cost=build_bin_cost(None),
++    )
++
++    packed = [batch for worker in batches for batch in worker]
++    assert sum(sum(batch.rl_normalizers or []) for batch in packed) == 1.0
++    assert [sample.rl_normalizer for sample in decoded.examples] == [0.25] * 4
++
++    losses = []
++    for sample in decoded.examples:
++        logprobs = torch.tensor(sample.logprobs)
++        result = clean_decision_loss(
++            LossInputs(
++                trainer_logprobs=logprobs,
++                inference_logprobs=logprobs.clone(),
++                ref_logprobs=None,
++                advantages=torch.tensor(sample.advantages),
++                loss_mask=torch.tensor(sample.mask),
++                loss_weights=torch.tensor(sample.rl_weights),
++            ),
++            kl_tau=0.0,
++        )
++        losses.append(result.loss.item())
++
++    assert sum(losses) == pytest.approx(0.0)
 diff --git a/tests/unit/train/rl/test_redco_loss_cpu.py b/tests/unit/train/rl/test_redco_loss_cpu.py
 new file mode 100644
 index 000000000..5ac3301f1
