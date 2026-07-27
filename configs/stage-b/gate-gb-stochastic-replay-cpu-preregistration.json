@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "status": "frozen_before_campaign_observation",
+  "purpose": "Supply the stochastic-reward equivalence evidence missing from the deterministic Gate GB replay campaigns without consuming GPU resources.",
+  "scope": {
+    "programs": 500,
+    "alternatives_per_program": 50,
+    "paired_branches": 25000,
+    "reward_samples_per_arm": 25000,
+    "direct_route_samples_per_arm": 12500,
+    "recursive_route_samples_per_arm": 12500,
+    "program_seed": 20260727,
+    "master_seed": "redco-stage-b-stochastic-replay-gb-v1",
+    "route_allocation": "Programs alternate direct and recursive routes, yielding exactly balanced preregistered strata.",
+    "reward_model": "Terminal-dependent Bernoulli probability in [0.2, 0.8], with independent HMAC-derived full-suffix and sliced draws."
+  },
+  "equivalence_contract": {
+    "confidence": 0.9,
+    "overall_margin": 0.03,
+    "route_margin": 0.04,
+    "interval": "Two independent Bernoulli-arm Hoeffding intervals combined by a union bound.",
+    "overall_fixed_half_width": 0.0171787763338695,
+    "route_fixed_half_width": 0.0242944584763322,
+    "pass_rule": "The overall and both route-level confidence intervals must lie strictly within their frozen symmetric margins."
+  },
+  "mandatory_checks": {
+    "paired_branches": 25000,
+    "deterministic_state_mismatches": 0,
+    "minimum_topology_divergences": 1,
+    "overall_equivalence_passed": true,
+    "direct_route_equivalence_passed": true,
+    "recursive_route_equivalence_passed": true,
+    "report_signed": true
+  },
+  "implementation": {
+    "commit": "d8cff9da1edc529dcf1494cb85de511327874066",
+    "module": "src/redco/analysis/stochastic_replay_equivalence.py",
+    "module_sha256": "f67e37353d726914dab0d2e41f76b997f1c15e4720633c30c4dcc2d3c82f1fc9",
+    "command": "uv run --frozen python -m redco.analysis.stochastic_replay_equivalence --output reports/gate-gb-stochastic-replay-cpu-result-2026-07-26.json --master-seed redco-stage-b-stochastic-replay-gb-v1 --program-seed 20260727 --programs 500 --alternatives-per-program 50 --confidence 0.9 --overall-margin 0.03 --route-margin 0.04",
+    "package_manager": "uv",
+    "pip_used": false
+  },
+  "retry_policy": {
+    "campaigns": 1,
+    "post_observation_threshold_changes": false,
+    "post_observation_seed_changes": false,
+    "post_observation_automatic_retry": false
+  },
+  "resource_policy": {
+    "cpu_only": true,
+    "prime_resources": false,
+    "persistent_storage": false
+  },
+  "interpretation": {
+    "pass": "The randomized dynamic replay engine has distribution-free stochastic-reward equivalence at the frozen overall and route-level margins.",
+    "fail": "Record the failure without retrying or changing the frozen margins.",
+    "not_claimed": [
+      "live-model stochastic reward equivalence",
+      "training effectiveness",
+      "Gate GB clearance by this component alone"
+    ]
+  }
+}
