@@ -12,7 +12,7 @@ test -f "$config_path"
 test ! -e "$output_dir"
 
 test -s patches/prime-rl-redco-stage-c.patch
-git -C external/prime-rl apply --reverse --check \
+git -C external/prime-rl apply --no-index --reverse --check \
   "$repo_root/patches/prime-rl-redco-stage-c.patch"
 
 mkdir -p "$(dirname "$output_dir")"
