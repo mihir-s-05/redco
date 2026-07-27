@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-smoke-v2",
+  "amends": "configs/stage-c/gate-gc-live-smoke-amendment-v2-7.json",
+  "status": "frozen_after_pre_model_setup_failure_before_same_pod_relaunch",
+  "observed_setup_failure": {
+    "pod_id": "fec65e0f73204c6c8be93e4d597f9ca1",
+    "cause": "The tracked-file sparse bundle represented nested Prime git submodules as empty directories, so uv could not find deps/pydantic-config/pyproject.toml.",
+    "failure_stage": "uv local package discovery",
+    "model_calls": 0,
+    "trainer_process_started": false,
+    "output_directory_created": false,
+    "metrics_created": false,
+    "model_cache_bytes": 0,
+    "first_attempt_logs_preserved": true
+  },
+  "corrected_logistics": {
+    "bundle_contents": "All root experiment files plus all regular files from the Prime checkout and its initialized nested dependency submodules, excluding git metadata, virtual environments, caches, and historical outputs.",
+    "bundle_sha256": "194efc28cd9ca9301a45c0fafbcc2e7593a5ef07a4223cbb3bde6c4b63e1a119",
+    "bundle_files": 2309,
+    "bundle_bytes": 10518844,
+    "same_pod_relaunch_allowed": true,
+    "justification": "The failed command never reached dependency installation, model loading, inference, rollout generation, or training."
+  },
+  "unchanged": [
+    "hardware and hourly price",
+    "model and source hashes",
+    "environment and action mapping",
+    "seed and sample counts",
+    "optimizer and loss",
+    "decision rule and remaining cost cap",
+    "run-scoped SSH trust",
+    "zero persistent disks"
+  ]
+}
