@@ -17,6 +17,21 @@ def test_taskset_covers_every_probe_at_each_seed() -> None:
     assert len(tasks) == 16
     assert {task.data.exogenous_seed for task in tasks} == {10, 11}
     assert all("<route>VALUE</route>" in task.data.prompt for task in tasks)
+    assert all(
+        canonical not in task.data.actions
+        for task in tasks
+        for _, canonical in task.data.action_map
+    )
+    assert tasks[0].data.actions == (
+        "p0_a0",
+        "p0_a1",
+        "p0_a2",
+        "p0_a3",
+        "p0_a4",
+        "p0_a5",
+        "p0_a6",
+        "p0_a7",
+    )
 
 
 def test_action_parser_never_repairs_or_accepts_invalid_values() -> None:

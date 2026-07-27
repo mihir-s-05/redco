@@ -19,6 +19,7 @@ ROUTE_REWARD = {"alpha": -0.25, "beta": 0.0, "gamma": 0.25, "delta": 0.5}
 class RedcoCreditData(vf.TaskData):
     probe_name: str
     actions: tuple[str, ...]
+    action_map: tuple[tuple[str, str], ...]
     exogenous_seed: int
     context_route: str | None = None
 
@@ -51,7 +52,8 @@ class RedcoCreditTask(vf.Task[RedcoCreditData]):
     @vf.reward(weight=1.0)
     async def deterministic_reward(self, trace: vf.Trace) -> float:
         probe = credit_probe_by_name(self.data.probe_name)
-        action = parse_action(trace.last_reply, self.data.actions)
+        displayed_action = parse_action(trace.last_reply, self.data.actions)
+        action = dict(self.data.action_map).get(displayed_action)
         return probe.replay_reward(
             action,
             self.data.exogenous_seed,
@@ -75,7 +77,11 @@ class RedcoCreditTaskset(
         tasks: list[RedcoSeedTask] = []
         index = 0
         for repeat in range(self.config.repeats_per_probe):
-            for probe in standard_credit_probes():
+            for probe_index, probe in enumerate(standard_credit_probes()):
+                action_map = tuple(
+                    (f"p{probe_index}_a{action_index}", action)
+                    for action_index, action in enumerate(probe.actions)
+                )
                 prompt = (
                     "Choose a routing label for a later sub-call. The route adds a "
                     "deterministic background contribution to the final reward, "
@@ -89,7 +95,8 @@ class RedcoCreditTaskset(
                     name=f"{probe.name}-{repeat:04d}",
                     prompt=prompt,
                     probe_name=probe.name,
-                    actions=probe.actions,
+                    actions=tuple(alias for alias, _ in action_map),
+                    action_map=action_map,
                     exogenous_seed=self.config.exogenous_seed_offset + repeat,
                 )
                 tasks.append(RedcoSeedTask(data, self.config.task))
@@ -170,7 +177,8 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             if not isinstance(data, RedcoCreditData):
                 raise TypeError("ReDCO environment received an incompatible task")
             probe = credit_probe_by_name(data.probe_name)
-            action = parse_action(trace.last_reply, data.actions)
+            displayed_action = parse_action(trace.last_reply, data.actions)
+            action = dict(data.action_map).get(displayed_action)
             full_reward = probe.replay_reward(
                 action,
                 data.exogenous_seed,
@@ -210,7 +218,8 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
                 "replay_equivalent": equivalent,
                 "full_suffix_reward": full_reward,
                 "sliced_reward": sliced_reward,
-                "parsed_action": action,
+                "parsed_action": displayed_action,
+                "canonical_action": action,
                 "context_route": data.context_route,
                 "outer_weight": 1.0,
                 "checkpoint_contract": "episode-policy-version",
