@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-smoke",
+  "status": "frozen_before_resource_provisioning",
+  "frozen_at_local_date": "2026-07-26",
+  "scope": {
+    "purpose": "Prove that the 4B LoRA Stage C path completes one exact-snapshot ReDCO update before authorizing any learning campaign.",
+    "not_a_learning_claim": true,
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "config": "configs/stage-c/smoke-redco-sliced.toml",
+    "algorithm": "redco",
+    "replay_mode": "sliced",
+    "optimizer_steps": 1,
+    "episodes": 2,
+    "traces_per_episode": 5,
+    "branch_group": {
+      "n": 4,
+      "continuations": 1,
+      "eta": 1,
+      "cost_penalty": 0
+    }
+  },
+  "source": {
+    "parent_commit": "354e2cdff6b5d667f0146171a60f06c8cb88539f",
+    "prime_rl_commit": "3b22dd951cad1036d1fe8dd0a0bfc40807a9b360",
+    "prime_rl_remote": "https://github.com/PrimeIntellect-ai/prime-rl.git",
+    "sha256": {
+      "configs/stage-c/smoke-redco-sliced.toml": "7fe80a924aa05e3874c8d1298d1345e18d6dccf8f21ed55068d923f524f3914e",
+      "patches/prime-rl-redco-stage-c.patch": "bde30dac37294ce19dc45244df200e19b41939985a2a8627cdd3f24cf21ee222",
+      "scripts/run_stage_c_live.sh": "1efa75069cfdcdd406ede89534c95ad85f36ea3a4e0a1fcd9e17d8c5f23f2f5b",
+      "src/redco/analysis/stage_c_live.py": "99506bdd76cc80924057cbc3821f07ebaa4ac117e717031b4655f8c793b4c67a",
+      "src/redco/algo/training.py": "25eb8918118e5e670d04a473ea9b64f291c61516a395ff4218b99e1f1c29c3ee",
+      "src/redco/env/tasks/credit_probes.py": "99623bdb606813cd5b5906a8fc8c72f66ff2b22d9dccd2e5c7e2d69555f33473",
+      "environments/redco_credit_v1/pyproject.toml": "20e2fc3d0820c81f73e90cda941503627c3de392df5866f8c1bbe1cffd0eee03",
+      "environments/redco_credit_v1/redco_credit_v1/taskset.py": "385a6bf8724afc96855a21d0d39fc1420f19977340cd1b195b68657901380ce2",
+      "external/prime-rl/uv.lock": "188b23ec2c723b8ca0c8ca80278747e0628f680449061a5404622f39114d42f5"
+    }
+  },
+  "validated_before_freeze": {
+    "root_targeted_tests": 8,
+    "prime_and_environment_targeted_tests": 42,
+    "ruff": "pass",
+    "mypy": "pass",
+    "shell_parse": "pass",
+    "all_four_stage_c_configs_parse_as_pinned_rlconfig": true,
+    "prime_patch_reverse_apply_check": "pass"
+  },
+  "hardware": {
+    "resource_id": "2126e0",
+    "cloud_id": "l40s-48gb.2x",
+    "provider": "crusoecloud",
+    "location": "US",
+    "gpu_type": "L40S 48GB",
+    "gpu_count": 2,
+    "gpu_memory_total_gib": 96,
+    "is_spot": false,
+    "price_usd_per_hour": 2.0,
+    "availability_observed": "Available",
+    "prohibited": [
+      "A100",
+      "H100",
+      "persistent storage",
+      "a second simultaneous Stage C pod"
+    ]
+  },
+  "resource_policy": {
+    "wallet_before_usd": 45.3463,
+    "maximum_smoke_compute_usd": 3.0,
+    "maximum_pod_lifetime_minutes": 90,
+    "training_timeout_seconds": 3600,
+    "persistent_disks": 0,
+    "terminate_after_local_artifact_sync": true,
+    "terminate_immediately_if_ssh_preflight_fails": true,
+    "no_campaign_if_smoke_fails": true,
+    "new_resource_or_location_requires_committed_hardware_only_amendment": true
+  },
+  "ssh": {
+    "configured_private_key": "C:\\Users\\mihir\\.ssh\\id_rsa",
+    "public_fingerprint": "SHA256:LNuExn82n/p//myB4cc0pYv7yA1rzlbeI8Qyi6mXM3U",
+    "noninteractive_verification_required_after_provisioning": true
+  },
+  "execution": {
+    "package_manager": "uv",
+    "pip_prohibited": true,
+    "wandb_mode": "disabled",
+    "run_seed": 7202602,
+    "output": "runs/stage-c/gate-gc-live-smoke",
+    "all_raw_artifacts_must_be_local_before_termination": true
+  },
+  "decision_rule": {
+    "mandatory": [
+      "the frozen config, patch, runner, verifier, environment, and lock hashes match",
+      "exactly one optimizer step completes",
+      "exactly two complete episodes and ten traces are serialized",
+      "all traces use policy version zero",
+      "each episode contains one context and branch indices zero through three",
+      "every target is recorded as committed before action sampling",
+      "all eight branch records report exact sliced/full reward equivalence",
+      "the trainer batch is serialized",
+      "the optimizer gradient norm is finite and positive",
+      "a non-empty LoRA adapter is saved"
+    ],
+    "pass": "all mandatory conditions are true",
+    "failure": "stop, sync all available artifacts, terminate the pod, and do not start a learning arm"
+  }
+}
