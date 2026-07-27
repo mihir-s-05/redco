@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-smoke-v2",
+  "amends": [
+    "configs/stage-c/gate-gc-live-smoke-preregistration-v2.json",
+    "configs/stage-c/gate-gc-live-smoke-amendment-v2-1.json"
+  ],
+  "status": "frozen_before_resource_provisioning",
+  "reason": "The original CrusoeCloud 2xL40S grouped resource remained unallocatable. A cheaper qualifying non-spot 2xA6000 offer became available.",
+  "hardware_only": {
+    "previous_resource_id": "2126e0",
+    "resource_id": "ecdbb5",
+    "cloud_id": "gpu_2x_a6000",
+    "provider": "massedcompute",
+    "location": "US",
+    "gpu_type": "A6000 48GB",
+    "gpu_count": 2,
+    "gpu_memory_total_gib": 96,
+    "is_spot": false,
+    "price_usd_per_hour": 1.08,
+    "vcpus": 14,
+    "memory_gb": 96,
+    "ephemeral_boot_disk_gb": 512,
+    "image": "prime_rl",
+    "availability_observed_at": "2026-07-27T10:57:22-07:00"
+  },
+  "unchanged": [
+    "model and source hashes",
+    "environment and action mapping",
+    "seed and sample counts",
+    "optimizer and loss",
+    "decision rule",
+    "maximum smoke cost",
+    "maximum pod lifetime",
+    "zero persistent disks"
+  ]
+}
