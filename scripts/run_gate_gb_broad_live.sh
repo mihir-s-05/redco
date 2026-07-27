@@ -33,9 +33,9 @@ verify_sha256 "$inference_config" \
 verify_sha256 patches/prime-rl-strict-tool-env-guard.patch \
   "1c52102bf79741d8a1791733397de26d7319b907531317c22d5ec1e6cd29c001"
 verify_sha256 src/redco/analysis/empirical_branch_replay.py \
-  "4eba47358267820248e2f118633dd1252be71c8b882f46d40cc337e945a7176f"
+  "4be7db532627375e18a354bd6570a7b7a50a706e303bd844adde9110e344734e"
 verify_sha256 src/redco/analysis/gate_gb_aggregate.py \
-  "4386254c1e70e218040c979c1cd980a1e879cc4470b35e8d839b83b9951453d3"
+  "acc374c81153b532fb7906af38b39266a6f967ac129675a23125116a77bef772"
 verify_sha256 "$static_report" \
   "754eea47223d5076465c78d321cb7bb01ccba9647b19fdfac93df0232d3a3221"
 verify_sha256 "$dynamic_report" \

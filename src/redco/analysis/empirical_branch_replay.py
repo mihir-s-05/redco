@@ -6,6 +6,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import sys
 import time
 import urllib.error
@@ -60,6 +61,7 @@ class ReplayArmResult:
 class EmpiricalBranchPair:
     target_node_id: str
     target_call_index: int
+    target_agent_depth: int
     alternative_index: int
     action_seed: int
     continuation_seed: int
@@ -89,6 +91,23 @@ class LosslessRenderBoundary:
     recorded_static_prefix_tokens: int
     canonical_suffix_start_tokens: int
     exact_common_suffix_tokens: int
+
+
+@dataclass(frozen=True, slots=True)
+class EmpiricalTargetMetrics:
+    target_node_id: str
+    target_call_index: int
+    target_agent_depth: int
+    paired_branches: int
+    alternative_action_generated_tokens: int
+    downstream_generated_tokens: int
+    generation_prompt_tokens: int
+    model_request_wall_seconds: float
+    full_suffix_policy_events_visited: int
+    sliced_policy_events_visited: int
+    sliced_policy_event_fraction: float
+    full_arm_cost: ActualEvaluationCost
+    sliced_arm_cost: ActualEvaluationCost
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +145,7 @@ class EmpiricalReplayReport:
     empirical_full_policy_token_raf: float
     empirical_sliced_policy_token_raf: float
     same_prompt_same_seed_reproducibility: ReproducibilityAudit
+    target_metrics: tuple[EmpiricalTargetMetrics, ...]
     pairs: tuple[EmpiricalBranchPair, ...]
     passed_representative_micro_gate: bool
     gate_gb_cleared: bool
@@ -554,6 +574,8 @@ def run_empirical_replay(
     pairs: list[EmpiricalBranchPair] = []
     candidate_hashes_by_target: dict[str, set[str]] = {}
     for target in target_calls:
+        if target.agent_depth is None:
+            raise ValueError("eligible target call has no agent depth")
         original_child_text = _message_content(nodes[target.node_index])
         target_node_id = policy_node_ids_by_call[target.call_index]
         full_indices, sliced_indices = build_replay_indices(
@@ -680,6 +702,7 @@ def run_empirical_replay(
                 EmpiricalBranchPair(
                     target_node_id=target_node_id,
                     target_call_index=target.call_index,
+                    target_agent_depth=target.agent_depth,
                     alternative_index=alternative_index,
                     action_seed=action_seed,
                     continuation_seed=continuation_seed,
@@ -824,6 +847,7 @@ def run_empirical_replay(
         empirical_full_policy_token_raf=policy_token_raf,
         empirical_sliced_policy_token_raf=policy_token_raf,
         same_prompt_same_seed_reproducibility=reproducibility,
+        target_metrics=_target_metrics(pairs),
         pairs=tuple(pairs),
         passed_representative_micro_gate=passed,
         gate_gb_cleared=False,
@@ -856,6 +880,61 @@ def _distinct_candidate_fractions(
         target_id: len(hashes) / alternatives_per_target
         for target_id, hashes in sorted(hashes_by_target.items())
     }
+
+
+def _target_metrics(
+    pairs: list[EmpiricalBranchPair],
+) -> tuple[EmpiricalTargetMetrics, ...]:
+    grouped: dict[str, list[EmpiricalBranchPair]] = {}
+    for pair in pairs:
+        grouped.setdefault(pair.target_node_id, []).append(pair)
+    metrics: list[EmpiricalTargetMetrics] = []
+    for target_id, target_pairs in sorted(grouped.items()):
+        first = target_pairs[0]
+        full_visits = sum(
+            len(pair.full_suffix.visited_call_indices) for pair in target_pairs
+        )
+        sliced_visits = sum(
+            len(pair.sliced.visited_call_indices) for pair in target_pairs
+        )
+        metrics.append(
+            EmpiricalTargetMetrics(
+                target_node_id=target_id,
+                target_call_index=first.target_call_index,
+                target_agent_depth=first.target_agent_depth,
+                paired_branches=len(target_pairs),
+                alternative_action_generated_tokens=sum(
+                    pair.candidate_action_generation.generated_tokens
+                    for pair in target_pairs
+                ),
+                downstream_generated_tokens=sum(
+                    pair.downstream_generation.generated_tokens
+                    for pair in target_pairs
+                ),
+                generation_prompt_tokens=sum(
+                    pair.candidate_action_generation.prompt_tokens
+                    + pair.downstream_generation.prompt_tokens
+                    for pair in target_pairs
+                ),
+                model_request_wall_seconds=math.fsum(
+                    pair.candidate_action_generation.wall_seconds
+                    + pair.downstream_generation.wall_seconds
+                    for pair in target_pairs
+                ),
+                full_suffix_policy_events_visited=full_visits,
+                sliced_policy_events_visited=sliced_visits,
+                sliced_policy_event_fraction=(
+                    sliced_visits / full_visits if full_visits else 0.0
+                ),
+                full_arm_cost=_sum_arm_costs(
+                    pair.full_suffix for pair in target_pairs
+                ),
+                sliced_arm_cost=_sum_arm_costs(
+                    pair.sliced for pair in target_pairs
+                ),
+            )
+        )
+    return tuple(metrics)
 
 
 def _sum_arm_costs(arms: Any) -> ActualEvaluationCost:

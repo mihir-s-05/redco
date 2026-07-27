@@ -241,6 +241,29 @@ def evaluate_gate_gb(
         dict[str, float],
         broad.get("distinct_candidate_fraction_by_target", {}),
     )
+    target_metrics = cast(
+        list[dict[str, Any]],
+        broad.get("target_metrics", []),
+    )
+    target_meter_fields = {
+        "paired_branches",
+        "alternative_action_generated_tokens",
+        "downstream_generated_tokens",
+        "generation_prompt_tokens",
+        "model_request_wall_seconds",
+        "full_suffix_policy_events_visited",
+        "sliced_policy_events_visited",
+        "sliced_policy_event_fraction",
+        "full_arm_cost",
+        "sliced_arm_cost",
+    }
+    live_target_meters_complete = (
+        len(target_metrics) == 4
+        and all(metric.get("target_agent_depth") == 1 for metric in target_metrics)
+        and all(
+            target_meter_fields <= metric.keys() for metric in target_metrics
+        )
+    )
     broad_passed = (
         _verify_signed_report(broad)
         and broad.get("paired_branches") == len(pairs)
@@ -263,10 +286,37 @@ def evaluate_gate_gb(
         and overall_interval.passed
         and len(target_intervals) == 4
         and all(interval.passed for interval in target_intervals.values())
+        and live_target_meters_complete
     )
     gpu = _gpu_resource_metrics(
         gpu_samples_path,
         minimum_samples=minimum_gpu_samples,
+    )
+    dynamic_full_work = cast(
+        dict[str, Any],
+        dynamic.get("full_work_by_role", {}),
+    )
+    dynamic_sliced_work = cast(
+        dict[str, Any],
+        dynamic.get("sliced_work_by_role", {}),
+    )
+    expected_roles = {"environment", "judge", "root_policy", "subcall_policy"}
+    raf_meters_complete = (
+        live_target_meters_complete
+        and expected_roles <= dynamic_full_work.keys()
+        and expected_roles <= dynamic_sliced_work.keys()
+        and gpu.passed_minimum_samples
+        and cast(int, broad.get("alternative_action_generated_tokens", 0)) > 0
+        and cast(int, broad.get("downstream_generated_tokens", 0)) > 0
+        and cast(float, broad.get("model_request_wall_seconds", 0.0)) > 0
+        and cast(dict[str, Any], broad.get("full_arm_cost", {})).get(
+            "storage_bytes", 0
+        )
+        > 0
+        and cast(dict[str, Any], broad.get("sliced_arm_cost", {})).get(
+            "storage_bytes", 0
+        )
+        > 0
     )
     all_checks = {
         "expected_input_file_hashes_exact": all(expected_hashes_exact.values()),
@@ -276,6 +326,7 @@ def evaluate_gate_gb(
         "strict_live_trace_provenance": strict_trace_passed,
         "broad_frozen_model_live_replay": broad_passed,
         "gpu_resource_metering": gpu.passed_minimum_samples,
+        "raf_meters_by_role_and_live_target": raf_meters_complete,
     }
     passed = all(all_checks.values())
     payload: dict[str, Any] = {
@@ -310,6 +361,32 @@ def evaluate_gate_gb(
             "live_reward_per_target_equivalence": {
                 target: asdict(interval)
                 for target, interval in target_intervals.items()
+            },
+            "raf_meters": {
+                "live_policy_depth_one_by_target": target_metrics,
+                "dynamic_full_work_by_role": dynamic_full_work,
+                "dynamic_sliced_work_by_role": dynamic_sliced_work,
+                "live_alternative_action_generated_tokens": broad.get(
+                    "alternative_action_generated_tokens"
+                ),
+                "live_regenerated_downstream_policy_tokens": broad.get(
+                    "downstream_generated_tokens"
+                ),
+                "live_generation_prompt_tokens": broad.get(
+                    "generation_prompt_tokens"
+                ),
+                "live_model_request_wall_seconds": broad.get(
+                    "model_request_wall_seconds"
+                ),
+                "live_full_arm_cost": broad.get("full_arm_cost"),
+                "live_sliced_arm_cost": broad.get("sliced_arm_cost"),
+                "live_judge_calls": 0,
+                "live_environment_events": 0,
+                "protocol_note": (
+                    "The frozen live protocol has policy calls only; environment "
+                    "and judge roles are exercised and metered in the dynamic "
+                    "CPU campaign."
+                ),
             },
         },
         "resource_use": asdict(gpu),
