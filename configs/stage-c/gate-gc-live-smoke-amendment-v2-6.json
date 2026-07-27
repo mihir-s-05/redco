@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-smoke-v2",
+  "amends": [
+    "configs/stage-c/gate-gc-live-smoke-amendment-v2-4.json",
+    "configs/stage-c/gate-gc-live-smoke-amendment-v2-5.json"
+  ],
+  "status": "frozen_before_replacement_resource_provisioning",
+  "reason": "The rotating replacement A6000 resource disappeared before creation. Select the next cheapest qualifying non-spot offer.",
+  "hardware_only": {
+    "resource_id": "e0cf54",
+    "cloud_id": "gpu_2x_6000_ada",
+    "provider": "massedcompute",
+    "location": "US",
+    "gpu_type": "RTX6000Ada 48GB",
+    "gpu_count": 2,
+    "gpu_memory_total_gib": 96,
+    "is_spot": false,
+    "price_usd_per_hour": 1.5,
+    "vcpus": 26,
+    "memory_gb": 144,
+    "ephemeral_boot_disk_gb": 700,
+    "image": "ubuntu_22_cuda_12"
+  },
+  "unchanged": [
+    "run-scoped SSH preflight",
+    "model and source hashes",
+    "seed and sample counts",
+    "optimizer and loss",
+    "decision rule and remaining cost cap",
+    "zero persistent disks"
+  ]
+}
