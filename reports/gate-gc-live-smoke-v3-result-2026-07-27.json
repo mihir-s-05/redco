@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-smoke-v3",
+  "status": "fail",
+  "terminal_error": "RuntimeError: 10 consecutive empty train batches",
+  "prior_lifecycle_error_reproduced": false,
+  "checks": {
+    "policy_versions": [
+      0
+    ],
+    "score_groups": 10,
+    "episodes": 20,
+    "traces": 100,
+    "model_calls": 100,
+    "branch_records": 80,
+    "valid_parsed_branches": 47,
+    "distinct_action_seeds": 80,
+    "distinct_branch_cache_salts": 80,
+    "replay_equivalent_branches": 80,
+    "episodes_with_nonconstant_branch_reward": 0,
+    "branch_reward_values": [
+      0.25
+    ],
+    "effective_traces": 0,
+    "optimizer_steps": 0
+  },
+  "verification": {
+    "status": "fail",
+    "signed_payload_sha256": "70be53ba0a38e7c042fd7a7939ce02d9e9740b1503dbe2819233fb996c729126",
+    "remote_manifest_entries_verified_locally": 21
+  },
+  "billing": {
+    "hardware": "2x RTX A6000 48GB",
+    "rate_usd_per_hour": 1.08,
+    "pod_charge_usd": 0.2826,
+    "wallet_after_usd": 44.4677,
+    "cumulative_prime_spend_usd": 5.5323
+  },
+  "cleanup": {
+    "active_pods": 0,
+    "persistent_disks": 0
+  },
+  "next_blocker": "Replace unconstrained free-form branch text with a constrained one-token categorical action policy."
+}
