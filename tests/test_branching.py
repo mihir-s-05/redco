@@ -5,6 +5,8 @@ import pytest
 from redco.algo.branching import (
     CommitmentStatus,
     OnlineTargetSelector,
+    TokenSpan,
+    assemble_stage_c_credit,
     inclusive_group_mean_advantages,
     leave_one_out_advantages,
     trajectory_rloo,
@@ -45,3 +47,61 @@ def test_loo_and_stock_scaling_are_explicitly_distinct() -> None:
     assert stock == pytest.approx(tuple((len(rewards) - 1) / len(rewards) * x for x in loo))
     assert sum(loo) == pytest.approx(0.0)
 
+
+def test_stage_c_credit_replaces_target_with_four_branch_records() -> None:
+    assignment = assemble_stage_c_credit(
+        trainable_mask=(False, True, True, False, True, True),
+        trajectory_advantage=2.0,
+        target_span=TokenSpan(4, 6),
+        branch_rewards=(1.0, 0.0, 0.5, -1.0),
+        outer_weight=0.5,
+    )
+
+    expected = leave_one_out_advantages((1.0, 0.0, 0.5, -1.0))
+    assert assignment.incumbent_token_advantages == (0.0, 2.0, 2.0, 0.0, 0.0, 0.0)
+    assert tuple(record.advantage for record in assignment.branch_records) == expected
+    assert tuple(record.record_weight for record in assignment.branch_records) == (
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+    )
+    assert assignment.target_replaced
+
+
+def test_stage_c_credit_keeps_trajectory_credit_when_target_is_skipped() -> None:
+    assignment = assemble_stage_c_credit(
+        trainable_mask=(False, True, True),
+        trajectory_advantage=-0.75,
+        target_span=None,
+        branch_rewards=None,
+        outer_weight=1.0,
+    )
+
+    assert assignment.incumbent_token_advantages == (0.0, -0.75, -0.75)
+    assert assignment.branch_records == ()
+    assert not assignment.target_replaced
+
+
+@pytest.mark.parametrize(
+    ("target_span", "branch_rewards", "message"),
+    [
+        (TokenSpan(1, 2), None, "requires branch rewards"),
+        (None, (1.0, 0.0, 0.5, -1.0), "require a committed target"),
+        (TokenSpan(1, 2), (1.0, 0.0, 0.5), "exactly four"),
+        (TokenSpan(0, 1), (1.0, 0.0, 0.5, -1.0), "only trainable"),
+    ],
+)
+def test_stage_c_credit_rejects_incomplete_or_misaligned_inputs(
+    target_span: TokenSpan | None,
+    branch_rewards: tuple[float, ...] | None,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        assemble_stage_c_credit(
+            trainable_mask=(False, True),
+            trajectory_advantage=1.0,
+            target_span=target_span,
+            branch_rewards=branch_rewards,
+            outer_weight=1.0,
+        )

@@ -24,6 +24,37 @@ class TargetCommitment:
     features: PrefixFeatures | None
 
 
+@dataclass(frozen=True, slots=True)
+class TokenSpan:
+    """Half-open token interval for one committed policy action."""
+
+    start: int
+    stop: int
+
+    def __post_init__(self) -> None:
+        if self.start < 0:
+            raise ValueError("token span start must be non-negative")
+        if self.stop <= self.start:
+            raise ValueError("token span must be non-empty")
+
+
+@dataclass(frozen=True, slots=True)
+class BranchRecordCredit:
+    """Credit and decision-unit weight for one emitted branch action."""
+
+    advantage: float
+    record_weight: float
+
+
+@dataclass(frozen=True, slots=True)
+class StageCCreditAssignment:
+    """Trainer-facing credit for one rollout and its optional branch group."""
+
+    incumbent_token_advantages: tuple[float, ...]
+    branch_records: tuple[BranchRecordCredit, ...]
+    target_replaced: bool
+
+
 class OnlineTargetSelector:
     """Commit the first eligible node before its action is sampled."""
 
@@ -95,3 +126,52 @@ def mean_branch_gradient_weight(
         raise ValueError("outer_weight must be positive")
     scale = outer_weight / len(values)
     return tuple(scale * advantage for advantage in values)
+
+
+def assemble_stage_c_credit(
+    *,
+    trainable_mask: Sequence[bool],
+    trajectory_advantage: float,
+    target_span: TokenSpan | None,
+    branch_rewards: Sequence[float] | None,
+    outer_weight: float,
+) -> StageCCreditAssignment:
+    """Compile the clean Stage-C replacement rule for one rollout.
+
+    Untargeted action tokens retain trajectory RLOO credit. A committed target
+    is zeroed in the incumbent record and emitted once per branch with
+    all-branch LOO credit and equal decision-unit weight.
+    """
+    if not trainable_mask:
+        raise ValueError("trainable_mask must be non-empty")
+    if outer_weight <= 0:
+        raise ValueError("outer_weight must be positive")
+
+    incumbent = [
+        float(trajectory_advantage) if trainable else 0.0
+        for trainable in trainable_mask
+    ]
+    if target_span is None:
+        if branch_rewards is not None:
+            raise ValueError("branch rewards require a committed target")
+        return StageCCreditAssignment(tuple(incumbent), (), False)
+
+    if branch_rewards is None:
+        raise ValueError("a committed target requires branch rewards")
+    if len(branch_rewards) != 4:
+        raise ValueError("clean Stage C requires exactly four branch rewards")
+    if target_span.stop > len(trainable_mask):
+        raise ValueError("target span exceeds the token stream")
+    if not all(trainable_mask[target_span.start : target_span.stop]):
+        raise ValueError("target span must contain only trainable action tokens")
+
+    for index in range(target_span.start, target_span.stop):
+        incumbent[index] = 0.0
+
+    branch_advantages = leave_one_out_advantages(branch_rewards)
+    record_weight = outer_weight / len(branch_advantages)
+    branch_records = tuple(
+        BranchRecordCredit(float(advantage), record_weight)
+        for advantage in branch_advantages
+    )
+    return StageCCreditAssignment(tuple(incumbent), branch_records, True)
