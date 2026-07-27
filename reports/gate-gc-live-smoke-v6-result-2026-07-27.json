@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-smoke-v6",
+  "status": "fail",
+  "execution_status": "one optimizer step completed",
+  "terminal_error": "ValueError: expected one '**/metrics.jsonl' below the run, found 0",
+  "prior_lifecycle_error_reproduced": false,
+  "checks": {
+    "collected_episodes": 2,
+    "collected_traces": 10,
+    "effective_signal_episodes": 1,
+    "effective_branch_traces": 4,
+    "valid_parsed_branches": 4,
+    "invalid_parsed_branches": 0,
+    "distinct_action_seeds_in_effective_batch": 4,
+    "distinct_branch_cache_salts_in_effective_batch": 4,
+    "replay_equivalent_effective_branches": 4,
+    "episodes_with_nonconstant_branch_reward": 1,
+    "effective_branch_reward_counts": {
+      "0.25": 1,
+      "1.25": 3
+    },
+    "effective_canonical_action_counts": {
+      "render_changed_prompt": 3,
+      "reuse_stale_prompt": 1
+    },
+    "trainer_batch_bytes": 16268,
+    "broadcast_adapter_bytes": 264300328,
+    "optimizer_steps": 1,
+    "trainer_log_grad_norm": 12.3538,
+    "metrics_jsonl_present": false
+  },
+  "verification": {
+    "status": "fail",
+    "signed_payload_sha256": "248c40647080df8a872793093e3015bb14f351006dfff5686867c0452d096f84",
+    "remote_manifest_entries_verified_locally": 36,
+    "remote_manifest_sha256": "95639deae5b7837f29e1bcc6fa715464c21d763b825d74ab39756ca4109ac517",
+    "local_artifact_bytes": 8595923192
+  },
+  "billing": {
+    "hardware": "2x A6000 48GB",
+    "rate_usd_per_hour": 1.08,
+    "pod_charge_usd": 0.5921,
+    "wallet_after_usd": 43.4005,
+    "cumulative_prime_spend_usd": 6.5995
+  },
+  "cleanup": {
+    "active_pods": 0,
+    "persistent_disks": 0
+  },
+  "next_blocker": "Enable Prime's shared file_monitor, select the trainer metrics artifact explicitly in the verifier, align the verifier with the branch-only effective training subset, and suppress redundant full-model checkpoint gathering while retaining the broadcast LoRA adapter."
+}
