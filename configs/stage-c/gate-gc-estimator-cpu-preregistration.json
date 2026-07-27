@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-estimator-cpu",
+  "frozen_at_utc": "2026-07-27T05:28:14Z",
+  "purpose": "Decisive pre-GPU audit of the Stage-C n=4 all-branch LOO estimator against exact finite-policy ground truth.",
+  "scope": {
+    "included": [
+      "all eight restricted deterministic credit probes",
+      "exact enumeration of Q(s,a) over fixed exogenous seeds",
+      "sampled all-branch leave-one-out policy gradients",
+      "gradient cosine, advantage rank correlation, sign accuracy, and RMSE"
+    ],
+    "excluded": [
+      "4B model learning",
+      "Prime trainer execution",
+      "wall-time or accelerator-efficiency claims",
+      "general Python or unrestricted RLM transfer"
+    ]
+  },
+  "implementation": {
+    "repository_commit": "63759b0b97327a09028e97b6032979f6433dd41b",
+    "prime_rl_commit": "3b22dd951cad1036d1fe8dd0a0bfc40807a9b360",
+    "sha256": {
+      "src/redco/analysis/stage_c_estimator.py": "5a2cd9e67702f84a3c820ed8978416654573c61776235aef3ff25e724e70df9a",
+      "src/redco/analysis/stage_c_estimator_gate.py": "3350967679450ad4521f33e7f756746f64a09941a052a1dc8155766015e231f6",
+      "src/redco/env/tasks/credit_probes.py": "99623bdb606813cd5b5906a8fc8c72f66ff2b22d9dccd2e5c7e2d69555f33473",
+      "patches/prime-rl-redco-stage-c.patch": "532eb99b7df0896428ec048a217155660aeb9ccc0f54d73e4e00ca70fba1a7b8"
+    }
+  },
+  "frozen_settings": {
+    "branch_group_size": 4,
+    "samples_per_probe": 50000,
+    "master_seed": 7202601,
+    "exogenous_seed_count": 10000,
+    "noise_floor": 0.01
+  },
+  "frozen_thresholds": {
+    "all_actions_observed": true,
+    "minimum_informative_gradient_cosine": 0.99,
+    "minimum_informative_advantage_rank_correlation": 0.99,
+    "minimum_informative_sign_accuracy_above_noise": 1.0,
+    "maximum_informative_advantage_rmse": 0.02
+  },
+  "decision_rule": {
+    "pass": "All frozen thresholds pass. Proceed to the preregistered 4B LoRA smoke after the Prime frozen-batch integration checks pass.",
+    "fail": "Do not provision paid compute. Debug the estimator or probe definition and preregister a new campaign.",
+    "zero_signal_handling": "A probe with an exactly zero policy gradient is excluded from cosine and rank minima; sign accuracy is one only when there are no above-noise comparisons."
+  },
+  "execution": {
+    "runtime": "local CPU",
+    "package_manager": "uv",
+    "output": "runs/stage-c/gate-gc-estimator-cpu/report.json",
+    "one_campaign": true
+  }
+}
