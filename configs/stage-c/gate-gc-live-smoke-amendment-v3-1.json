@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-smoke-v3",
+  "amends": "configs/stage-c/gate-gc-live-smoke-preregistration-v3.json",
+  "status": "frozen_before_pre_model_relaunch_on_same_pod",
+  "observed_setup_failure": {
+    "stage": "uv cache initialization",
+    "error": "Failed to initialize cache at /workspace/.uv-cache-prime-stage-c: Permission denied",
+    "model_calls": 0,
+    "output_directory_created": false,
+    "gpu_memory_mib_per_device_after_exit": [
+      1,
+      1
+    ],
+    "artifacts": {
+      "launcher.log": "e92e02ab9dcdf2c4d9b9b4ddc9d0952ca78a7ee819d33ed0033a12341b42a762",
+      "output.control.log": "d0df75a403bca8614a25245f8b48b4b56c9e07fada8f581a6ee994b9b1e5ef06",
+      "output.gpu-samples.csv": "9c68b4b1c129b13bed2c645925280539f549d252d75ac52d6fcd4526a5fe9683",
+      "output.resource.log": "9834727e37ed737a86380ea5fecf2f60c52585626582e189f5a3ceeb6b5878a5"
+    }
+  },
+  "logistics_only": {
+    "same_pod_id": "56dbd352b9354a6081a7aa79e25454c4",
+    "same_hardware_resource_id": "8b33a6",
+    "set_environment": {
+      "REDCO_UV_CACHE_DIR": "/home/ubuntu/.cache/uv-prime-stage-c",
+      "REDCO_UV_ENVIRONMENT": "/home/ubuntu/.venv-prime-stage-c"
+    },
+    "preserve_first_attempt_under": "runs/stage-c/gate-gc-live-smoke-v3/attempt-1-pre-model-cache",
+    "reason": "The SSH user owns its home directory; moving uv state there changes no model, code, config, seed, optimizer, sample, or decision setting."
+  },
+  "unchanged": [
+    "all preregistered source hashes",
+    "model and sampling settings",
+    "run seed",
+    "optimizer and loss",
+    "effective sample requirements",
+    "decision rule",
+    "one-campaign policy",
+    "training timeout and cost cap",
+    "zero persistent disks"
+  ]
+}
