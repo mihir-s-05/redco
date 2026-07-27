@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-smoke-v2",
+  "amends": "configs/stage-c/gate-gc-live-smoke-amendment-v2-9.json",
+  "status": "frozen_before_same_pod_relaunch",
+  "record_correction": {
+    "field": "observed_import_failure.output_directory_created",
+    "previous_value": false,
+    "corrected_value": "empty_directory_only",
+    "evidence": "The Prime entrypoint created the output directory before the trainer import failed; the directory contained zero files and no metrics, rollouts, batches, checkpoints, or adapters."
+  },
+  "preservation": {
+    "remote_path": "runs/stage-c/gate-gc-live-smoke/attempt-2-pre-model-import/output",
+    "move_before_relaunch": true,
+    "delete": false
+  },
+  "unchanged": [
+    "model_calls remain zero",
+    "model cache remains empty",
+    "GPU memory remained 2 MiB per device",
+    "locked flash-attn runner amendment",
+    "all experiment settings and decision rules",
+    "zero persistent disks"
+  ]
+}
