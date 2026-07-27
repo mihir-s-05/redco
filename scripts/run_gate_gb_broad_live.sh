@@ -112,7 +112,8 @@ if test "$ready" != "1"; then
 fi
 grep -Fx "REDCO_STRICT_TOOL_CALLING_ENV=1" "$inference_log"
 
-"$uv_bin" run --frozen python -m redco.analysis.empirical_branch_replay \
+timeout --signal=TERM 10800 \
+  "$uv_bin" run --frozen python -m redco.analysis.empirical_branch_replay \
   --input "$source_trace" \
   --output "$run_root/broad-report.json" \
   --expected-source-sha256 "$source_sha256" \
