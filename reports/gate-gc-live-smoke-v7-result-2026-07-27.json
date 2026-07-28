@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-smoke-v7",
+  "status": "fail",
+  "execution_status": "no optimizer step; orchestrator stopped after ten consecutive empty train batches",
+  "terminal_error": "RuntimeError: 10 consecutive empty train batches — check filter config (pre_batch_filters / post_batch_filters) or task difficulty.",
+  "prior_lifecycle_error_reproduced": false,
+  "checks": {
+    "collected_episodes": 20,
+    "collected_traces": 100,
+    "collected_branch_traces": 80,
+    "collected_context_traces": 20,
+    "effective_traces": 0,
+    "episodes_with_nonconstant_branch_reward": 0,
+    "branch_reward_counts": {
+      "0.25": 24,
+      "1.25": 56
+    },
+    "episodes_with_one_distinct_sampled_token": 14,
+    "episodes_with_two_distinct_sampled_tokens": 3,
+    "episodes_with_three_distinct_sampled_tokens": 3,
+    "optimizer_steps": 0,
+    "trainer_metrics_bytes": 0,
+    "orchestrator_metrics_bytes": 0,
+    "trainer_batch_present": false,
+    "broadcast_adapter_present": false,
+    "gathered_master_weight_files": 0,
+    "raw_remote_run_bytes": 880640
+  },
+  "verification": {
+    "status": "fail",
+    "signed_payload_sha256": "ff48552e6012c5aeccb064cfdf54d2ddcf632f06b68cdcd5f603d1686f230c73",
+    "error": "expected one '**/rollouts/step_1/train/effective/traces.jsonl' below the run, found 0",
+    "remote_manifest_entries_verified_locally": 20,
+    "remote_manifest_sha256": "4fcaad97da02e6266b08331bb0a605cc651a1b3821f8f21ecd6979e672b00a86",
+    "transfer_archive_sha256": "fa9f94fb8ca0fe6f97da3849564f13cc52c79e5054ee299330f8f0ac8b8bcd18",
+    "local_artifact_bytes": 64659244
+  },
+  "billing": {
+    "pod_id": "38720805e00246a7b9adcb925573ce82",
+    "hardware": "2x A6000 48GB",
+    "resource_id": "8b33a6",
+    "rate_usd_per_hour": 1.08,
+    "pod_charge_usd": 0.18,
+    "wallet_after_usd_displayed": 43.22,
+    "cumulative_prime_spend_usd_displayed": 6.78
+  },
+  "cleanup": {
+    "active_pods": 0,
+    "persistent_disks": 0
+  },
+  "next_blocker": "The unrestricted one-token behavior policy produced no within-episode counterfactual reward variation in twenty episodes. A replacement smoke must preregister a signal-acquisition design with adequate power, while preserving the behavior-policy distribution and without reusing v7."
+}
