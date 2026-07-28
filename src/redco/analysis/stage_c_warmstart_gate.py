@@ -86,8 +86,13 @@ def verify_warmstart_gate(
     expected_steps: int = 12,
 ) -> dict[str, Any]:
     metrics = _read_jsonl(run_dir / "metrics.jsonl")
-    if len(metrics) != expected_steps:
-        raise ValueError(f"expected {expected_steps} SFT metric rows")
+    metric_steps = {
+        int(row["step"])
+        for row in metrics
+        if isinstance(row.get("step"), int | float)
+    }
+    if metric_steps != set(range(1, expected_steps + 1)):
+        raise ValueError(f"expected metrics for SFT steps 1 through {expected_steps}")
     numeric_metrics = [
         float(value)
         for row in metrics
@@ -153,6 +158,7 @@ def verify_warmstart_gate(
         "sft": {
             "steps": expected_steps,
             "metric_rows": len(metrics),
+            "metric_steps": sorted(metric_steps),
             "adapters": {str(step): value for step, value in adapters.items()},
             "gathered_full_model_files": 0,
         },

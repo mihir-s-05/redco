@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 import torch
-from peft import PeftModel
+from stage_c_lora import merge_adapter
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
@@ -34,10 +34,9 @@ def main() -> None:
         device_map={"": "cuda:0"},
         low_cpu_mem_usage=True,
     )
-    tuned = PeftModel.from_pretrained(base, args.adapter)
-    merged = tuned.merge_and_unload(safe_merge=True)
+    merge_adapter(base, args.adapter)
     args.output.mkdir(parents=True, exist_ok=True)
-    merged.save_pretrained(
+    base.save_pretrained(
         args.output,
         safe_serialization=True,
         max_shard_size="4GB",

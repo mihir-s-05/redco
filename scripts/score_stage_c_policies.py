@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import argparse
 import json
-from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
 import torch
-from peft import PeftModel
+from stage_c_lora import adapter_hooks
 from transformers import AutoModelForCausalLM
 
 
@@ -127,25 +126,14 @@ def main() -> None:
         base_distributions=None,
     )
     models: list[dict[str, Any]] = [{"name": args.model_name, "cases": base_rows}]
-    if adapters:
-        first_name, first_path = adapters[0]
-        model = PeftModel.from_pretrained(
-            base_model,
-            first_path,
-            adapter_name=first_name,
-        )
-        for name, path in adapters[1:]:
-            model.load_adapter(path, adapter_name=name)
-        for name, _ in adapters:
-            model.set_adapter(name)
-            context = nullcontext()
-            with context:
-                rows, _ = _score_model(
-                    model,
-                    cases,
-                    base_distributions=base_distributions,
-                )
-            models.append({"name": name, "cases": rows})
+    for name, path in adapters:
+        with adapter_hooks(base_model, Path(path)):
+            rows, _ = _score_model(
+                base_model,
+                cases,
+                base_distributions=base_distributions,
+            )
+        models.append({"name": name, "cases": rows})
     payload = {
         "schema_version": 1,
         "source": {
