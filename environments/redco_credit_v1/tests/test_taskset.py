@@ -132,3 +132,12 @@ def test_env_config_rejects_unsupported_branch_temperature() -> None:
         assert "less than or equal to 2" in str(error)
     else:
         raise AssertionError("unsupported vLLM temperature must fail locally")
+
+
+def test_env_config_accepts_greedy_evaluation_temperature() -> None:
+    config = RedcoCreditEnvConfig(
+        taskset={"id": "redco-credit-v1"},
+        branch_temperature=0.0,
+    )
+
+    assert config.branch_temperature == 0.0

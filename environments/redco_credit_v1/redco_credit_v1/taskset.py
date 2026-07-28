@@ -180,7 +180,7 @@ class RedcoCreditEnvConfig(vf.EnvConfig):
     alternative_3: vf.AgentConfig = vf.AgentConfig(max_turns=1)
     branching_enabled: bool = True
     replay_mode: Literal["full_suffix", "sliced"] = "sliced"
-    branch_temperature: float = Field(1.0, gt=0, le=2.0)
+    branch_temperature: float = Field(1.0, ge=0, le=2.0)
 
 
 class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
