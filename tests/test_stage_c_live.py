@@ -101,6 +101,26 @@ def test_verify_smoke_accepts_branch_only_effective_subset(tmp_path: Path) -> No
     assert report["checks"]["context_records"] == 0
 
 
+def test_verify_smoke_accepts_preregistered_empty_batch_retries(
+    tmp_path: Path,
+) -> None:
+    run_dir = _fixture(tmp_path)
+    all_traces = next(run_dir.glob("**/train/all/traces.jsonl"))
+    rows = [json.loads(line) for line in all_traces.read_text().splitlines()]
+    retry_rows = json.loads(json.dumps(rows))
+    for row in retry_rows:
+        row["id"] += "-retry"
+        row["info"]["episode_id"] += "-retry"
+    _write_jsonl(all_traces, [*rows, *retry_rows])
+
+    report = verify_smoke(run_dir)
+
+    assert report["status"] == "pass"
+    assert report["checks"]["collected_traces"] == 20
+    assert report["checks"]["collected_episodes"] == 4
+    assert report["checks"]["collection_attempts"] == 2
+
+
 def test_verify_smoke_rejects_gathered_master_weights(tmp_path: Path) -> None:
     run_dir = _fixture(tmp_path)
     gathered = run_dir / "output" / "weights" / "step_1" / "model.safetensors"

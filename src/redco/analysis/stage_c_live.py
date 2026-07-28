@@ -61,9 +61,14 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
 
     all_traces = _read_jsonl(all_traces_path)
     traces = _read_jsonl(effective_traces_path)
-    if len(all_traces) != 10:
+    if (
+        len(all_traces) < 10
+        or len(all_traces) > 100
+        or len(all_traces) % 10 != 0
+    ):
         raise ValueError(
-            f"smoke must collect exactly 10 traces, found {len(all_traces)}"
+            "smoke must collect one to ten complete ten-trace attempts, "
+            f"found {len(all_traces)} traces"
         )
     if len(traces) < 4:
         raise ValueError(
@@ -94,10 +99,17 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
         if info.get("policy_version") != 0:
             raise ValueError("collected smoke trace is not from snapshot version 0")
         collected_episodes.setdefault(episode_id, []).append(trace)
-    if len(collected_episodes) != 2 or any(
+    if (
+        len(collected_episodes) < 2
+        or len(collected_episodes) > 20
+        or len(collected_episodes) % 2 != 0
+        or any(
         len(episode) != 5 for episode in collected_episodes.values()
+        )
     ):
-        raise ValueError("collected smoke must contain two complete five-trace groups")
+        raise ValueError(
+            "collected smoke must contain one to ten complete two-episode attempts"
+        )
 
     policy_versions: set[int] = set()
     episodes: dict[str, list[dict[str, Any]]] = {}
@@ -231,6 +243,7 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
             "policy_versions": sorted(policy_versions),
             "collected_traces": len(all_traces),
             "collected_episodes": len(collected_episodes),
+            "collection_attempts": len(all_traces) // 10,
             "effective_traces": len(traces),
             "effective_episodes": len(episodes),
             "branch_records": len(branch_records),

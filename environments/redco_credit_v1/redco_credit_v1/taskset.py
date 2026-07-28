@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import Literal
 
 import verifiers.v1 as vf
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from redco.contracts import SeedNamespace
 from redco.env.tasks.credit_probes import credit_probe_by_name, standard_credit_probes
@@ -112,6 +112,22 @@ class RedcoCreditTask(vf.Task[RedcoCreditData]):
 class RedcoCreditTasksetConfig(vf.TasksetConfig):
     repeats_per_probe: int = Field(16, ge=1)
     exogenous_seed_offset: int = Field(0, ge=0)
+    probe_names: tuple[str, ...] | None = None
+
+    @field_validator("probe_names")
+    @classmethod
+    def validate_probe_names(
+        cls, probe_names: tuple[str, ...] | None
+    ) -> tuple[str, ...] | None:
+        if probe_names is None:
+            return None
+        if not probe_names:
+            raise ValueError("probe_names must be non-empty when provided")
+        if len(set(probe_names)) != len(probe_names):
+            raise ValueError("probe_names must be unique")
+        for probe_name in probe_names:
+            credit_probe_by_name(probe_name)
+        return probe_names
 
 
 class RedcoCreditTaskset(
@@ -120,8 +136,16 @@ class RedcoCreditTaskset(
     def load(self) -> list[RedcoSeedTask]:
         tasks: list[RedcoSeedTask] = []
         index = 0
+        probes = (
+            tuple(
+                credit_probe_by_name(probe_name)
+                for probe_name in self.config.probe_names
+            )
+            if self.config.probe_names is not None
+            else standard_credit_probes()
+        )
         for repeat in range(self.config.repeats_per_probe):
-            for probe in standard_credit_probes():
+            for probe in probes:
                 action_map = tuple(
                     (str(action_index), action)
                     for action_index, action in enumerate(probe.actions)
