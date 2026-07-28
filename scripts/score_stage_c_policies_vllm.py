@@ -16,6 +16,8 @@ from typing import Any
 from vllm import LLM, SamplingParams
 from vllm.lora.request import LoRARequest
 
+from redco.analysis.vllm_temperature import retemper_selected_logprobs
+
 
 def _logprob(value: Any) -> float:
     if hasattr(value, "logprob"):
@@ -29,15 +31,14 @@ def _score(
     llm: LLM,
     cases: list[dict[str, Any]],
     *,
-    temperature: float,
     lora_request: LoRARequest | None,
-) -> list[dict[str, Any]]:
+) -> dict[str, list[dict[str, Any]]]:
     prompts = [
         {"prompt_token_ids": [int(token) for token in case["prefix_token_ids"]]}
         for case in cases
     ]
     params = SamplingParams(
-        temperature=temperature,
+        temperature=1.0,
         max_tokens=1,
         logprobs=-1,
         seed=7202803,
@@ -49,7 +50,7 @@ def _score(
         lora_request=lora_request,
         use_tqdm=False,
     )
-    rows: list[dict[str, Any]] = []
+    rows: dict[str, list[dict[str, Any]]] = {"1.0": [], "2.0": []}
     for case, output in zip(cases, outputs, strict=True):
         completion = output.outputs[0]
         if completion.logprobs is None or len(completion.logprobs) != 1:
@@ -64,25 +65,33 @@ def _score(
         ]
         if missing:
             raise ValueError(f"vLLM omitted action token logprobs: {missing}")
-        action_logprobs = {
-            action: _logprob(logprobs[token_id])
-            for action, token_id in action_ids.items()
+        raw_logprobs = {
+            int(token_id): _logprob(value) for token_id, value in logprobs.items()
         }
-        greedy_token = max(logprobs, key=lambda token_id: _logprob(logprobs[token_id]))
-        rows.append(
-            {
-                "case_id": case["case_id"],
-                "probe_name": case["probe_name"],
-                "context_route": case["context_route"],
-                "temperature": temperature,
-                "greedy_token_id": int(greedy_token),
-                "action_logprobabilities": action_logprobs,
-                "action_probabilities": {
-                    action: math.exp(logprob)
-                    for action, logprob in action_logprobs.items()
-                },
+        greedy_token = max(raw_logprobs, key=raw_logprobs.__getitem__)
+        for temperature in (1.0, 2.0):
+            selected = retemper_selected_logprobs(
+                raw_logprobs,
+                list(action_ids.values()),
+                temperature=temperature,
+            )
+            action_logprobs = {
+                action: selected[token_id] for action, token_id in action_ids.items()
             }
-        )
+            rows[str(temperature)].append(
+                {
+                    "case_id": case["case_id"],
+                    "probe_name": case["probe_name"],
+                    "context_route": case["context_route"],
+                    "temperature": temperature,
+                    "greedy_token_id": int(greedy_token),
+                    "action_logprobabilities": action_logprobs,
+                    "action_probabilities": {
+                        action: math.exp(logprob)
+                        for action, logprob in action_logprobs.items()
+                    },
+                }
+            )
     return rows
 
 
@@ -138,25 +147,20 @@ def main() -> None:
         models.append(
             {
                 "name": name,
-                "temperatures": {
-                    "1.0": _score(
-                        llm,
-                        cases,
-                        temperature=1.0,
-                        lora_request=request,
-                    ),
-                    "2.0": _score(
-                        llm,
-                        cases,
-                        temperature=2.0,
-                        lora_request=request,
-                    ),
-                },
+                "temperatures": _score(
+                    llm,
+                    cases,
+                    lora_request=request,
+                ),
             }
         )
     payload = {
         "schema_version": 1,
         "backend": "vllm",
+        "temperature_semantics": (
+            "vLLM raw full-vocabulary logprobs retempered exactly as "
+            "softmax(logits / temperature)"
+        ),
         "source": {
             "model": args.model,
             "cases_sha256": case_payload["signed_payload_sha256"],
