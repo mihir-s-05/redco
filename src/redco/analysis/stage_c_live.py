@@ -51,6 +51,13 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
     adapter_path = _single_match(
         run_dir, "**/broadcasts/step_1/adapter_model.safetensors"
     )
+    gathered_master_weights = sorted(
+        run_dir.glob("**/weights/step_1/model*.safetensors")
+    )
+    if gathered_master_weights:
+        raise ValueError(
+            "smoke produced prohibited gathered full-model checkpoint shards"
+        )
 
     all_traces = _read_jsonl(all_traces_path)
     traces = _read_jsonl(effective_traces_path)
@@ -234,6 +241,7 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
             "grad_norm": grad_norm,
             "adapter_bytes": adapter_path.stat().st_size,
             "batch_bytes": batch_path.stat().st_size,
+            "gathered_master_weight_files": 0,
         },
         "artifacts": {
             name: {

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from redco.analysis.stage_c_live import smoke_verification_report, verify_smoke
 
 
@@ -97,6 +99,18 @@ def test_verify_smoke_accepts_branch_only_effective_subset(tmp_path: Path) -> No
     assert report["checks"]["effective_episodes"] == 1
     assert report["checks"]["branch_records"] == 4
     assert report["checks"]["context_records"] == 0
+
+
+def test_verify_smoke_rejects_gathered_master_weights(tmp_path: Path) -> None:
+    run_dir = _fixture(tmp_path)
+    gathered = run_dir / "output" / "weights" / "step_1" / "model.safetensors"
+    gathered.parent.mkdir(parents=True)
+    gathered.write_bytes(b"redundant full model")
+
+    with pytest.raises(
+        ValueError, match="prohibited gathered full-model checkpoint"
+    ):
+        verify_smoke(run_dir)
 
 
 def test_verify_smoke_rejects_replay_disagreement(tmp_path: Path) -> None:
