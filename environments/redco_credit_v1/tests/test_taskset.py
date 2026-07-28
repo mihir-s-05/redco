@@ -45,16 +45,18 @@ def test_taskset_can_select_a_preregistered_probe_subset() -> None:
         RedcoCreditTasksetConfig(
             repeats_per_probe=3,
             exogenous_seed_offset=20,
-            probe_names=("observation_trap",),
+            probe_names=("integration_planted_needle",),
         )
     )
 
     tasks = taskset.load()
 
     assert len(tasks) == 3
-    assert {task.data.probe_name for task in tasks} == {"observation_trap"}
+    assert {task.data.probe_name for task in tasks} == {
+        "integration_planted_needle"
+    }
     assert {task.data.exogenous_seed for task in tasks} == {20, 21, 22}
-    assert all(task.data.actions == ("0", "1") for task in tasks)
+    assert all(task.data.actions == tuple(str(index) for index in range(8)) for task in tasks)
 
 
 def test_action_parser_never_repairs_or_accepts_invalid_values() -> None:

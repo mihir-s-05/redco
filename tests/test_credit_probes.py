@@ -4,6 +4,7 @@ import pytest
 
 from redco.env.tasks.credit_probes import (
     credit_probe_by_name,
+    integration_planted_needle,
     planted_needle,
     redundancy,
     spurious_correlation,
@@ -16,6 +17,18 @@ def test_planted_needle_has_enumerable_ground_truth() -> None:
 
     assert probe.q_values([0]) == {"0": 0.0, "1": 0.0, "2": 1.0, "3": 0.0}
     assert probe.advantages([0])["2"] == pytest.approx(0.75)
+
+
+def test_integration_needle_is_signal_rich_but_not_in_learning_suite() -> None:
+    probe = integration_planted_needle()
+
+    assert probe.name == "integration_planted_needle"
+    assert probe.q_values([0])["1"] == 1.0
+    assert sum(probe.q_values([0]).values()) == 1.0
+    assert probe.name not in {item.name for item in standard_credit_probes()}
+    resolved = credit_probe_by_name(probe.name)
+    assert resolved.actions == probe.actions
+    assert resolved.q_values([0]) == probe.q_values([0])
 
 
 def test_redundancy_and_spurious_probes_separate_causation() -> None:

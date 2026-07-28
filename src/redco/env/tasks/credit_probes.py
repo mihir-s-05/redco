@@ -59,7 +59,8 @@ class FiniteCreditProbe:
 
 def credit_probe_by_name(name: str) -> FiniteCreditProbe:
     try:
-        return {probe.name: probe for probe in standard_credit_probes()}[name]
+        probes = (*standard_credit_probes(), integration_planted_needle())
+        return {probe.name: probe for probe in probes}[name]
     except KeyError as error:
         raise ValueError(f"unknown credit probe: {name}") from error
 
@@ -75,6 +76,16 @@ def planted_needle(*, chunk_count: int, needle_chunk: int) -> FiniteCreditProbe:
         return float(int(action) == needle_chunk)
 
     return FiniteCreditProbe("planted_needle", actions, reward)
+
+
+def integration_planted_needle() -> FiniteCreditProbe:
+    """Return the signal-rich, non-learning fixture used by the live smoke."""
+    probe = planted_needle(chunk_count=8, needle_chunk=1)
+    return FiniteCreditProbe(
+        "integration_planted_needle",
+        probe.actions,
+        probe.reward_function,
+    )
 
 
 def redundancy() -> FiniteCreditProbe:

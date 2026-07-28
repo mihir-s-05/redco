@@ -47,7 +47,7 @@ max_completion_tokens = 64
 [[orchestrator.train.env]]
 name = "redco-credit"
 env.id = "redco-credit-v1"
-env.taskset = { id = "redco-credit-v1", repeats_per_probe = 1, exogenous_seed_offset = 1000, probe_names = ["observation_trap"] }
+env.taskset = { id = "redco-credit-v1", repeats_per_probe = 1, exogenous_seed_offset = 1000, probe_names = ["integration_planted_needle"] }
 env.replay_mode = "sliced"
 env.branch_temperature = 2.0
 env.context.harness = { id = "null", runtime = { type = "subprocess" } }
