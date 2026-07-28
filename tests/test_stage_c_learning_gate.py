@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from redco.analysis.stage_c_learning_gate import _eval_rewards, _paired_bootstrap
+from redco.analysis.stage_c_learning_gate import (
+    _eval_rewards,
+    _paired_bootstrap,
+    _single_metrics_file,
+)
 
 
 def test_paired_bootstrap_preserves_task_pairing() -> None:
@@ -57,3 +61,12 @@ def test_eval_rewards_uses_only_original_role(tmp_path: Path) -> None:
 
     assert len(rewards) == 32
     assert rewards[("probe-7", 7)] == 7.0
+
+
+def test_single_metrics_file_accepts_root_file_monitor_layout(
+    tmp_path: Path,
+) -> None:
+    metrics = tmp_path / "metrics.jsonl"
+    metrics.write_text('{"step": 1, "optim/grad_norm": 0.25}\n')
+
+    assert _single_metrics_file(tmp_path) == metrics.resolve()

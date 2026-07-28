@@ -37,8 +37,22 @@ def _single_match(run_dir: Path, pattern: str) -> Path:
     return matches[0]
 
 
+def _single_metrics_file(run_dir: Path) -> Path:
+    """Locate the trainer file-monitor artifact across Prime output layouts."""
+    matches = {
+        path.resolve()
+        for pattern in ("metrics.jsonl", "**/output/metrics.jsonl")
+        for path in run_dir.glob(pattern)
+    }
+    if len(matches) != 1:
+        raise ValueError(
+            f"expected one trainer metrics.jsonl below {run_dir}, found {len(matches)}"
+        )
+    return next(iter(matches))
+
+
 def verify_smoke(run_dir: Path) -> dict[str, Any]:
-    metrics_path = _single_match(run_dir, "**/output/metrics.jsonl")
+    metrics_path = _single_metrics_file(run_dir)
     all_traces_path = _single_match(
         run_dir, "**/rollouts/step_1/train/all/traces.jsonl"
     )

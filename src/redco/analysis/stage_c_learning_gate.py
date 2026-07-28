@@ -47,6 +47,20 @@ def _one_per_step(run_dir: Path, pattern: str) -> dict[int, Path]:
     return result
 
 
+def _single_metrics_file(run_dir: Path) -> Path:
+    """Locate the trainer file-monitor artifact across Prime output layouts."""
+    matches = {
+        path.resolve()
+        for pattern in ("metrics.jsonl", "**/output/metrics.jsonl")
+        for path in run_dir.glob(pattern)
+    }
+    if len(matches) != 1:
+        raise ValueError(
+            f"expected one trainer metrics.jsonl below {run_dir}, found {len(matches)}"
+        )
+    return next(iter(matches))
+
+
 def _eval_rewards(
     path: Path,
     *,
@@ -177,10 +191,7 @@ def _summarize_arm(
             elif not isinstance(info.get("redco_control"), dict):
                 raise ValueError("broadcast trace is missing control metadata")
 
-    metrics_paths = sorted(run_dir.glob("**/output/metrics.jsonl"))
-    if len(metrics_paths) != 1:
-        raise ValueError(f"{name} must contain exactly one metrics.jsonl")
-    metric_rows = _read_jsonl(metrics_paths[0])
+    metric_rows = _read_jsonl(_single_metrics_file(run_dir))
     grad_norms = [
         float(row["optim/grad_norm"])
         for row in metric_rows

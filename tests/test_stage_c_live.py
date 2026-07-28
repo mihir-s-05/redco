@@ -101,6 +101,19 @@ def test_verify_smoke_accepts_branch_only_effective_subset(tmp_path: Path) -> No
     assert report["checks"]["context_records"] == 0
 
 
+def test_verify_smoke_accepts_root_file_monitor_metrics(tmp_path: Path) -> None:
+    run_dir = _fixture(tmp_path)
+    legacy_metrics = run_dir / "output" / "metrics.jsonl"
+    root_metrics = run_dir / "metrics.jsonl"
+    root_metrics.write_bytes(legacy_metrics.read_bytes())
+    legacy_metrics.unlink()
+
+    report = verify_smoke(run_dir)
+
+    assert report["status"] == "pass"
+    assert report["artifacts"]["metrics"]["path"] == "metrics.jsonl"
+
+
 def test_verify_smoke_accepts_preregistered_empty_batch_retries(
     tmp_path: Path,
 ) -> None:
