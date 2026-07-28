@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c2-exact-prefix-backend-parity",
+  "amendment": "corrective-5",
+  "status": "adapter_path_and_consumed_call_accounting_frozen_after_first_partial_scoring_attempt",
+  "frozen_at_local_date": "2026-07-28",
+  "scientific_protocol": {
+    "path": "configs/stage-c2/backend-parity-preregistration.json",
+    "sha256": "fd30ffdc85a6ac8d9215651fe9e32d05a5da05339cefc394cdf30c3182ecdd55",
+    "unchanged_except_operational_call_ceiling": true
+  },
+  "observed_failure": {
+    "phase": "first adapter load after the 16 base-model case-temperature requests completed",
+    "error": "LoRAAdapterNotFoundError for the original repository-relative adapter path",
+    "cause": "The compact sparse pod stores the hash-verified adapters under /home/ubuntu/redco/adapters, while the invocation passed their original local repository-relative paths.",
+    "vllm_score_artifact_created": false,
+    "adapter_scores_generated": false,
+    "base_requests_consumed_without_persisted_or_inspected_scores": 16,
+    "hugging_face_scores_complete": true
+  },
+  "correction": {
+    "adapter_paths": {
+      "full_suffix_29": "/home/ubuntu/redco/adapters/full_suffix_29",
+      "full_suffix_30": "/home/ubuntu/redco/adapters/full_suffix_30",
+      "sliced_29": "/home/ubuntu/redco/adapters/sliced_29",
+      "broadcast_74": "/home/ubuntu/redco/adapters/broadcast_74"
+    },
+    "adapter_bytes_and_hashes_unchanged": true,
+    "changes_prefixes_temperatures_or_thresholds": false,
+    "changes_scoring_code": false
+  },
+  "call_accounting": {
+    "original_maximum_model_calls": 80,
+    "consumed_unobserved_base_calls": 16,
+    "corrected_total_ceiling": 96,
+    "justification": "Permit exactly one complete 80-call recovery run while accounting for the 16 unpersisted base calls consumed by the path error. No scientific sample size or comparison input changes."
+  },
+  "retry_policy": "Run one complete unchanged vLLM scoring pass on the same pod using the absolute hash-verified adapter paths. Do not rerun Hugging Face scoring and do not retry again after this pass starts."
+}
