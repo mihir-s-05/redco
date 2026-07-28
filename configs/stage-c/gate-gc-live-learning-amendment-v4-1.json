@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-learning-v4",
+  "amendment": "v4.1-hardware-only",
+  "status": "frozen_before_provisioning_and_before_any_v4_model_call",
+  "frozen_at_local_date": "2026-07-28",
+  "parent": {
+    "path": "configs/stage-c/gate-gc-live-learning-preregistration-v4.json",
+    "sha256": "6f72ac3230212556b88bebb9c5602935a9ab9b252b15c1a4efa2b14dc497a72c"
+  },
+  "reason": "The preregistered 2xA6000 resource 8b33a6 was not returned by a read-only availability query. The cheapest genuinely available qualifying resource was e0cf54.",
+  "replacement_resource": {
+    "resource_id": "e0cf54",
+    "cloud_id": "gpu_2x_6000_ada",
+    "hardware": "non-spot 2x RTX6000Ada 48GB",
+    "provider": "massedcompute",
+    "location": "US",
+    "security": "datacenter",
+    "price_usd_per_hour": 1.5,
+    "vcpus": 26,
+    "memory_gb": 144,
+    "ephemeral_disk_gb": 700,
+    "persistent_disks": 0
+  },
+  "unchanged": [
+    "source and patch hashes",
+    "model and LoRA settings",
+    "optimizer",
+    "run seed",
+    "step, trace, and policy-call budgets",
+    "single corrected broadcast campaign",
+    "strict snapshot lifecycle contract",
+    "analysis code",
+    "bootstrap seed, sample count, and confidence",
+    "all integration and learning thresholds",
+    "90-minute lifetime and 3.00 USD charge caps",
+    "3600-second training timeout",
+    "no-retry rule after any v4 model call"
+  ]
+}
