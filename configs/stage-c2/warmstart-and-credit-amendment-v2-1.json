@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c2-powered-warmstart-and-credit",
+  "amendment": "v2.1",
+  "status": "clerical_validation_count_correction_frozen_before_gpu_use",
+  "frozen_at_local_date": "2026-07-28",
+  "protocol": {
+    "path": "configs/stage-c2/warmstart-and-credit-preregistration-v2.json",
+    "sha256": "9bee607f95f0d3eed67fb19e9c01b2510d66ce02c886ed6965cf287d9a4eed2a"
+  },
+  "correction": {
+    "field": "validated_before_freeze.root_tests",
+    "recorded": 122,
+    "correct": 118,
+    "evidence": "uv run pytest --collect-only -q summed 118 collected tests; the complete suite passed immediately before freeze.",
+    "changes_scientific_protocol": false,
+    "changes_code_or_runtime": false
+  }
+}
