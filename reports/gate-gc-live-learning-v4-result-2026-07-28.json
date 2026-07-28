@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-learning-v4",
+  "status": "fail",
+  "campaign_complete": true,
+  "gate_gc_cleared": false,
+  "failure_class": "learning threshold failure after valid three-arm integration",
+  "checks": {
+    "integration_pass": true,
+    "learning_pass": false,
+    "replay_mode_equivalence_pass": true,
+    "thresholds_changed": false,
+    "observed_v4_arm_retried": false
+  },
+  "broadcast": {
+    "status": "complete_and_integration_valid",
+    "steps": 75,
+    "train_policy_calls": 1200,
+    "branch_records": 0,
+    "invalid_snapshot_records": 0,
+    "errored_traces": 0,
+    "positive_gradient_steps": 75,
+    "final_eval_mean": 0.96875,
+    "final_eval_policy_version": 74,
+    "final_adapter_sha256": "9fa28c69cff12ce581a47ce17e4a7c01c274c633b5a34fb95d2b1546a0b61e9c",
+    "final_adapter_bytes": 264300328,
+    "gathered_full_model_files": 0
+  },
+  "carried_forward_arms": {
+    "sliced": {
+      "source": "gate-gc-live-learning-v3",
+      "status": "complete_and_integration_valid",
+      "steps": 30,
+      "train_policy_calls": 1200,
+      "branch_records": 960,
+      "invalid_snapshot_records": 0,
+      "replay_mismatches": 0,
+      "errored_traces": 0,
+      "positive_gradient_steps": 30,
+      "final_eval_mean": 0.96875,
+      "manifest_sha256": "99291af9e35cf96c88a8076ec8476572ccd191670e82ef1767f67be79eb1d2cc"
+    },
+    "full_suffix": {
+      "source": "gate-gc-live-learning-v3",
+      "status": "complete_and_integration_valid",
+      "steps": 30,
+      "train_policy_calls": 1200,
+      "branch_records": 960,
+      "invalid_snapshot_records": 0,
+      "replay_mismatches": 0,
+      "errored_traces": 0,
+      "positive_gradient_steps": 30,
+      "final_eval_mean": 0.96875,
+      "manifest_sha256": "d4ba6442840d4dc3ddf01168feb2acccc6d79e0adfc9e33a75b7c1d0f0a3f1d9"
+    }
+  },
+  "comparisons": {
+    "full_suffix_minus_broadcast": {
+      "estimate": 0.0,
+      "lower_90_percent": 0.0,
+      "upper_90_percent": 0.0,
+      "required_point_minimum": 0.02,
+      "required_lower_bound": "greater than zero",
+      "pass": false
+    },
+    "sliced_minus_broadcast": {
+      "estimate": 0.0,
+      "lower_90_percent": 0.0,
+      "upper_90_percent": 0.0,
+      "required_point_minimum": 0.02,
+      "required_lower_bound": "greater than zero",
+      "pass": false
+    },
+    "sliced_minus_full_suffix": {
+      "estimate": 0.0,
+      "lower_90_percent": 0.0,
+      "upper_90_percent": 0.0,
+      "maximum_absolute_point_difference": 0.05,
+      "confidence_interval_must_be_within": [
+        -0.15,
+        0.15
+      ],
+      "pass": true
+    }
+  },
+  "artifact_integrity": {
+    "local_root": "runs/stage-c/gate-gc-live-learning-v4",
+    "remote_manifest_entries": 363,
+    "remote_manifest_sha256": "c6d975aff14feb27d12d18c0dcf4d2ae2bbe35722e86324f97ffcda18e3ae46f",
+    "remote_manifest_verified_locally": true,
+    "aggregate_report": "runs/stage-c/gate-gc-live-learning-v4/gate-report.json",
+    "aggregate_report_sha256": "099833dff97d47b193f4b49b11f0c47c8926bfb7e29fe107514b422f12cb19ef",
+    "aggregate_signed_payload_sha256": "9aa4c2e267ef0ec3ecad0d6143b4e73dfa59e38be6632feed90e9d6ad5d931c4",
+    "local_bytes_including_aggregate_report": 559002960
+  },
+  "setup_history": {
+    "pre_model_attempts": 2,
+    "model_calls_in_setup_attempts": 0,
+    "cause": "The first sparse transfer omitted editable-package README metadata. Both setup-only failures are preserved in the local artifact root, and the completed uv environment and cache were reused.",
+    "runtime_warning": "vLLM's optional usage-reporting thread could not create /home/ubuntu/.config/vllm. The inference server, trainer, and campaign continued normally."
+  },
+  "resource": {
+    "pod_id": "ef19bb5e33364ddeb135065943f8f9ce",
+    "hardware": "2x RTX6000Ada 48GB",
+    "rate_usd_per_hour": 1.5,
+    "final_pod_charge_usd": 0.7672,
+    "wallet_after_termination_usd": 40.4662,
+    "active_pods_after_cleanup": 0,
+    "persistent_disks_after_cleanup": 0
+  },
+  "conclusion": "The corrected exact-snapshot control and the ReDCO arms all integrate successfully, and sliced/full replay are exactly equivalent on the held-out pairs. The unchanged minimal probe suite produces identical final held-out outcomes in all three arms, so the preregistered ReDCO learning-improvement claim fails.",
+  "signed_payload_sha256": "29708a14886eb7314d2dcf4e3497ec8d186a76e19b1d30846fe9f26c848a4bfb"
+}
