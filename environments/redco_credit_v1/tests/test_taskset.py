@@ -1,5 +1,10 @@
+import asyncio
+from dataclasses import dataclass
+from types import SimpleNamespace
+
 import verifiers.v1 as vf
 from redco_credit_v1.taskset import (
+    RedcoCreditEnv,
     RedcoCreditEnvConfig,
     RedcoCreditTaskset,
     RedcoCreditTasksetConfig,
@@ -9,6 +14,37 @@ from redco_credit_v1.taskset import (
     parse_action,
     parse_route,
 )
+
+from redco.algo.branching import trajectory_rloo
+
+
+@dataclass(frozen=True)
+class _MockContext:
+    sampling: vf.SamplingConfig
+
+
+class _MockAgent:
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+        self.ctx = _MockContext(
+            vf.SamplingConfig(
+                temperature=0.7,
+                max_tokens=64,
+                extra_body={"cache_salt": "mock"},
+            )
+        )
+        self.tasks: list[vf.Task] = []
+        self.traces: list[SimpleNamespace] = []
+        self.trainable = True
+
+    async def run(self, task: vf.Task) -> SimpleNamespace:
+        self.tasks.append(task)
+        trace = SimpleNamespace(
+            id=f"mock-trace-{len(self.traces)}",
+            last_reply=self.reply,
+        )
+        self.traces.append(trace)
+        return trace
 
 
 def test_taskset_covers_every_probe_at_each_seed() -> None:
@@ -133,6 +169,50 @@ def test_context_sampling_preserves_multitoken_route_budget() -> None:
         "top_k": 20,
     }
     assert parse_route("<route>delta</route>") == "delta"
+
+
+def test_mock_model_rollout_parses_root_and_emits_trainable_credit() -> None:
+    env = RedcoCreditEnv(
+        RedcoCreditEnvConfig(
+            taskset={
+                "id": "redco-credit-v1",
+                "repeats_per_probe": 1,
+                "probe_names": ["confusion_redundant"],
+            },
+            branch_group_size=4,
+            context_temperature=2.0,
+            branch_temperature=2.0,
+        )
+    )
+    task = env.taskset.load()[0]
+    context = _MockAgent("<route>beta</route>")
+    original = _MockAgent("0")
+    alternative_1 = _MockAgent("5")
+    alternative_2 = _MockAgent("0")
+    alternative_3 = _MockAgent("5")
+    agents = SimpleNamespace(
+        context=context,
+        original=original,
+        alternative_1=alternative_1,
+        alternative_2=alternative_2,
+        alternative_3=alternative_3,
+    )
+
+    asyncio.run(env.run(task, agents))
+
+    assert context.ctx.sampling.max_tokens == 64
+    assert parse_route(context.traces[0].last_reply) == "beta"
+    branch_agents = (original, alternative_1, alternative_2, alternative_3)
+    assert all(agent.tasks[0].data.context_route == "beta" for agent in branch_agents)
+    rewards = tuple(
+        asyncio.run(agent.tasks[0].deterministic_reward(agent.traces[0]))
+        for agent in branch_agents
+    )
+    advantages = trajectory_rloo(rewards)
+    trainable_fraction = sum(value != 0.0 for value in advantages) / len(advantages)
+
+    assert rewards == (0.0, 1.0, 0.0, 1.0)
+    assert trainable_fraction > 0.0
 
 
 def test_env_config_freezes_branch_count_and_replay_mode() -> None:

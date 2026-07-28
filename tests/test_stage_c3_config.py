@@ -37,3 +37,36 @@ def test_stage_c3_config_render_rejects_unregistered_probe(tmp_path: Path) -> No
             seed=9301,
             run_root="runs/stage-c3/test",
         )
+
+
+def test_stage_c3_smoke_is_one_step_broadcast(tmp_path: Path) -> None:
+    output = tmp_path / "smoke.toml"
+    manifest = render(
+        Path("configs/stage-c3/credit-confusion-broadcast-template.toml"),
+        output,
+        arm="broadcast",
+        probe="confusion_redundant",
+        seed=9400,
+        run_root="runs/stage-c3/credit-confusion-live-v2/smoke",
+        smoke=True,
+    )
+    text = output.read_text(encoding="utf-8")
+
+    assert "max_steps = 1" in text
+    assert "interval = 1" in text
+    assert "num_examples = 16" in text
+    assert "max_steps = 36" not in text
+    assert manifest["smoke"] is True
+
+
+def test_stage_c3_smoke_rejects_sliced_arm(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="broadcast arm"):
+        render(
+            Path("configs/stage-c3/credit-confusion-sliced-template.toml"),
+            tmp_path / "bad-smoke.toml",
+            arm="sliced",
+            probe="confusion_redundant",
+            seed=9400,
+            run_root="runs/stage-c3/credit-confusion-live-v2/smoke",
+            smoke=True,
+        )

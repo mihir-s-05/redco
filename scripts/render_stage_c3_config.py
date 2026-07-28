@@ -16,6 +16,7 @@ def main() -> None:
     parser.add_argument("--arm", choices=sorted(ARMS), required=True)
     parser.add_argument("--probe", choices=sorted(PROBES), required=True)
     parser.add_argument("--seed", type=int, required=True)
+    parser.add_argument("--smoke", action="store_true")
     parser.add_argument(
         "--run-root",
         default="runs/stage-c3/credit-confusion-live",
@@ -29,6 +30,7 @@ def main() -> None:
         probe=args.probe,
         seed=args.seed,
         run_root=args.run_root,
+        smoke=args.smoke,
     )
     if args.manifest is not None:
         args.manifest.parent.mkdir(parents=True, exist_ok=True)

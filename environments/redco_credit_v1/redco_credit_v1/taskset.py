@@ -363,6 +363,10 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
                     "arm": "broadcast",
                     "branch_evaluations": 0,
                 }
+            by_role["context"].record_metric(
+                "redco_valid_route",
+                float(parse_route(by_role["context"].last_reply) is not None),
+            )
             return
         roles = stage_c_branch_roles(self.config.branch_group_size)
         if len(episode.traces) != 1 + len(roles):
@@ -503,3 +507,7 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             "outer_weight": 1.0,
             "parsed_route": parse_route(context.last_reply),
         }
+        context.record_metric(
+            "redco_valid_route",
+            float(parse_route(context.last_reply) is not None),
+        )

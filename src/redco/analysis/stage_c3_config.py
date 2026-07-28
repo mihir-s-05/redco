@@ -21,6 +21,7 @@ def render(
     probe: str,
     seed: int,
     run_root: str,
+    smoke: bool = False,
 ) -> dict[str, object]:
     if arm not in ARMS:
         raise ValueError(f"unsupported arm: {arm}")
@@ -42,6 +43,18 @@ def render(
         text = text.replace(placeholder, value)
     if "__" in text:
         raise ValueError("rendered config retains an unresolved placeholder")
+    if smoke:
+        if arm != "broadcast":
+            raise ValueError("the frozen smoke uses the broadcast arm")
+        if text.count("max_steps = 36") != 1:
+            raise ValueError("broadcast template has an unexpected max_steps")
+        if text.count("interval = 6") != 1:
+            raise ValueError("broadcast template has an unexpected eval interval")
+        if text.count("num_examples = 64") != 1:
+            raise ValueError("broadcast template has an unexpected eval size")
+        text = text.replace("max_steps = 36", "max_steps = 1")
+        text = text.replace("interval = 6", "interval = 1")
+        text = text.replace("num_examples = 64", "num_examples = 16")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(text, encoding="utf-8", newline="\n")
     digest = hashlib.sha256(text.encode()).hexdigest()
@@ -50,6 +63,7 @@ def render(
         "arm": arm,
         "probe": probe,
         "seed": seed,
+        "smoke": smoke,
         "template": template.as_posix(),
         "output": output.as_posix(),
         "sha256": digest,
