@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c2-policy-audit-and-shared-warmstart",
+  "amendment": "corrective-3",
+  "status": "adapter_name_correction_frozen_before_any_adapter_policy_score",
+  "frozen_at_local_date": "2026-07-28",
+  "observed_state": {
+    "base_model_loaded_for_scoring": true,
+    "adapter_models_scored": 0,
+    "score_artifact_written": false,
+    "selection_observed": false,
+    "sft_will_be_retried": false
+  },
+  "trigger": "The retained RL broadcasts use Prime's native tensor names (model.layers...), while SFT weight checkpoints use PEFT-compatible names (base_model.model.model.layers...). The direct loader initially accepted only the latter and stopped before installing any adapter hook.",
+  "correction": "Accept both serialized prefixes and map both to the same underlying Transformers module name. Tensor values, LoRA algebra, cases, and all selection rules are unchanged.",
+  "validation": "The algebra validator now asserts both name mappings before repeating the exact hook/merge analytical equality checks.",
+  "source": {
+    "parent_commit": "cc78366086b995515d0cc3844befaa4e48a170f6",
+    "sha256": {
+      "scripts/stage_c_lora.py": "0647f6ed77e11757fe25279e5f29e560ddd3bd8a4c1fb8db26b944553d52d846",
+      "scripts/validate_stage_c_lora.py": "22650fd74dcc33cd5deb7d38415c2fab28ca8fa10d972a0d2bc2b5fb7f963303"
+    }
+  }
+}
