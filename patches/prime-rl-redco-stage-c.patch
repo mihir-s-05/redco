@@ -79,10 +79,10 @@ index fe6b69620..575d09640 100644
          for env_cfg in self.train.env:
              if "group_size" not in env_cfg.model_fields_set:
 diff --git a/skills/configs/SKILL.md b/skills/configs/SKILL.md
-index 1aa0d0068..e7329fb8f 100644
+index 1aa0d0068..a10501fe2 100644
 --- a/skills/configs/SKILL.md
 +++ b/skills/configs/SKILL.md
-@@ -74,6 +74,30 @@ enable_token_export = true
+@@ -74,6 +74,32 @@ enable_token_export = true
 
  Leave it unset for normal training. When enabled, it exports every sequence from each exporting rank.
 
@@ -101,14 +101,16 @@ index 1aa0d0068..e7329fb8f 100644
 +type = "filesystem"
 +```
 +
-+`train_groups_per_policy` is the number of complete environment groups needed
-+to fill one optimizer batch. Strict mode stops opening groups after that
-+number, waits until the trainer's filesystem checkpoint has been fully applied
-+to inference, runs any evaluation scheduled for that snapshot to completion,
-+and only then opens the next training cohort. Use it for exact call accounting
-+and snapshot-aligned evaluation, not throughput-oriented production runs. The
-+config validator rejects nonzero `max_off_policy_steps` and non-filesystem
-+weight broadcast in this mode.
++`train_groups_per_policy` counts complete source environment groups admitted
++for one policy version; it does not count optimizer batches or serialized
++traces. One source group can expand into enough traces for a full optimizer
++batch, so use `1` whenever a single group fills the batch. Strict mode stops
++opening groups after that number, waits until the trainer's filesystem
++checkpoint has been fully applied to inference, runs any evaluation scheduled
++for that snapshot to completion, and only then opens the next training cohort.
++Use it for exact call accounting and snapshot-aligned evaluation, not
++throughput-oriented production runs. The config validator rejects nonzero
++`max_off_policy_steps` and non-filesystem weight broadcast in this mode.
 +
  ## Key files
 
@@ -1049,7 +1051,7 @@ index 8b4b31f7e..a14b06971 100644
      micro_batch = prepare_sample(make_training_example(), seq_len=16)
 
 diff --git a/tests/unit/orchestrator/test_orchestrator_setup.py b/tests/unit/orchestrator/test_orchestrator_setup.py
-index 73768a769..4725249b0 100644
+index 73768a769..2d8a068a6 100644
 --- a/tests/unit/orchestrator/test_orchestrator_setup.py
 +++ b/tests/unit/orchestrator/test_orchestrator_setup.py
 @@ -1,9 +1,13 @@
@@ -1072,11 +1074,11 @@ index 73768a769..4725249b0 100644
      asyncio.run(run())
 +
 +
-+def test_strict_snapshot_dispatch_limits_groups_and_waits_for_eval_tail():
++def test_strict_snapshot_single_group_budget_blocks_second_group():
 +    dispatcher = object.__new__(RolloutDispatcher)
 +    dispatcher.strict_snapshot_batches = True
-+    dispatcher.train_groups_per_policy = 2
-+    dispatcher.train_groups_started_by_policy = Counter({4: 1})
++    dispatcher.train_groups_per_policy = 1
++    dispatcher.train_groups_started_by_policy = Counter()
 +    dispatcher.policy = Policy(version=4, model_name="policy")
 +    dispatcher.eval_source = None
 +    dispatcher.groups = {}
@@ -1084,7 +1086,7 @@ index 73768a769..4725249b0 100644
 +
 +    assert dispatcher.can_open_fresh_train_group()
 +
-+    dispatcher.train_groups_started_by_policy[4] = 2
++    dispatcher.train_groups_started_by_policy[4] = 1
 +    assert not dispatcher.can_open_fresh_train_group()
 +
 +    dispatcher.policy.version = 5
