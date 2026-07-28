@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c2-policy-audit-and-shared-warmstart",
+  "amendment": "corrective-1",
+  "status": "implementation_correction_frozen_after_sft_and_before_any_policy_scoring",
+  "frozen_at_local_date": "2026-07-28",
+  "observed_state": {
+    "sft_optimizer_steps_complete": 12,
+    "stable_adapter_only_checkpoints": 12,
+    "policy_scoring_calls_complete": 0,
+    "merge_calls_complete": 0,
+    "selection_observed": false,
+    "sft_will_be_retried": false
+  },
+  "trigger": {
+    "failure": "The frozen scorer imported PEFT, which is not a Prime-RL dependency.",
+    "first_resolution_attempt": "A uv --with peft import-only check resolved a second CUDA-13 Torch overlay whose torchvision ABI was incompatible with Prime-RL's frozen CUDA-12 Torch environment.",
+    "effect": "Both attempts failed before loading a model for scoring. The incompatible overlay is not used."
+  },
+  "correction": {
+    "scoring": "Load standard adapter safetensors directly and attach non-mutating Linear forward hooks implementing output + B(A(input)) * (alpha/r).",
+    "merge": "Apply the identical standard LoRA update weight += B @ A * (alpha/r) directly to each named base weight before save_pretrained.",
+    "dependencies": "Use only Torch, safetensors, and Transformers already present in the frozen Prime-RL uv environment.",
+    "validation_before_scoring": "A synthetic Linear adapter must match both the analytical LoRA output and the merged output before any policy checkpoint is scored.",
+    "metrics_verifier": "Prime's file monitor emits six JSONL records per optimizer step. Verify the exact step set 1..12 and retain the raw row count instead of requiring one row per step."
+  },
+  "unchanged_science": [
+    "base model",
+    "SFT dataset and seeds",
+    "SFT optimizer settings and completed checkpoints",
+    "all 12 candidates",
+    "exact-prefix scoring cases",
+    "temperatures and reported metrics",
+    "15 to 25 percent action-support window",
+    "greedy-rate cap",
+    "branch count and informativeness floor",
+    "earliest-passing-checkpoint rule",
+    "merge-equivalence tolerance",
+    "no-heldout-reward rule"
+  ],
+  "source": {
+    "parent_commit": "8c24084ae3d33348eb45e1621430dd85ca52285c",
+    "sha256": {
+      "scripts/stage_c_lora.py": "67efb29f338751100b5e0ac153c5539032524eb83c763610895a2b41b91307a7",
+      "scripts/score_stage_c_policies.py": "024b2e3cb2b65c464d8f318b842fa748ae75d8285d46680898336ca3cf29d374",
+      "scripts/merge_stage_c_warmstart.py": "29ef2bb8eac167cddf08904f83d5c1d81d7e2a1f3c794964f0d5010b76ae7138",
+      "src/redco/analysis/stage_c_warmstart_gate.py": "89b6e14dea099eee8ddc8cee21115db5f8d934b5807b0ef7f041a036e634cb31"
+    }
+  }
+}
