@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c2-policy-audit-and-shared-warmstart",
+  "status": "scientific_protocol_frozen_before_gpu_scoring_or_sft",
+  "frozen_at_local_date": "2026-07-28",
+  "purpose": "Quantify movement in the completed cold-start arms, then create one deliberately incomplete exploration warm start shared by every Stage C2 credit arm.",
+  "separation_of_factors": {
+    "exploration_component": "A single SFT checkpoint selected only by planted-action support, before consulting any held-out reward.",
+    "credit_component": "Not varied in this protocol. The selected merged checkpoint will become the identical initialization for broadcast, full-suffix, and sliced arms in a separately frozen campaign.",
+    "claim_boundary": "This protocol can clear an exploration-support prerequisite. It cannot establish a ReDCO learning advantage."
+  },
+  "policy_audit": {
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "cases": "Eight exact rendered gamma-route prefixes recovered from observed Stage C training tensors, one per finite probe.",
+    "action_tokens": "Observed one-token digit IDs 15 through 22; no retokenized prompt is used.",
+    "cold_models": [
+      {
+        "name": "base",
+        "adapter": null
+      },
+      {
+        "name": "cold_sliced",
+        "adapter_sha256": "226a96b6d7e8e7c2e44f6a633d80c92880ac79df444d454f2a81423c58818729"
+      },
+      {
+        "name": "cold_full_suffix",
+        "adapter_sha256": "6ce868aa127bde05c7e5f05714ac4ea4845c9835d5d33d7c1c219d192b9be167"
+      },
+      {
+        "name": "cold_broadcast",
+        "adapter_sha256": "9fa28c69cff12ce581a47ce17e4a7c01c274c633b5a34fb95d2b1546a0b61e9c"
+      }
+    ],
+    "measurements": [
+      "full-vocabulary action probabilities at temperatures 1.0 and 2.0",
+      "allowed-action-conditional probabilities at temperatures 1.0 and 2.0",
+      "full-vocabulary KL from base at temperature 1.0",
+      "allowed-action KL from base at temperature 1.0",
+      "greedy token and allowed-action agreement"
+    ],
+    "limitation": "Every observed root context used route gamma. Generalization of support to other route strings is not asserted by this audit."
+  },
+  "warmstart": {
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "adaptation": "LoRA rank 32 alpha 64",
+    "optimizer": "AdamW, learning rate 1e-6, constant schedule",
+    "steps": 12,
+    "global_batch_size": 32,
+    "micro_batch_size": 4,
+    "sequence_length": 256,
+    "checkpoint_interval": 1,
+    "checkpoint_storage": "adapter-only safetensors; no gathered 4B checkpoints",
+    "dataset": {
+      "examples": 32,
+      "probe": "planted_needle only",
+      "teacher_action": "5",
+      "calibration_seeds": [
+        20000,
+        20031
+      ],
+      "heldout_seed_overlap": false,
+      "scope": "The dataset raises support for the missing useful action and does not teach the other seven probe solutions."
+    }
+  },
+  "selection_rule": {
+    "candidate_order": "ascending SFT optimizer step",
+    "selected_checkpoint": "the earliest checkpoint meeting every bound",
+    "minimum_full_vocab_action_5_mass_at_temperature_2_for_every_needle_case": 0.15,
+    "maximum_full_vocab_action_5_mass_at_temperature_2_for_every_needle_case": 0.25,
+    "maximum_needle_action_5_greedy_rate": 0.5,
+    "future_branch_count": 6,
+    "future_groups_per_optimizer_step": 8,
+    "minimum_expected_informative_groups_per_optimizer_step_using_the_minimum_case_mass": 4.75,
+    "formula": "8 * (1 - p^6 - (1-p)^6)",
+    "heldout_rewards_consulted": false,
+    "failure": "If no one of the 12 checkpoints meets every bound, report the warm-start prerequisite as failed and do not launch a learning arm."
+  },
+  "merge_gate": {
+    "method": "PEFT safe_merge into a temporary local copy of the same 4B base",
+    "greedy_token_mismatches_allowed": 0,
+    "maximum_absolute_action_probability_difference": 2e-05,
+    "retention": "Keep the selected LoRA adapter and signed merge manifest locally. The reproducible merged 4B model remains ephemeral and is not copied to the local workspace."
+  },
+  "execution_policy": {
+    "one_sft_run": true,
+    "no_retry_after_any_optimizer_step": true,
+    "pre_model_setup_failures": "May be corrected only if logs establish that neither scoring nor an optimizer step occurred.",
+    "gpu_protocol": "Use at most one non-spot 2x48GB non-A100/non-H100 pod at no more than $2.00/hour, selected in a hardware-only amendment.",
+    "persistent_disks": 0,
+    "reuse_one_pod_for_followup": "If the warm-start gate passes, keep the same ephemeral pod only long enough to freeze and execute the authorized Stage C2 campaign, avoiding a second dependency/model download.",
+    "timeout_seconds": 3600,
+    "artifact_policy": "Sync raw scores, logs, metrics, all manifests, the gate report, and only the selected adapter. Do not retain unselected adapters or the merged 4B model locally."
+  },
+  "source": {
+    "parent_commit": "8953245f9ea1b7d1c56c07d98e06e278f571c0e4",
+    "prime_rl_commit": "3b22dd951cad1036d1fe8dd0a0bfc40807a9b360",
+    "sha256": {
+      "patches/prime-rl-redco-stage-c2.patch": "8c74a85e57f201f6c7d9139ff3b57893f362805965541152bcdc99cb70290e43",
+      "configs/stage-c2/warmstart-sft.toml": "199f1ac577798487255a4180a8c21b5e81aca8c659eed04761950981863da5a4",
+      "configs/stage-c2/policy-audit-cases.json": "259ff6e94e2f692a5f50a34137a39f77aa247633d0ced481b931784f386e1dcc",
+      "datasets/stage-c/warmstart-train.jsonl": "8fa55a3b3a1f99b37b9a40eb93aa351b4a525b63865061461fdaa215596eac33",
+      "datasets/stage-c/warmstart-manifest.json": "6c95e37d8df6e79cea2f374771aaf2ed1db5fb3c8c4122915c8c0c0903e3f9cf",
+      "scripts/score_stage_c_policies.py": "e478f5f328f5733d6d3d6383b9b6fcb83fc8da8f054d85cdc37250637028d4c8",
+      "scripts/merge_stage_c_warmstart.py": "835920f9a5303bf8c3447fca524ba64d5e693cade40e21b785a0d1af20cb4ec6",
+      "scripts/run_stage_c2_warmstart.sh": "bdd71eb085322c81825ec36c7a23d057808d9a40a842ce2eb49507951b06609a",
+      "src/redco/analysis/stage_c_policy_audit.py": "3ea0feea8da5e07958f859202ae957ee56bf1346405758010a0673e99842fdbc",
+      "src/redco/analysis/stage_c_warmstart.py": "729477cea509c6f31f0c67496bb821f3a27a44e245a34fa10589850734ab4dbd",
+      "src/redco/analysis/stage_c_warmstart_gate.py": "934cbc32800af2888875281b15bf1b99213eb13df8c2e9e36114d7bcfc590577",
+      "environments/redco_credit_v1/redco_credit_v1/taskset.py": "5abe0658a9ee835de2cddadb4ffcee5c729193000868bab4069ad6a75fd26c09",
+      "reports/stage-c-oracle-2026-07-28.json": "0feef3c87f9b4802936bdbaf1248f54e9fa3d68490d702803657a4beb73207c2"
+    }
+  }
+}
