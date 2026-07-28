@@ -7,6 +7,12 @@
     "mechanistic_credit_positive": false,
     "replay_equivalence_passed": true
   },
+  "scientific_scope": {
+    "frozen_gate_outcome": "The preregistered mechanistic-positive rule did not pass.",
+    "core_credit_thesis_negative": false,
+    "reason": "The task had one reward-relevant decision and all arms saturated; after broadcast reached 0.9999624760, a +0.02 endpoint margin was unreachable.",
+    "required_followup": "A preregistered multi-decision credit-confusion battery with nuisance drift, causal calls-to-threshold, and an a priori saturation guard."
+  },
   "authoritative_final_action_5_mass_temperature_2": {
     "full_suffix": 0.9975516931259703,
     "broadcast": 0.9999624760300176,
