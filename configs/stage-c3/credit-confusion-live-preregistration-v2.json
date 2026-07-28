@@ -1,0 +1,224 @@
+{
+  "schema_version": 2,
+  "experiment": "stage-c3-credit-confusion-live-v2",
+  "status": "frozen_before_any_stage_c3_v2_model_call",
+  "frozen_at_local_date": "2026-07-28",
+  "scientific_question": "On genuine two-decision workflows, does node-level all-branch LOO reduce policy drift at a known non-causal target compared with trajectory-broadcast GRPO, while preserving the ability to learn causal target actions?",
+  "v1_terminal_record": {
+    "protocol_commit": "8f479f2",
+    "terminal_report_commit": "a659674",
+    "terminal_report": "reports/stage-c3-credit-confusion-live-2026-07-28.md",
+    "bundle": "runs/stage-c3/credit-confusion-live-terminal-failure.tar.zst",
+    "bundle_sha256": "1a4c239da6c878a1513964be2041dcd9e73066cc567456de8c896d5b8ddb13d9",
+    "scientific_gate_evaluated": false,
+    "scientific_information_observed": "None: the first arm produced constant -0.5 reward, zero trainable rollouts, and no useful optimizer update; no paired arm ran and no scientific threshold was evaluated.",
+    "failure_class": "Root route completions were accidentally restricted to one token, so every route was invalid. This was an execution-path integration defect, not an estimator observation.",
+    "billed_cost_usd": 0.43,
+    "accepted_disposition": "Terminal failure; v1 remains closed and is never retried."
+  },
+  "distinct_campaign_justification": {
+    "rules_question": "v1 prohibited a second v1 campaign after its first model call. v2 does not reinterpret or reopen v1; it is a separately preregistered campaign after accepting v1's terminal result.",
+    "anti_bias_basis": "The v1 defect prevented any arm comparison or scientific gate evaluation, so no outcome-informed redesign of metrics, thresholds, or hypotheses was possible.",
+    "insurance": [
+      "Retire the entire 9301-9304 seed block and use fresh seeds 9401-9404.",
+      "Keep frozen_metrics_and_decision byte-identical to v1.",
+      "Permit only the reviewed execution fix, end-to-end regression, pre-arm smoke, automatic early abort, fresh seeds, source hashes, and currently available hardware."
+    ]
+  },
+  "scope_correction": {
+    "stage_c2": "Stage C2 is treated as a successful infrastructure and exploration diagnostic, not a powered negative for the core credit thesis.",
+    "reason": [
+      "Its endpoint margin became unreachable after broadcast saturated.",
+      "Its planted-needle workflow did not create meaningful credit confusion at the targeted decision."
+    ],
+    "cpu_power_gate": {
+      "preregistration_commit": "a16a23b",
+      "result_commit": "38f3d28",
+      "status": "passed",
+      "raw_sha256": "8f3a00e012390fec455897378c80c9b31ee596df49a050145e300b3636214e43"
+    }
+  },
+  "tasks": {
+    "confusion_irrelevant": "The root route changes reward; the targeted digit has no effect. This is the primary credit-confusion endpoint.",
+    "confusion_redundant": "Reward succeeds when either root route delta or target digit 5 succeeds.",
+    "confusion_lucky": "Target digit 5 and root route are causal while an episode-level +/-1 luck term is shared by every branch.",
+    "common_random_numbers": "For one ReDCO episode, root route and episode luck are sampled once and held fixed across all 11 target branches."
+  },
+  "initialization": {
+    "base_model": "Qwen/Qwen3-4B-Instruct-2507",
+    "selected_warmstart_step": 23,
+    "selected_adapter_sha256": "28fba5d421ea611db2e0d9cd411e40a0fc2035a9a45eb0bb3be24c84947e0ab6",
+    "merged_runtime_path": "runs/stage-c2/warmstart-merged-candidates-v2/step_23",
+    "prior_deployed_score_sha256": "1971d104e5a16ee6998037d19ad370e03324980eb68cd344157bcafb4f730c9d",
+    "support_guard": {
+      "mean_digit_5_mass_at_temperature_2": [
+        0.03,
+        0.35
+      ],
+      "mean_normalized_octet_entropy_minimum": 1.25,
+      "failure_action": "Classify the campaign as underpowered and do not reinterpret it as an algorithm failure."
+    }
+  },
+  "design": {
+    "arms": {
+      "broadcast": "Stock GRPO trajectory advantage assigned to root and target decisions.",
+      "sliced": "ReDCO trajectory LOO at the root and 11-branch LOO at the target with sliced replay."
+    },
+    "excluded_arm": "Full-suffix replay is not repeated because prior live sliced-vs-full outcome equivalence already passed; this gate isolates credit.",
+    "branch_group_size": 11,
+    "trajectory_group_size": 8,
+    "matched_policy_calls_per_run": 576,
+    "aligned_curve_interval_policy_calls": 96,
+    "optimizer": {
+      "lora_rank": 32,
+      "lora_alpha": 64,
+      "learning_rate": 1e-05,
+      "broadcast_steps": 36,
+      "sliced_steps": 6
+    },
+    "runs": [
+      {
+        "probe": "confusion_irrelevant",
+        "seed": 9401,
+        "order": [
+          "broadcast",
+          "sliced"
+        ]
+      },
+      {
+        "probe": "confusion_irrelevant",
+        "seed": 9402,
+        "order": [
+          "sliced",
+          "broadcast"
+        ]
+      },
+      {
+        "probe": "confusion_redundant",
+        "seed": 9403,
+        "order": [
+          "broadcast",
+          "sliced"
+        ]
+      },
+      {
+        "probe": "confusion_lucky",
+        "seed": 9404,
+        "order": [
+          "sliced",
+          "broadcast"
+        ]
+      }
+    ],
+    "total_runs": 8,
+    "total_policy_calls": 4608,
+    "one_campaign_rule": "After the first Stage C3 v2 model call, do not retry, substitute hardware, change thresholds, or launch a second v2 campaign."
+  },
+  "frozen_metrics_and_decision": {
+    "policy_distribution": "For each recorded prefix, normalize exact vLLM temperature-2 probabilities over digit tokens 0-7 and compute Jensen-Shannon divergence from the shared warm start.",
+    "primary_irrelevant_target": {
+      "exposure_floor": "Mean broadcast JS divergence across seeds must be at least 0.002; otherwise status is underpowered.",
+      "directional_effect": "Mean sliced JS divergence must be at most 75% of mean broadcast JS divergence.",
+      "pairwise_guard": "For each seed, sliced JS may not exceed paired broadcast JS by more than 0.002."
+    },
+    "causal_sanity": {
+      "rule": "On each causal probe, at least one arm must increase exact digit-5 mass by at least 0.05 from initialization.",
+      "calls_to_threshold": "First aligned policy-call point whose sampled evaluation target-success rate is at least 0.5.",
+      "comparison": "Calls-to-threshold is reported for both arms as a compute tradeoff; ReDCO is not required to beat broadcast because it receives fewer optimizer steps at matched calls."
+    },
+    "saturation_guard": "If any exact final digit-5 mass is at least 0.98, endpoint margins are forbidden and only the frozen calls-to-threshold curve is used for sample-efficiency interpretation.",
+    "pass": "Every support, primary, causal-sanity, completeness, and aligned-evaluation check in the frozen verifier passes.",
+    "underpowered": "Either initialization support fails or the broadcast exposure floor is not met.",
+    "fail": "The gate is adequately exposed but one or more other mandatory checks fail.",
+    "claim_limit": "A pass supports reduced nuisance drift on this small mechanistic battery, not a broad population claim."
+  },
+  "decision_rule_identity": {
+    "canonicalization": "UTF-8 JSON with sort_keys=true and separators=(',', ':')",
+    "v1_canonical_sha256": "73453e9424f79b85542cba46f0656561c789b4a3d00d01755b04ab608f8c2d3b",
+    "v2_canonical_sha256": "73453e9424f79b85542cba46f0656561c789b4a3d00d01755b04ab608f8c2d3b",
+    "requirement": "The audit must prove canonical bytes are identical before any v2 model call."
+  },
+  "execution": {
+    "package_manager": "uv only; pip is forbidden",
+    "end_to_end_regression": "A mock model drives RedcoCreditEnv.run through the real route and branch path, then asserts a 64-token root budget, parseable route, deterministic branch rewards, and nonzero trainable credit.",
+    "smoke": {
+      "position": "before_every_scientific_arm",
+      "seed": 9400,
+      "probe": "confusion_redundant",
+      "arm": "broadcast",
+      "steps": 1,
+      "training_policy_calls": 16,
+      "purpose": "Exercise the live parser, environment, reward, rollout serialization, and trainer before scientific arms.",
+      "failure_action": "Recover artifacts, terminate the pod, record terminal v2 failure, and run no scientific arm."
+    },
+    "early_abort": {
+      "scope": "smoke_and_all_eight_arms",
+      "observation": "First training aggregate row only.",
+      "checks": {
+        "rollout_error_fraction": 0.0,
+        "valid_root_route_fraction": 1.0,
+        "root_truncation_fraction_strictly_below": 0.75,
+        "trainable_fraction_strictly_above": 0.0,
+        "reward_max_strictly_above_reward_min": true
+      },
+      "implementation": "A supervisor polls run_default/metrics.jsonl, terminates the process group with exit 42 on a failed invariant, and writes a signed-by-source JSON record.",
+      "failure_action": "Stop the campaign immediately; recover existing artifacts; do not retry after any model call."
+    },
+    "pre_model_call_checks": [
+      "Verify every frozen source hash.",
+      "Run the root, environment, Prime ReDCO algorithm, config, invariant, preregistration-audit, and verifier tests.",
+      "Require the end-to-end mock rollout regression to pass.",
+      "Apply no uncommitted source edits.",
+      "Reconstruct and hash the selected merged warm start.",
+      "Render the smoke and all eight arm configs and save their hashes before the first model call.",
+      "Run the machine audit proving decision-rule identity, fresh seeds, terminal-bundle identity, smoke ordering, early-abort scope, and source hashes."
+    ],
+    "timeouts": {
+      "per_run_seconds": 10800,
+      "whole_pod_hours": 3.5
+    },
+    "failure_handling": "After any failure, recover all existing artifacts, record the terminal result, and do not retry after a model call.",
+    "artifacts": "Sync all logs, metrics, rendered configs, manifests, verifier outputs, and final adapters locally. Store final adapters as independently hashed zstd files and omit redundant intermediate broadcasts.",
+    "teardown": "Always terminate compute after artifact recovery and confirm zero persistent disks."
+  },
+  "hardware": {
+    "resource_id": "2126e0",
+    "gpu": "2x L40S 48GB",
+    "provider": "crusoecloud",
+    "location": "US",
+    "security": "datacenter",
+    "spot": false,
+    "hourly_rate_usd": 2.0,
+    "maximum_compute_charge_usd": 7.0,
+    "persistent_storage": false,
+    "selection": "Cheapest genuinely available non-spot 2x48GB resource at or below $2.00/hour observed immediately before freeze; v1 resource 6705b0 was no longer listed.",
+    "forbidden": [
+      "A100",
+      "H100",
+      "persistent disk"
+    ],
+    "ssh_key": "C:/Users/mihir/.ssh/id_rsa",
+    "ssh_rule": "Verify SSH noninteractively immediately after provisioning; terminate without model calls if it fails."
+  },
+  "source": {
+    "commit_before_preregistration": "24284ba",
+    "sha256": {
+      "configs/stage-c3/credit-confusion-broadcast-template.toml": "5b70c5fd7f2ae006539c189c30b0b73de7c004ee450bf657e8ac61cea2567ed3",
+      "configs/stage-c3/credit-confusion-sliced-template.toml": "3fad771315140a4bb432cc22c2163bc8eeb79b96e0af0c1789644a70b22d6e1b",
+      "scripts/render_stage_c3_config.py": "2cfec4ceca456717922d20faa125313c46b5b241b25415bac1954a8ed58ce2a0",
+      "scripts/run_stage_c3_supervised_arm.py": "6d6258e61e827c76a81adac61fbef42b15a29cda3d777350ffd75bddb57e4319",
+      "scripts/run_stage_c3_v2_campaign.sh": "2f488ac9fe8d9a632d8cc5b68024bfb52f12da6334c08aa576777357c5b9124c",
+      "scripts/audit_stage_c3_v2_preregistration.py": "4fc19e18c9052097ddf85d20d7ffee900ae323208bc115df28b71f5f13ae988b",
+      "src/redco/analysis/stage_c3_config.py": "275e57ca520f3606b3bcd17da28562e34c943642497c5c7b717bcb9ccd93d474",
+      "src/redco/analysis/stage_c3_invariants.py": "e184881a75186a3db6eda9034e6fd58a7aa973973e894c030a74979e80c0d53f",
+      "src/redco/analysis/stage_c3_live.py": "1a57afaa1fde010bc8ffad0a0b1a71c0f1f7d11ff9e4be6da4a43ec723158071",
+      "src/redco/analysis/stage_c3_preregistration.py": "82e8ad1f02d89180122ed4b2ccab1176662b46552711a16ed903ef76811c6ab4",
+      "environments/redco_credit_v1/redco_credit_v1/taskset.py": "9b6acff43171976957368463dc92bfbfe89575aa73bd701296f19afff28a3012",
+      "environments/redco_credit_v1/tests/test_taskset.py": "884963ecdea098d8950a1ab0c695ef59ce378e5dcfc903fb81d8b1b2391ef10a",
+      "scripts/run_stage_c2_campaign_arm.sh": "3420705eb7c588fddf33cf6d28c546dbe859abcdb75f89e3322f6c918718f638",
+      "scripts/score_stage_c_policies_vllm.py": "81c6548b60143c5e962606e630c2fe36d55b7b0c1fda47c0c3f57dbeeff2322d",
+      "configs/stage-c2/policy-audit-cases.json": "259ff6e94e2f692a5f50a34137a39f77aa247633d0ced481b931784f386e1dcc",
+      "patches/prime-rl-redco-stage-c2.patch": "f237680600e0968bff99fd0208f6778c7044b0fb62107facb8dd98d3cdabbb5c"
+    }
+  }
+}
