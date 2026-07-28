@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c2-powered-warmstart-and-credit",
+  "amendment": "v2.2",
+  "status": "deployed_warmstart_selection_correction_frozen_before_scoring_any_merged_checkpoint_after_step_21",
+  "frozen_at_local_date": "2026-07-28",
+  "protocol": {
+    "path": "configs/stage-c2/warmstart-and-credit-preregistration-v2.json",
+    "sha256": "9bee607f95f0d3eed67fb19e9c01b2510d66ce02c886ed6965cf287d9a4eed2a"
+  },
+  "observed_before_this_amendment": {
+    "sft": "The one authorized 32-step SFT run completed. It will not be repeated.",
+    "adapter_selection": {
+      "selected_step": 21,
+      "action_5_mass_at_temperature_2": 0.08116292704003687,
+      "greedy_action_5_rate": 0.0,
+      "expected_informative_groups_per_step": 4.847075340340599,
+      "selection_json_sha256": "6219d09507b38ab03ffcd7ea041ba9c7a89b6c7bad07ffd99bd10d17087ea7ed",
+      "adapter_sha256": "22433d69da6e7de779a4de45f89b4f0867ee51665f1c948b8aee4d9448cdc04e"
+    },
+    "step_21_merged_model": {
+      "action_5_mass_at_temperature_2": 0.07573515993660936,
+      "greedy_action_5_rate": 0.0,
+      "maximum_adapter_relative_probability_difference": 0.1492484614815684,
+      "gate_report_sha256": "c58aa0f44fd47eaeab79e3a393b060a1ffeaf0a9a5cad07e679fc3f090844aec",
+      "merged_scores_sha256": "cb22bc74a0fcd0ffe144203b002061caf2d8b88f64700e0f63319e9227f9add1",
+      "merge_manifest_sha256": "257f599a49c2b038729c09b9124f960d41b44023497c5d10cb0206f29f2dc827"
+    },
+    "later_merged_checkpoints": "No merged checkpoint after step 21 has been created or scored."
+  },
+  "correction": {
+    "reason": "The original adapter-versus-merged 2e-5 equality gate is not a valid deployment criterion for this BF16/vLLM path. Runtime LoRA application and BF16 weight merging are numerically different policies. The scientific requirement is adequate support in the policy actually deployed to all three arms.",
+    "replaces": "The original merge_gate equality criterion only. It does not alter the SFT run, reward data, branch estimator, campaign arms, call budgets, thresholds, seeds, execution order, or decision rule.",
+    "deployed_candidate_order": "Start with the already observed step 21 merged model, then merge and score steps 22 through 32 in strict ascending contiguous order.",
+    "selection": "Select the earliest merged checkpoint satisfying every unchanged support bound. Stop immediately after the first passing candidate.",
+    "bounds": {
+      "minimum_full_vocab_action_5_mass_at_temperature_2": 0.08,
+      "maximum_full_vocab_action_5_mass_at_temperature_2": 0.12,
+      "maximum_action_5_greedy_rate": 0.0,
+      "minimum_expected_informative_groups_per_step": 4.75,
+      "branches_per_episode": 11,
+      "episodes_per_optimizer_step": 8
+    },
+    "backend": "The same pinned authoritative vLLM full-vocabulary scorer and exact temperature reweighting used by the original protocol.",
+    "heldout_reward_use": false,
+    "failure": "If no merged checkpoint through step 32 passes, record a terminal warm-start failure, sync compact evidence, terminate compute, and do not run any RL arm.",
+    "post_selection_freeze": "Before the first RL model call, record and commit the exact selected step, selected adapter hash, deployed merged-model manifest, deployed score hash, and campaign model path."
+  },
+  "source": {
+    "sha256": {
+      "src/redco/analysis/stage_c_deployed_selection.py": "74f619cdc78ddcabebfab03a36faac11770eb687bc114f261df4776a9a2a9d67",
+      "scripts/run_stage_c2_deployed_selection.sh": "5ee7afcc3a6381f0d5a50e080aafdc4a163df30cca88e9b994bae583a250f0ca",
+      "scripts/merge_stage_c_warmstart.py": "06046f345d0ac29e0919d43fce50c2a6ae20a29d03be215785323413e28d0416",
+      "scripts/score_stage_c_policies_vllm.py": "81c6548b60143c5e962606e630c2fe36d55b7b0c1fda47c0c3f57dbeeff2322d",
+      "src/redco/analysis/stage_c_warmstart.py": "dcb7b86914e9eff1d35ba54adc947bcf8b569fb1f7c61727f30a06a7dce00f62",
+      "configs/stage-c2/policy-audit-cases.json": "259ff6e94e2f692a5f50a34137a39f77aa247633d0ced481b931784f386e1dcc"
+    }
+  },
+  "validated_before_freeze": {
+    "deployed_selection_tests": 3,
+    "warmstart_tests": 4,
+    "ruff": "pass",
+    "mypy": "pass",
+    "package_manager": "uv only; no pip"
+  }
+}
