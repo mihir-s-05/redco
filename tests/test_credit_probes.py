@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from redco.env.tasks.credit_probes import (
+    credit_confusion_probes,
     credit_probe_by_name,
     integration_planted_needle,
     planted_needle,
@@ -64,3 +65,21 @@ def test_restricted_probe_replay_is_exact_and_invalid_actions_are_scored() -> No
             assert sliced == full
         assert probe.replay_reward(None, 7, mode="sliced") == 0.0
         assert credit_probe_by_name(probe.name).actions == probe.actions
+
+
+def test_live_credit_confusion_probes_share_an_octet_action_space() -> None:
+    probes = credit_confusion_probes()
+
+    assert {probe.name for probe in probes} == {
+        "confusion_irrelevant",
+        "confusion_redundant",
+        "confusion_lucky",
+    }
+    assert all(probe.actions == tuple(str(index) for index in range(8)) for probe in probes)
+    assert credit_probe_by_name("confusion_irrelevant").q_values([0]) == {
+        str(index): 0.0 for index in range(8)
+    }
+    for name in ("confusion_redundant", "confusion_lucky"):
+        values = credit_probe_by_name(name).q_values([0])
+        assert values["5"] == 1.0
+        assert sum(values.values()) == 1.0

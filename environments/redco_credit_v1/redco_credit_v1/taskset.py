@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 from dataclasses import replace
 from typing import Literal
@@ -21,6 +22,12 @@ ROUTE_PATTERN = re.compile(r"<route>\s*([^<\r\n]+?)\s*</route>", re.IGNORECASE)
 ROUTES = ("alpha", "beta", "gamma", "delta")
 ROUTE_REWARD = {"alpha": -0.25, "beta": 0.0, "gamma": 0.25, "delta": 0.5}
 BRANCH_SEED_MASTER = "redco-stage-c-branch-v1"
+CONTEXT_SEED_MASTER = "redco-stage-c-context-v1"
+CONFUSION_PROBES = {
+    "confusion_irrelevant",
+    "confusion_redundant",
+    "confusion_lucky",
+}
 
 
 class RedcoCreditData(vf.TaskData):
@@ -29,6 +36,7 @@ class RedcoCreditData(vf.TaskData):
     action_map: tuple[tuple[str, str], ...]
     exogenous_seed: int
     context_route: str | None = None
+    episode_luck: int = 0
 
 
 def parse_action(reply: str | None, actions: tuple[str, ...]) -> str | None:
@@ -78,6 +86,56 @@ def _branch_seed_namespace(context_id: str, target_node_id: str) -> SeedNamespac
     )
 
 
+def _context_seed(task_name: str) -> int:
+    digest = hashlib.sha256(
+        f"{CONTEXT_SEED_MASTER}:{task_name}".encode()
+    ).digest()
+    return int.from_bytes(digest[:4], "big")
+
+
+def confusion_reward(
+    probe_name: str,
+    *,
+    canonical_action: str | None,
+    context_route: str | None,
+    episode_luck: int,
+) -> float:
+    """Compose a fixed-world reward for one live credit-confusion branch."""
+    if episode_luck not in {-1, 1}:
+        raise ValueError("episode_luck must be -1 or 1")
+    route_reward = ROUTE_REWARD.get(context_route or "", -0.5)
+    target_success = canonical_action == "5"
+    if probe_name == "confusion_irrelevant":
+        return route_reward
+    if probe_name == "confusion_redundant":
+        context_success = context_route == "delta"
+        return float(context_success or target_success)
+    if probe_name == "confusion_lucky":
+        return float(target_success) + route_reward + float(episode_luck)
+    raise ValueError(f"not a credit-confusion probe: {probe_name}")
+
+
+def replay_reward(
+    data: RedcoCreditData,
+    canonical_action: str | None,
+    *,
+    mode: Literal["full_suffix", "sliced"],
+) -> float:
+    probe = credit_probe_by_name(data.probe_name)
+    if data.probe_name in CONFUSION_PROBES:
+        return confusion_reward(
+            data.probe_name,
+            canonical_action=canonical_action,
+            context_route=data.context_route,
+            episode_luck=data.episode_luck,
+        )
+    return probe.replay_reward(
+        canonical_action,
+        data.exogenous_seed,
+        mode=mode,
+    ) + ROUTE_REWARD.get(data.context_route or "", -0.5)
+
+
 def parse_route(reply: str | None) -> str | None:
     if reply is None:
         return None
@@ -95,14 +153,13 @@ class RedcoSeedTask(vf.Task[RedcoCreditData]):
 class RedcoCreditTask(vf.Task[RedcoCreditData]):
     @vf.reward(weight=1.0)
     async def deterministic_reward(self, trace: vf.Trace) -> float:
-        probe = credit_probe_by_name(self.data.probe_name)
         displayed_action = parse_action(trace.last_reply, self.data.actions)
         action = dict(self.data.action_map).get(displayed_action)
-        return probe.replay_reward(
+        return replay_reward(
+            self.data,
             action,
-            self.data.exogenous_seed,
             mode="full_suffix",
-        ) + ROUTE_REWARD.get(self.data.context_route or "", -0.5)
+        )
 
     @vf.metric
     async def valid_action(self, trace: vf.Trace) -> float:
@@ -189,6 +246,7 @@ class RedcoCreditEnvConfig(vf.EnvConfig):
     branch_group_size: int = Field(4, ge=2, le=11)
     replay_mode: Literal["full_suffix", "sliced"] = "sliced"
     branch_temperature: float = Field(1.0, ge=0, le=2.0)
+    context_temperature: float = Field(0.7, ge=0, le=2.0)
 
 
 class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
@@ -200,9 +258,19 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
     async def run(self, task: vf.Task, agents: vf.Agents) -> None:
         if not isinstance(task, RedcoSeedTask):
             raise TypeError("ReDCO environment requires a RedcoSeedTask")
-        context = await agents.context.run(task)
         data = task.data
+        agents.context.ctx = replace(
+            agents.context.ctx,
+            sampling=branch_sampling(
+                agents.context.ctx.sampling,
+                seed=_context_seed(data.name),
+                cache_salt_suffix=f"{data.name}:context",
+                temperature=self.config.context_temperature,
+            ),
+        )
+        context = await agents.context.run(task)
         context_route = parse_route(context.last_reply)
+        episode_luck = 1 if data.exogenous_seed % 2 == 0 else -1
         target_node_id = f"{data.name}:depth-one-subcall"
         branch_prompt = (
             "You are the trainable depth-one sub-call in a deterministic "
@@ -215,7 +283,11 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
         )
         branch_task = RedcoCreditTask(
             data.model_copy(
-                update={"prompt": branch_prompt, "context_route": context_route}
+                update={
+                    "prompt": branch_prompt,
+                    "context_route": context_route,
+                    "episode_luck": episode_luck,
+                }
             ),
             task.config,
         )
@@ -276,19 +348,22 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             data = trace.task.data
             if not isinstance(data, RedcoCreditData):
                 raise TypeError("ReDCO environment received an incompatible task")
-            probe = credit_probe_by_name(data.probe_name)
             displayed_action = parse_action(trace.last_reply, data.actions)
-            action = dict(data.action_map).get(displayed_action)
-            full_reward = probe.replay_reward(
+            action = (
+                dict(data.action_map).get(displayed_action)
+                if displayed_action is not None
+                else None
+            )
+            full_reward = replay_reward(
+                data,
                 action,
-                data.exogenous_seed,
                 mode="full_suffix",
-            ) + ROUTE_REWARD.get(data.context_route or "", -0.5)
-            sliced_reward = probe.replay_reward(
+            )
+            sliced_reward = replay_reward(
+                data,
                 action,
-                data.exogenous_seed,
                 mode="sliced",
-            ) + ROUTE_REWARD.get(data.context_route or "", -0.5)
+            )
             equivalent = full_reward == sliced_reward
             if not equivalent:
                 raise RuntimeError("sliced and full-suffix replay disagree in-loop")
@@ -360,6 +435,7 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
                 "branch_temperature": self.config.branch_temperature,
                 "branch_cache_salt": extra_body["cache_salt"],
                 "context_route": data.context_route,
+                "episode_luck": data.episode_luck,
                 "outer_weight": 1.0,
                 "checkpoint_contract": "episode-policy-version",
                 "logical_deployment_cost": {"model_calls": 1},

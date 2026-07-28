@@ -4,6 +4,7 @@ from redco_credit_v1.taskset import (
     RedcoCreditTaskset,
     RedcoCreditTasksetConfig,
     branch_sampling,
+    confusion_reward,
     parse_action,
     parse_route,
 )
@@ -141,3 +142,61 @@ def test_env_config_accepts_greedy_evaluation_temperature() -> None:
     )
 
     assert config.branch_temperature == 0.0
+
+
+def test_confusion_rewards_have_the_preregistered_causal_structure() -> None:
+    for action in ("0", "5"):
+        assert confusion_reward(
+            "confusion_irrelevant",
+            canonical_action=action,
+            context_route="delta",
+            episode_luck=1,
+        ) == 0.5
+    assert confusion_reward(
+        "confusion_redundant",
+        canonical_action="0",
+        context_route="delta",
+        episode_luck=-1,
+    ) == 1.0
+    assert confusion_reward(
+        "confusion_redundant",
+        canonical_action="5",
+        context_route="alpha",
+        episode_luck=1,
+    ) == 1.0
+    assert confusion_reward(
+        "confusion_redundant",
+        canonical_action="0",
+        context_route="alpha",
+        episode_luck=1,
+    ) == 0.0
+    assert confusion_reward(
+        "confusion_lucky",
+        canonical_action="5",
+        context_route="gamma",
+        episode_luck=1,
+    ) == 2.25
+    assert confusion_reward(
+        "confusion_lucky",
+        canonical_action="0",
+        context_route="gamma",
+        episode_luck=-1,
+    ) == -0.75
+
+
+def test_confusion_probe_subset_uses_the_same_octet_action_space() -> None:
+    taskset = RedcoCreditTaskset(
+        RedcoCreditTasksetConfig(
+            repeats_per_probe=2,
+            probe_names=(
+                "confusion_irrelevant",
+                "confusion_redundant",
+                "confusion_lucky",
+            ),
+        )
+    )
+
+    tasks = taskset.load()
+
+    assert len(tasks) == 6
+    assert all(task.data.actions == tuple(str(index) for index in range(8)) for task in tasks)

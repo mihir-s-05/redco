@@ -59,7 +59,11 @@ class FiniteCreditProbe:
 
 def credit_probe_by_name(name: str) -> FiniteCreditProbe:
     try:
-        probes = (*standard_credit_probes(), integration_planted_needle())
+        probes = (
+            *standard_credit_probes(),
+            integration_planted_needle(),
+            *credit_confusion_probes(),
+        )
         return {probe.name: probe for probe in probes}[name]
     except KeyError as error:
         raise ValueError(f"unknown credit probe: {name}") from error
@@ -85,6 +89,29 @@ def integration_planted_needle() -> FiniteCreditProbe:
         "integration_planted_needle",
         probe.actions,
         probe.reward_function,
+    )
+
+
+def credit_confusion_probes() -> tuple[FiniteCreditProbe, ...]:
+    """Return octet action spaces for the live multi-decision battery.
+
+    Their complete rewards also depend on the already-sampled root context
+    and, for the lucky probe, episode-level exogenous noise.  The environment
+    composes those terms.  These local reward functions retain the target
+    action's causal component so the action map remains explicit and finite.
+    """
+    actions = tuple(str(index) for index in range(8))
+
+    def irrelevant(_: str, __: int) -> float:
+        return 0.0
+
+    def causal(action: str, _: int) -> float:
+        return float(action == "5")
+
+    return (
+        FiniteCreditProbe("confusion_irrelevant", actions, irrelevant),
+        FiniteCreditProbe("confusion_redundant", actions, causal),
+        FiniteCreditProbe("confusion_lucky", actions, causal),
     )
 
 
