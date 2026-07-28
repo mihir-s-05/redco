@@ -165,6 +165,16 @@ class RedcoCreditTask(vf.Task[RedcoCreditData]):
     async def valid_action(self, trace: vf.Trace) -> float:
         return float(parse_action(trace.last_reply, self.data.actions) is not None)
 
+    @vf.metric
+    async def target_success(self, trace: vf.Trace) -> float:
+        displayed_action = parse_action(trace.last_reply, self.data.actions)
+        canonical_action = (
+            dict(self.data.action_map).get(displayed_action)
+            if displayed_action is not None
+            else None
+        )
+        return float(canonical_action == "5")
+
 
 class RedcoCreditTasksetConfig(vf.TasksetConfig):
     repeats_per_probe: int = Field(16, ge=1)
