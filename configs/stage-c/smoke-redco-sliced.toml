@@ -31,6 +31,8 @@ batch_size = 10
 group_size = 2
 max_inflight_rollouts = 2
 max_off_policy_steps = 0
+strict_snapshot_batches = true
+train_groups_per_policy = 1
 
 [orchestrator.algo]
 type = "redco"
