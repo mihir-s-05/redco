@@ -1,0 +1,96 @@
+{
+  "schema_version": 10,
+  "experiment": "gate-gc-live-smoke-v10",
+  "status": "frozen_on_warm_active_resource_before_any_v10_model_call",
+  "frozen_at_local_date": "2026-07-27",
+  "supersedes": {
+    "experiment": "gate-gc-live-smoke-v9",
+    "terminal_result": "reports/gate-gc-live-smoke-v9-result-2026-07-27.json",
+    "terminal_status": "effective-subset evidence-contract failure; strict GPU lifecycle passed",
+    "change": "Set all three post-batch filters to monitoring-only, exactly matching every already-frozen v3 campaign arm. No Prime, ReDCO, model, optimizer, lifecycle, task, or threshold setting changes."
+  },
+  "purpose": "Confirm the repaired strict-snapshot lifecycle with the same post-filter semantics as the frozen v3 campaign before consuming a v3 arm.",
+  "not_a_learning_claim": true,
+  "scope": {
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "config": "configs/stage-c/smoke-redco-sliced.toml",
+    "algorithm": "redco",
+    "replay_mode": "sliced",
+    "optimizer_steps": 1,
+    "complete_groups_per_policy": 1,
+    "episodes": 2,
+    "all_traces": 10,
+    "effective_traces": 10,
+    "policy_calls": 10,
+    "branch_records": 8,
+    "post_batch_filters_enforced": 0,
+    "task_subset": [
+      "integration_planted_needle"
+    ],
+    "run_seed": 7202610
+  },
+  "strict_lifecycle_contract": {
+    "training_policy_version": 0,
+    "exactly_one_call_per_trace": true,
+    "wait_for_step_1_checkpoint_to_be_fully_applied": true,
+    "begin_final_drain_immediately_after_application": true,
+    "cancelled_train_rollouts": 0,
+    "unexpected_step_2": false,
+    "incomplete_group": false,
+    "launcher_exit_zero": true
+  },
+  "decision_rule": {
+    "pass": [
+      "exactly ten all-traces and ten effective traces, each with one policy call at policy version zero",
+      "exactly eight branch and two context records with no errors",
+      "every ReDCO replay record is equivalent and selected pre-action",
+      "one positive finite optimizer gradient is recorded",
+      "the step-1 filesystem LoRA adapter is present",
+      "the final checkpoint is applied, zero rollouts are cancelled, and the launcher exits zero",
+      "no gathered full-model weight file is written"
+    ],
+    "on_pass": "continue the already-frozen v3 campaign on the same pod",
+    "on_failure": "recover artifacts, terminate compute, and do not start v3",
+    "no_retry_after_any_v10_model_call": true
+  },
+  "source": {
+    "parent_commit": "ae27dd4b1e966dd784f6fff4973bde7ef270f554",
+    "prime_rl_commit": "3b22dd951cad1036d1fe8dd0a0bfc40807a9b360",
+    "sha256": {
+      "configs/stage-c/smoke-redco-sliced.toml": "d7c0a4418fb5fd1b3b1a5476d96093b4c89cb18453690a98c5c5db07e8b2a4d0",
+      "patches/prime-rl-redco-stage-c.patch": "fcfc33858c582097654e957b3f4d1b47946fce13a6abdb6f26c554d5b2c488d7",
+      "scripts/run_stage_c_live.sh": "af65d86daf071936f0d1bf230a410055dba6e257f8413f6ec766be6623b36170",
+      "src/redco/analysis/stage_c_live.py": "35d41b38562913cff027270ba6506997e8cecff5dde1d5fb0a0295d7bab8c89a",
+      "environments/redco_credit_v1/redco_credit_v1/taskset.py": "4ddf5a7578b056c5b71cf2da546e9f98766d99ff554938631b5b30f34c8364cb",
+      "src/redco/env/tasks/credit_probes.py": "fd751a38c09f4a354a3b1a5296e359c0218bfee0c9503fe283f50b2897b19454",
+      "reports/gate-gc-live-smoke-v9-result-2026-07-27.json": "f9aa6abe4858fcf5d83a653f4eaa8ea7d8b9daf9a566cc6e9fc6df4f8e5f6529",
+      "external/prime-rl/uv.lock": "188b23ec2c723b8ca0c8ca80278747e0628f680449061a5404622f39114d42f5"
+    }
+  },
+  "validated_before_freeze": {
+    "root_tests": 85,
+    "prime_and_environment_targeted_tests": 48,
+    "prime_schema_campaign_configs": 3,
+    "v9_gpu_lifecycle": "checkpoint applied, zero cancellation, clean drain",
+    "prime_patch_reverse_apply_check": "pass"
+  },
+  "hardware": {
+    "pod_id": "e9ad777ac456432a88f39c2f3a0c7abb",
+    "resource_id": "8b33a6",
+    "gpu_type": "A6000 48GB",
+    "gpu_count": 2,
+    "price_usd_per_hour": 1.08,
+    "persistent_disks": 0,
+    "ssh_verified_noninteractively": true,
+    "interim_shared_pod_charge_before_v10_usd": 0.23
+  },
+  "execution": {
+    "package_manager": "uv 0.11.32 standalone",
+    "pip_prohibited": true,
+    "reuse_warm_uv_model_and_compile_caches": true,
+    "output": "runs/stage-c/gate-gc-live-smoke-v10",
+    "training_timeout_seconds": 3600,
+    "maximum_additional_smoke_charge_usd": 0.2,
+    "all_raw_artifacts_must_be_local_before_v3": true
+  }
+}
