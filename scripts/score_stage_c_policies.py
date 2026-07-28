@@ -117,9 +117,9 @@ def main() -> None:
 
     base_model = AutoModelForCausalLM.from_pretrained(
         args.model,
-        torch_dtype=torch.bfloat16,
-        device_map="cuda",
-    )
+        dtype=torch.bfloat16,
+        low_cpu_mem_usage=True,
+    ).to("cuda:0")
     base_rows, base_distributions = _score_model(
         base_model,
         cases,

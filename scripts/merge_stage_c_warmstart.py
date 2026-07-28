@@ -30,10 +30,9 @@ def main() -> None:
 
     base = AutoModelForCausalLM.from_pretrained(
         args.model,
-        torch_dtype=torch.bfloat16,
-        device_map={"": "cuda:0"},
+        dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
-    )
+    ).to("cuda:0")
     merge_adapter(base, args.adapter)
     args.output.mkdir(parents=True, exist_ok=True)
     base.save_pretrained(
