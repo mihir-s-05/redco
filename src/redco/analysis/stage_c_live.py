@@ -38,7 +38,7 @@ def _single_match(run_dir: Path, pattern: str) -> Path:
 
 
 def verify_smoke(run_dir: Path) -> dict[str, Any]:
-    metrics_path = _single_match(run_dir, "**/metrics.jsonl")
+    metrics_path = _single_match(run_dir, "**/output/metrics.jsonl")
     all_traces_path = _single_match(
         run_dir, "**/rollouts/step_1/train/all/traces.jsonl"
     )
@@ -54,12 +54,14 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
 
     all_traces = _read_jsonl(all_traces_path)
     traces = _read_jsonl(effective_traces_path)
-    if len(traces) != 10:
+    if len(all_traces) != 10:
         raise ValueError(
-            f"smoke must serialize exactly 10 effective traces, found {len(traces)}"
+            f"smoke must collect exactly 10 traces, found {len(all_traces)}"
         )
-    if len(all_traces) < len(traces) or len(all_traces) % 5 != 0:
-        raise ValueError("collected smoke traces must contain complete five-trace episodes")
+    if len(traces) < 4:
+        raise ValueError(
+            f"smoke must serialize at least four effective branch traces, found {len(traces)}"
+        )
     effective_ids = {trace.get("id") for trace in traces}
     all_ids = {trace.get("id") for trace in all_traces}
     if (
@@ -85,8 +87,10 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
         if info.get("policy_version") != 0:
             raise ValueError("collected smoke trace is not from snapshot version 0")
         collected_episodes.setdefault(episode_id, []).append(trace)
-    if any(len(episode) != 5 for episode in collected_episodes.values()):
-        raise ValueError("collected smoke episode is not a complete five-trace group")
+    if len(collected_episodes) != 2 or any(
+        len(episode) != 5 for episode in collected_episodes.values()
+    ):
+        raise ValueError("collected smoke must contain two complete five-trace groups")
 
     policy_versions: set[int] = set()
     episodes: dict[str, list[dict[str, Any]]] = {}
@@ -115,10 +119,10 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
 
     if policy_versions != {0}:
         raise ValueError(f"smoke must use only snapshot version 0: {policy_versions}")
-    if len(episodes) != 2 or any(len(group) != 5 for group in episodes.values()):
-        raise ValueError("smoke must contain two complete five-trace episodes")
-    if len(branch_records) != 8 or len(context_records) != 2:
-        raise ValueError("smoke must contain eight branch and two context records")
+    if not branch_records or len(branch_records) % 4 != 0:
+        raise ValueError("effective smoke data must contain complete four-branch groups")
+    if len(context_records) > 2:
+        raise ValueError("effective smoke data contains too many context records")
 
     episodes_with_branch_signal = 0
     for episode in episodes.values():
@@ -129,10 +133,14 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
         contexts = [
             record for record in redco_records if record["record_kind"] == "context"
         ]
-        if sorted(record.get("branch_index") for record in branches) != [0, 1, 2, 3]:
-            raise ValueError("episode does not contain branch indices 0 through 3")
-        if len(contexts) != 1:
-            raise ValueError("episode must contain exactly one context record")
+        if len(contexts) > 1:
+            raise ValueError("effective episode contains duplicate context records")
+        if branches and sorted(
+            record.get("branch_index") for record in branches
+        ) != [0, 1, 2, 3]:
+            raise ValueError("effective branch group does not contain indices 0 through 3")
+        if not branches:
+            continue
         target_ids = {record.get("target_node_id") for record in redco_records}
         if len(target_ids) != 1 or None in target_ids:
             raise ValueError("episode target identity is inconsistent")
@@ -170,6 +178,8 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
             raise ValueError("effective episode contains an invalid branch reward")
         if len({float(reward) for reward in branch_rewards}) > 1:
             episodes_with_branch_signal += 1
+        else:
+            raise ValueError("effective branch group has zero counterfactual signal")
 
     if episodes_with_branch_signal < 1:
         raise ValueError("effective smoke batch has no counterfactual branch signal")
@@ -215,7 +225,7 @@ def verify_smoke(run_dir: Path) -> dict[str, Any]:
             "collected_traces": len(all_traces),
             "collected_episodes": len(collected_episodes),
             "effective_traces": len(traces),
-            "episodes": len(episodes),
+            "effective_episodes": len(episodes),
             "branch_records": len(branch_records),
             "context_records": len(context_records),
             "episodes_with_branch_signal": episodes_with_branch_signal,

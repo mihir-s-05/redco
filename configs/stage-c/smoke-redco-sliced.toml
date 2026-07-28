@@ -8,6 +8,9 @@ num_infer_gpus = 1
 [model]
 name = "Qwen/Qwen3-4B-Instruct-2507"
 
+[file_monitor]
+filename = "metrics.jsonl"
+
 [trainer.model.ac]
 freq = 1
 
@@ -57,9 +60,7 @@ env.alternative_3.harness = { id = "null", runtime = { type = "subprocess" } }
 
 [trainer.ckpt]
 weights_only = true
-
-[trainer.ckpt.weights]
-save_adapter_separately = true
+skip_gather_master_weights = true
 
 [inference]
 gpu_memory_utilization = 0.7

@@ -60,6 +60,10 @@ def _fixture(tmp_path: Path) -> Path:
     _write_jsonl(rollouts / "train" / "all" / "traces.jsonl", trace_rows)
     _write_jsonl(rollouts / "train" / "effective" / "traces.jsonl", trace_rows)
     _write_jsonl(output / "metrics.jsonl", [{"step": 1, "optim/grad_norm": 0.25}])
+    _write_jsonl(
+        output / "run_default" / "metrics.jsonl",
+        [{"step": 1, "train/agg/effective/reward/mean": 1.5}],
+    )
     (rollouts / "train_rollouts.bin").write_bytes(b"batch")
     adapter = output / "broadcasts" / "step_1" / "adapter_model.safetensors"
     adapter.parent.mkdir(parents=True)
@@ -72,6 +76,27 @@ def test_verify_smoke_accepts_complete_snapshot(tmp_path: Path) -> None:
     assert report["status"] == "pass"
     assert report["checks"]["branch_records"] == 8
     assert report["checks"]["policy_versions"] == [0]
+
+
+def test_verify_smoke_accepts_branch_only_effective_subset(tmp_path: Path) -> None:
+    run_dir = _fixture(tmp_path)
+    effective = next(run_dir.glob("**/train/effective/traces.jsonl"))
+    rows = [json.loads(line) for line in effective.read_text().splitlines()]
+    branch_only = [
+        row
+        for row in rows
+        if row["info"]["episode_id"] == "episode-a"
+        and row["info"]["redco"]["record_kind"] == "branch"
+    ]
+    _write_jsonl(effective, branch_only)
+
+    report = verify_smoke(run_dir)
+
+    assert report["status"] == "pass"
+    assert report["checks"]["effective_traces"] == 4
+    assert report["checks"]["effective_episodes"] == 1
+    assert report["checks"]["branch_records"] == 4
+    assert report["checks"]["context_records"] == 0
 
 
 def test_verify_smoke_rejects_replay_disagreement(tmp_path: Path) -> None:
