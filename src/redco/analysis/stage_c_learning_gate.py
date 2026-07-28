@@ -159,7 +159,7 @@ def _summarize_arm(
             elif not isinstance(info.get("redco_control"), dict):
                 raise ValueError("broadcast trace is missing control metadata")
 
-    metrics_paths = sorted(run_dir.glob("**/metrics.jsonl"))
+    metrics_paths = sorted(run_dir.glob("**/output/metrics.jsonl"))
     if len(metrics_paths) != 1:
         raise ValueError(f"{name} must contain exactly one metrics.jsonl")
     metric_rows = _read_jsonl(metrics_paths[0])
@@ -192,6 +192,11 @@ def _summarize_arm(
     )
     if len(adapter_matches) != 1 or adapter_matches[0].stat().st_size == 0:
         raise ValueError(f"{name} is missing its final LoRA adapter")
+    gathered_master_weights = sorted(
+        run_dir.glob("**/weights/step_*/model*.safetensors")
+    )
+    if gathered_master_weights:
+        raise ValueError(f"{name} produced gathered full-model checkpoint shards")
 
     return {
         "name": name,
@@ -202,6 +207,7 @@ def _summarize_arm(
         "invalid_snapshot_records": invalid_snapshots,
         "errored_traces": errors,
         "positive_grad_steps": sum(value > 0 for value in grad_norms),
+        "gathered_master_weight_files": 0,
         "eval_curve": {str(step): value for step, value in curves.items()},
         "final_eval_mean": fmean(final_rewards.values()),
         "final_eval_rewards": {
@@ -269,7 +275,12 @@ def evaluate_learning_gate(
         and arm["errored_traces"] == 0
         and arm["replay_mismatches"] == 0
         and arm["train_policy_calls"] == 1200
+        and arm["gathered_master_weight_files"] == 0
         for arm in arms.values()
+    ) and (
+        arms["sliced"]["branch_records"] == 960
+        and arms["full_suffix"]["branch_records"] == 960
+        and arms["broadcast"]["branch_records"] == 0
     )
     learning_pass = (
         full_broadcast.estimate >= minimum_branch_improvement

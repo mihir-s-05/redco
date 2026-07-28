@@ -26,6 +26,11 @@ batch_size = 16
 group_size = 8
 max_inflight_rollouts = 8
 max_off_policy_steps = 0
+post_batch_filters = [
+  { type = "gibberish", enforce = false },
+  { type = "repetition", enforce = false },
+  { type = "zero_advantage", enforce = false },
+]
 
 [orchestrator.algo]
 type = "grpo"
@@ -61,8 +66,7 @@ env.context.harness = { id = "null", runtime = { type = "subprocess" } }
 env.original.harness = { id = "null", runtime = { type = "subprocess" } }
 
 [ckpt]
-interval = 5
-keep_last = 2
+keep_last = 1
 
 [trainer.ckpt]
 weights_only = true
