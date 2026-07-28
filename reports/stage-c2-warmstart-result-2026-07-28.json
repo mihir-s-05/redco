@@ -1,0 +1,61 @@
+{
+  "artifact_integrity": {
+    "gate_signed_payload_sha256": "3bd8de14ea371a57557bea3d340123e168b64b626e83939a924b7c8044e32903",
+    "manifest_self_entry": {
+      "actual_condition": "manifest populated after its empty-file hash was recorded",
+      "status": "fail"
+    },
+    "material_entries_verified": true
+  },
+  "billing": {
+    "charge_usd": 0.9,
+    "hourly_rate_usd": 1.5,
+    "wallet_after_usd": 39.57
+  },
+  "cleanup": {
+    "active_pods": 0,
+    "persistent_disks": 0,
+    "rejected_adapters_copied_locally": false
+  },
+  "cold_policy_audit": {
+    "status": "provisional",
+    "reason": "full-suffix Hugging Face score conflicts with preserved vLLM actions",
+    "full_suffix_action_5_mass_t2": 0.966368138790131,
+    "preserved_policy_29_actions": [
+      "7",
+      "7",
+      "7",
+      "3"
+    ],
+    "step_29_to_30_adapter_max_abs_delta": 8.655042620375752e-06,
+    "required_followup": "exact-prefix vLLM versus Hugging Face LoRA parity diagnostic"
+  },
+  "execution": {
+    "gpu_type": "RTX 6000 Ada Generation",
+    "gpu_count": 2,
+    "metric_rows": 72,
+    "optimizer_steps": 12,
+    "package_manager": "uv",
+    "stable_adapter_only_checkpoints": 12
+  },
+  "gate": "stage-c2-warmstart",
+  "interpretation": "The frozen SFT calibration was too weak; this is not a ReDCO learning result.",
+  "observed": {
+    "maximum_expected_informative_groups_per_step": 1.704424337618617,
+    "maximum_needle_action_5_mass_t2": 0.039145614951848984,
+    "minimum_needle_action_5_mass_t2": 0.032106537371873856,
+    "needle_action_5_greedy_rate": 0.0,
+    "selected_checkpoint": null
+  },
+  "preregistered_thresholds": {
+    "branch_count": 6,
+    "groups_per_step": 8,
+    "maximum_needle_action_5_mass_t2": 0.25,
+    "maximum_needle_action_5_greedy_rate": 0.5,
+    "minimum_expected_informative_groups_per_step": 4.75,
+    "minimum_needle_action_5_mass_t2": 0.15
+  },
+  "schema_version": 1,
+  "stage_c2_rl_arms_launched": false,
+  "status": "fail"
+}
