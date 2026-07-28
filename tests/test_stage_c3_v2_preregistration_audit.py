@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from scripts.audit_stage_c3_v2_preregistration import audit
+from redco.analysis.stage_c3_preregistration import audit
 
 
 def test_audit_rejects_changed_decision_rule(tmp_path: Path) -> None:
