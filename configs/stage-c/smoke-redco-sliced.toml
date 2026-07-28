@@ -33,6 +33,11 @@ max_inflight_rollouts = 2
 max_off_policy_steps = 0
 strict_snapshot_batches = true
 train_groups_per_policy = 1
+post_batch_filters = [
+  { type = "gibberish", enforce = false },
+  { type = "repetition", enforce = false },
+  { type = "zero_advantage", enforce = false },
+]
 
 [orchestrator.algo]
 type = "redco"
