@@ -98,6 +98,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", type=Path, required=True)
     parser.add_argument("--model", required=True)
+    parser.add_argument("--model-name", default="base")
     parser.add_argument(
         "--adapter",
         action="append",
@@ -125,7 +126,7 @@ def main() -> None:
         cases,
         base_distributions=None,
     )
-    models: list[dict[str, Any]] = [{"name": "base", "cases": base_rows}]
+    models: list[dict[str, Any]] = [{"name": args.model_name, "cases": base_rows}]
     if adapters:
         first_name, first_path = adapters[0]
         model = PeftModel.from_pretrained(
