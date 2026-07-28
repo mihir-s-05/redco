@@ -5,6 +5,7 @@ from redco_credit_v1.taskset import (
     RedcoCreditTasksetConfig,
     branch_sampling,
     confusion_reward,
+    context_sampling,
     parse_action,
     parse_route,
 )
@@ -108,6 +109,30 @@ def test_branch_sampling_derives_distinct_auditable_requests() -> None:
         "episode:alternative_1"
     )
     assert base.model_dump()["extra_body"]["cache_salt"] == "snapshot-0"
+
+
+def test_context_sampling_preserves_multitoken_route_budget() -> None:
+    base = vf.SamplingConfig(
+        temperature=0.7,
+        max_tokens=64,
+        extra_body={"cache_salt": "snapshot-0", "top_k": 20},
+    )
+
+    result = context_sampling(
+        base,
+        seed=303,
+        cache_salt_suffix="episode:context",
+        temperature=2.0,
+    )
+
+    assert result.temperature == 2.0
+    assert result.max_tokens == 64
+    assert result.model_dump()["seed"] == 303
+    assert result.model_dump()["extra_body"] == {
+        "cache_salt": "snapshot-0:redco:episode:context",
+        "top_k": 20,
+    }
+    assert parse_route("<route>delta</route>") == "delta"
 
 
 def test_env_config_freezes_branch_count_and_replay_mode() -> None:

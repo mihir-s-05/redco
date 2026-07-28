@@ -77,6 +77,28 @@ def branch_sampling(
     return vf.SamplingConfig(**raw)
 
 
+def context_sampling(
+    base: vf.SamplingConfig,
+    *,
+    seed: int,
+    cache_salt_suffix: str,
+    temperature: float,
+) -> vf.SamplingConfig:
+    """Freeze root randomness without changing its completion-length contract."""
+    raw = base.model_dump(exclude_none=True)
+    extra_body = dict(raw.pop("extra_body", None) or {})
+    parent_salt = extra_body.get("cache_salt")
+    extra_body["cache_salt"] = (
+        f"{parent_salt}:redco:{cache_salt_suffix}"
+        if parent_salt is not None
+        else f"redco:{cache_salt_suffix}"
+    )
+    raw["seed"] = seed
+    raw["temperature"] = temperature
+    raw["extra_body"] = extra_body
+    return vf.SamplingConfig(**raw)
+
+
 def _branch_seed_namespace(context_id: str, target_node_id: str) -> SeedNamespace:
     return SeedNamespace(
         master_seed=BRANCH_SEED_MASTER,
@@ -271,7 +293,7 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
         data = task.data
         agents.context.ctx = replace(
             agents.context.ctx,
-            sampling=branch_sampling(
+            sampling=context_sampling(
                 agents.context.ctx.sampling,
                 seed=_context_seed(data.name),
                 cache_salt_suffix=f"{data.name}:context",
