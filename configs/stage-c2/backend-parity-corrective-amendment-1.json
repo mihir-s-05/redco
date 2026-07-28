@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c2-exact-prefix-backend-parity",
+  "amendment": "corrective-1",
+  "status": "runtime_environment_correction_frozen_after_vllm_initialization_failure_before_any_vllm_score",
+  "frozen_at_local_date": "2026-07-28",
+  "scientific_protocol": {
+    "path": "configs/stage-c2/backend-parity-preregistration.json",
+    "sha256": "fd30ffdc85a6ac8d9215651fe9e32d05a5da05339cefc394cdf30c3182ecdd55",
+    "unchanged": true
+  },
+  "observed_failure": {
+    "backend": "vllm 0.24.0+cu129",
+    "phase": "engine initialization after model load and before generation",
+    "error": "Could not find nvcc and default cuda_home='/usr/local/cuda' does not exist",
+    "vllm_score_artifact_created": false,
+    "vllm_generated_tokens": 0,
+    "hugging_face_scores_complete": true
+  },
+  "validated_runtime": {
+    "cuda_home": "/home/ubuntu/redco/.runtime/lib/python3.12/site-packages/nvidia/cu13",
+    "nvcc": "/home/ubuntu/redco/.runtime/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc",
+    "nvcc_version": "13.2.78",
+    "source": "The compiler and CUDA tree are locked uv dependencies already installed in the frozen Prime environment."
+  },
+  "correction": {
+    "CUDA_HOME": "/home/ubuntu/redco/.runtime/lib/python3.12/site-packages/nvidia/cu13",
+    "XDG_CONFIG_HOME": "/home/ubuntu/redco/.config",
+    "reason": "Point vLLM's compile path and usage configuration at writable, uv-managed locations.",
+    "changes_model_or_adapter_bytes": false,
+    "changes_prefixes_temperatures_or_thresholds": false,
+    "changes_scoring_code": false
+  },
+  "retry_policy": "Retry only the unchanged vLLM half on the same pod. Do not rerun the completed Hugging Face half."
+}
