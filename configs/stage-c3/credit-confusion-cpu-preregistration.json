@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c3-multi-decision-credit-confusion-cpu",
+  "status": "frozen_before_default_cpu_diagnostic_execution",
+  "frozen_at_local_date": "2026-07-28",
+  "purpose": "Predict whether a multi-decision battery can distinguish trajectory broadcast from node-local LOO credit before any further GPU spend.",
+  "prior_result_scope": {
+    "stage_c2": "Integration and replay-equivalence pass; mechanistic-positive gate fail on a saturated, non-discriminating planted-needle task.",
+    "scientific_conclusion": "Stage C2 is not treated as a negative test of the core multi-node credit thesis."
+  },
+  "probes": {
+    "irrelevant_target": {
+      "context_success_probability": 0.35,
+      "target_success_probability": 0.5,
+      "luck_probability": 0.0,
+      "reward": "context",
+      "prediction": "Both estimators have zero mean target gradient; node LOO has zero target-gradient variance while broadcast does not."
+    },
+    "redundant_target": {
+      "context_success_probability": 0.5,
+      "target_success_probability": 0.2,
+      "luck_probability": 0.0,
+      "reward": "max(context,target)",
+      "prediction": "When context already succeeds, the target is locally redundant and node LOO removes its conditional noise."
+    },
+    "lucky_target": {
+      "context_success_probability": 0.5,
+      "target_success_probability": 0.2,
+      "luck_probability": 0.5,
+      "reward": "target + (1 if luck else -1)",
+      "prediction": "Counterfactual branches share luck, so LOO cancels it while trajectory broadcast retains rollout-level noise."
+    }
+  },
+  "estimator_contract": {
+    "trajectory_broadcast": "All-sample leave-one-out terminal-reward advantage over eight independent two-decision trajectories.",
+    "node_loo": "All-branch leave-one-out target advantage over 11 target actions with context and luck held common; eight independent branch episodes averaged per optimizer step.",
+    "target": "The exact Bernoulli target-logit policy gradient.",
+    "expected_gradient_rule": "Both estimators must match the exact target gradient. The discriminating quantity is variance and finite-budget drift, not mean-gradient disagreement.",
+    "enumeration": "Exact multinomial count enumeration; no Monte Carlo for estimator moments."
+  },
+  "learning_diagnostic": {
+    "policy_call_budget_per_arm": 1152,
+    "learning_rate": 0.5,
+    "trials": 10000,
+    "seed": 9202801,
+    "target_probability_threshold": 0.8,
+    "broadcast_calls_per_step": 16,
+    "node_loo_calls_per_step": 96,
+    "scope": "Seeded tabular nonlinear power diagnostic. Calls-to-threshold is descriptive here and must be independently frozen for a GPU campaign."
+  },
+  "mandatory_cpu_gate": {
+    "maximum_absolute_mean_bias": 1e-12,
+    "enumerated_probability_absolute_tolerance": 1e-12,
+    "irrelevant_node_loo_variance_fraction_of_broadcast_maximum": 0.01,
+    "lucky_node_loo_variance_fraction_of_broadcast_maximum": 0.5,
+    "redundant_node_loo_variance_fraction_of_broadcast_maximum": 0.75,
+    "irrelevant_node_loo_mean_absolute_drift_fraction_of_broadcast_maximum": 0.25,
+    "decision": "Every condition must pass. Otherwise report the CPU failure and do not provision a GPU."
+  },
+  "conditional_next_step": {
+    "if_pass": "Write and commit a separate GPU preregistration with nuisance drift, causal calls-to-threshold, a saturation switch, fixed arm order, exact budgets, and earliest-deployed-checkpoint selection before provisioning.",
+    "if_fail": "Stop the credit-confusion campaign without threshold changes."
+  },
+  "output": "runs/stage-c3/credit-confusion-cpu/diagnostic.json",
+  "source": {
+    "implementation_commit": "9d54292e47090ebf11dc085c026b6b8e57afdb55",
+    "sha256": {
+      "src/redco/analysis/credit_confusion.py": "2fdecedbbf78c34cb0e725194dafc0aa5bc07feab5d124b2f40022467c2a6ad8",
+      "tests/test_credit_confusion.py": "eca7a42210d6a98c848bf7d32291bafa45b391a91c21dfac33a7a027025b9147"
+    }
+  },
+  "validated_before_freeze": {
+    "targeted_tests": 4,
+    "ruff": "pass",
+    "mypy": "pass",
+    "package_manager": "uv only; no pip"
+  }
+}
