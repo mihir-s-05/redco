@@ -1,0 +1,198 @@
+{
+  "schema_version": 8,
+  "experiment": "gate-gc-live-smoke-v8",
+  "status": "frozen_before_resource_provisioning",
+  "frozen_at_local_date": "2026-07-27",
+  "supersedes": {
+    "experiment": "gate-gc-live-smoke-v7",
+    "terminal_result_commit": "674b926",
+    "reason": "Version 7 initialized the full GPU stack and collected twenty complete mixed-probe episodes, but every four-branch group had a constant reward. Prime correctly stopped after ten consecutive empty batches before an optimizer step."
+  },
+  "scope": {
+    "purpose": "Prove that the 4B LoRA Stage C path completes one exact-snapshot ReDCO update with a preregistered signal-rich integration fixture, auditable trainer metrics, and compact adapter retention.",
+    "not_a_learning_claim": true,
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "config": "configs/stage-c/smoke-redco-sliced.toml",
+    "algorithm": "redco",
+    "replay_mode": "sliced",
+    "optimizer_steps": 1,
+    "task_subset": [
+      "integration_planted_needle"
+    ],
+    "learning_probe_suite_unchanged": true,
+    "branch_group": {
+      "n": 4,
+      "continuations": 1,
+      "eta": 1,
+      "cost_penalty": 0
+    }
+  },
+  "signal_acquisition": {
+    "fixture": "eight-way planted needle with rewarding digit 1",
+    "behavior_support": "complete model vocabulary",
+    "forced_actions": false,
+    "repairs_or_resampling": false,
+    "batch_episodes": 2,
+    "maximum_consecutive_empty_batches": 10,
+    "maximum_collected_episodes": 20,
+    "maximum_collected_traces": 100,
+    "v7_diagnostic_pilot": {
+      "planted_needle_groups_observed": 2,
+      "recorded_group_tokens": [
+        [
+          16,
+          18,
+          18,
+          22
+        ],
+        [
+          16,
+          19,
+          16,
+          22
+        ]
+      ],
+      "decoded_group_actions": [
+        [
+          "1",
+          "3",
+          "3",
+          "7"
+        ],
+        [
+          "1",
+          "4",
+          "1",
+          "7"
+        ]
+      ],
+      "counterfactual_signal_under_frozen_v8_reward_mapping": [
+        true,
+        true
+      ],
+      "interpretation": "V7 is used only as an explicitly reported diagnostic pilot to choose a reliable integration fixture. V8 is frozen before observing any new model output and makes no learning-quality claim."
+    }
+  },
+  "behavior_action_policy": {
+    "representation": "one model token from the complete behavior-policy support",
+    "decoder": {
+      "max_tokens": 1,
+      "allowed_token_ids": null,
+      "temperature": 2.0,
+      "per_branch_seed": "63-bit HMAC-derived structural seed",
+      "per_branch_cache_salt": "distinct and recorded"
+    },
+    "invalid_action_semantics": "Any token whose exact decoded text is not an allowed digit is retained without repair and receives the deterministic failure reward.",
+    "same_distribution_contract": "All four branches use the same checkpoint, prompt, temperature, top-p, tool state, maximum length, and unrestricted token support; only structural seed and cache salt vary."
+  },
+  "evidence_and_storage_contract": {
+    "trainer_file_monitor": "metrics.jsonl",
+    "orchestrator_file_monitor": "metrics.jsonl",
+    "trainer_metrics_selection": "**/output/metrics.jsonl",
+    "effective_subset_semantics": "Every retained branch group must remain complete and have nonconstant rewards. One to ten complete collection attempts may appear in the all-traces artifact.",
+    "weights_only": true,
+    "skip_gather_master_weights": true,
+    "required_checkpoint": "filesystem-broadcast LoRA adapter",
+    "prohibited_checkpoint_artifact": "output/weights/step_1/model*.safetensors"
+  },
+  "source": {
+    "parent_commit": "5c0a297e32c9ca3e1f545644c2d2980a18a0515b",
+    "prime_rl_commit": "3b22dd951cad1036d1fe8dd0a0bfc40807a9b360",
+    "prime_rl_remote": "https://github.com/PrimeIntellect-ai/prime-rl.git",
+    "sha256": {
+      "configs/stage-c/smoke-redco-sliced.toml": "7e4c269fb51c963866c40c502255fdd2c22b26154d87e9a75e81f2e83e73d5bd",
+      "patches/prime-rl-redco-stage-c.patch": "48ff1fa641f6540cfe73627e8954d9056211180d902c384f9be335688429d43b",
+      "scripts/run_stage_c_live.sh": "af65d86daf071936f0d1bf230a410055dba6e257f8413f6ec766be6623b36170",
+      "src/redco/analysis/stage_c_live.py": "35d41b38562913cff027270ba6506997e8cecff5dde1d5fb0a0295d7bab8c89a",
+      "src/redco/algo/training.py": "25eb8918118e5e670d04a473ea9b64f291c61516a395ff4218b99e1f1c29c3ee",
+      "src/redco/contracts.py": "b577ce627eaa6e53d2e056d7806662109d8396a834d49ffcd4ce73c00ec12988",
+      "src/redco/env/tasks/credit_probes.py": "fd751a38c09f4a354a3b1a5296e359c0218bfee0c9503fe283f50b2897b19454",
+      "environments/redco_credit_v1/pyproject.toml": "20e2fc3d0820c81f73e90cda941503627c3de392df5866f8c1bbe1cffd0eee03",
+      "environments/redco_credit_v1/redco_credit_v1/taskset.py": "4ddf5a7578b056c5b71cf2da546e9f98766d99ff554938631b5b30f34c8364cb",
+      "external/prime-rl/uv.lock": "188b23ec2c723b8ca0c8ca80278747e0628f680449061a5404622f39114d42f5"
+    }
+  },
+  "validated_before_freeze": {
+    "root_tests": 85,
+    "prime_and_environment_targeted_tests": 11,
+    "persistent_wsl_uv_environment": "/home/mihir/.cache/redco-wsl/prime-stage-c-env",
+    "persistent_wsl_uv_cache": "/home/mihir/.cache/redco-wsl/uv-cache",
+    "native_wsl_source_mirror": "/home/mihir/.cache/redco-wsl/worktrees/stage-c-v7-src",
+    "prime_schema_configs": 4,
+    "ruff": "pass",
+    "mypy": "pass",
+    "prime_patch_reverse_apply_check": "pass"
+  },
+  "hardware": {
+    "resource_id": "8b33a6",
+    "cloud_id": "gpu_2x_a6000",
+    "provider": "massedcompute",
+    "location": "US",
+    "gpu_type": "A6000 48GB",
+    "gpu_count": 2,
+    "gpu_memory_total_gib": 96,
+    "availability_status_at_freeze": "Available",
+    "is_spot_observed": null,
+    "spot_policy": "reject the resource if provisioning identifies it as spot or preemptible",
+    "price_usd_per_hour": 1.08,
+    "image": "ubuntu_22_cuda_12",
+    "ephemeral_boot_disk_gb": 512,
+    "vcpus": 14,
+    "memory_gb": 96,
+    "prohibited": [
+      "A100",
+      "H100",
+      "persistent storage",
+      "a second simultaneous Stage C pod"
+    ]
+  },
+  "resource_policy": {
+    "wallet_before_usd_displayed": 43.22,
+    "maximum_smoke_compute_usd": 2.0,
+    "maximum_pod_lifetime_minutes": 90,
+    "training_timeout_seconds": 3600,
+    "persistent_disks": 0,
+    "terminate_after_local_artifact_sync": true,
+    "terminate_immediately_if_ssh_preflight_fails": true,
+    "no_campaign_if_smoke_fails": true,
+    "no_second_v8_smoke_after_any_model_call": true,
+    "stop_if_v2_lifecycle_error_recurs": "ValueError: clean Stage C permits one collected group per snapshot"
+  },
+  "ssh": {
+    "configured_private_key": "C:\\Users\\mihir\\.ssh\\id_rsa",
+    "public_fingerprint": "SHA256:LNuExn82n/p//myB4cc0pYv7yA1rzlbeI8Qyi6mXM3U",
+    "noninteractive_verification_required_after_provisioning": true
+  },
+  "execution": {
+    "package_manager": "uv",
+    "pip_prohibited": true,
+    "wandb_mode": "disabled",
+    "run_seed": 7202608,
+    "output": "runs/stage-c/gate-gc-live-smoke-v8",
+    "remote_repository_root": "/home/ubuntu/redco",
+    "environment": {
+      "REDCO_UV_CACHE_DIR": "/home/ubuntu/.cache/uv-prime-stage-c",
+      "REDCO_UV_ENVIRONMENT": "/home/ubuntu/.venv-prime-stage-c",
+      "XDG_CONFIG_HOME": "/home/ubuntu/.config-redco"
+    },
+    "all_raw_artifacts_must_be_local_before_termination": true
+  },
+  "decision_rule": {
+    "mandatory": [
+      "all frozen source hashes match locally and remotely",
+      "exactly one optimizer step completes",
+      "one to ten complete ten-trace collection attempts are serialized under policy version zero",
+      "the effective subset contains at least one complete four-branch group with nonconstant branch rewards",
+      "each effective branch records exactly one sampled token, temperature 2.0, a distinct structural seed, and a distinct cache salt",
+      "invalid displayed actions, if any, are retained with null canonical action and their true deterministic failure reward",
+      "every target is committed before action sampling",
+      "all effective branch records report exact sliced/full reward equivalence",
+      "the trainer batch is serialized",
+      "the trainer metrics file contains exactly one finite positive optimizer gradient norm",
+      "a non-empty filesystem-broadcast LoRA adapter is saved",
+      "no gathered full-model safetensors checkpoint is produced"
+    ],
+    "pass": "all mandatory conditions are true",
+    "failure": "sync all artifacts, emit a signed structured failure, terminate compute, and do not start a learning arm"
+  }
+}
