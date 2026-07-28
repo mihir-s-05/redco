@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c2-known-propensity-proposal-diagnostic",
+  "status": "frozen_before_full_cpu_grid_execution",
+  "frozen_at_local_date": "2026-07-28",
+  "purpose": "Validate the unbiased known-propensity estimator and freeze a future exploration-by-credit factorial without reinterpreting the negative Stage-C2 credit result.",
+  "claim_boundary": {
+    "estimator": "CPU exact enumeration of a binary reward-class reduction. This is not ReDCO and is not a language-model learning result.",
+    "stage_c2": "The failed mechanistic-credit-positive decision remains final. This diagnostic does not authorize another GPU campaign.",
+    "proposal": "Proposal sampling is a separately named exploration factor. It may not be added only to a ReDCO arm."
+  },
+  "estimator_contract": {
+    "sampling_distribution": "q=(1-epsilon)*pi+epsilon*r",
+    "target_distribution": "pi",
+    "importance_ratio": "unnormalized pi(a)/q(a)",
+    "baseline": "For sample i, the arithmetic mean of importance-weighted rewards from samples j != i.",
+    "support": "epsilon is strictly below 1, so q(a)>0 whenever pi(a)>0.",
+    "prohibited": [
+      "self-normalized importance ratios",
+      "unknown teacher propensities",
+      "forced inclusion represented as if sampled from pi",
+      "post-hoc epsilon selection for a GPU claim"
+    ]
+  },
+  "grid": {
+    "target_success_masses": [
+      0.01,
+      0.02,
+      0.05,
+      0.08143392780108703
+    ],
+    "proposal_success_masses": {
+      "uniform_over_eight_actions": 0.125,
+      "teacher_half_mass_on_success": 0.5
+    },
+    "epsilons": [
+      0.0,
+      0.1,
+      0.25,
+      0.5
+    ],
+    "branch_group_size": 11,
+    "groups_per_optimizer_step": 8,
+    "reward_classes": [
+      0.0,
+      1.0
+    ],
+    "enumeration": "All 2^11 action groups for every grid row; no Monte Carlo."
+  },
+  "mandatory_checks": {
+    "enumerated_probability_absolute_tolerance": 1e-12,
+    "maximum_absolute_gradient_bias": 1e-12,
+    "all_importance_ratios_finite": true,
+    "failure": "Record the failure without changing the estimator or tolerance."
+  },
+  "reported_diagnostics": [
+    "sampling success mass",
+    "informative-group probability",
+    "expected informative groups per optimizer step",
+    "maximum importance ratio",
+    "importance effective-sample fraction",
+    "exact estimator variance trace",
+    "variance ratio to the on-policy estimator",
+    "exact target gradient, estimator mean, and maximum absolute bias"
+  ],
+  "future_factorial": {
+    "exploration_levels": [
+      "shared warm-start on-policy sampling",
+      "shared declared mixture proposal with known propensities"
+    ],
+    "credit_levels": [
+      "broadcast trajectory credit",
+      "ReDCO full-suffix LOO credit",
+      "ReDCO sliced LOO credit"
+    ],
+    "crossing": "Every exploration level is crossed with every credit level.",
+    "broadcast_equivalent": "At a proposal level, broadcast samples the same target decision from q and applies the same known pi/q correction; only the credit method differs.",
+    "next_gpu_run": "None is authorized by this preregistration. Any future run needs a new protocol justified against the Stage-C2 negative result."
+  },
+  "output": "runs/stage-c2/proposal-factorial-cpu/diagnostic.json",
+  "source": {
+    "parent_commit": "2e36c908cbd9295a1261ae10201266feb1a778e1",
+    "sha256": {
+      "src/redco/analysis/proposal_factorial.py": "620debd9a46fde9e7138dc40a4e21db3cd5d79021cdc7d244972bd22cc18d006",
+      "tests/test_proposal_factorial.py": "f90d5db09897809ee39375bb74ff9acee44e98f68fddc15ab670cd93d2175e76"
+    }
+  },
+  "validated_before_freeze": {
+    "targeted_tests": 4,
+    "ruff": "pass",
+    "mypy": "pass",
+    "package_manager": "uv only; no pip"
+  }
+}
