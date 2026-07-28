@@ -115,6 +115,7 @@ def main() -> None:
         model=args.model,
         enable_lora=bool(adapters),
         max_lora_rank=32,
+        max_logprobs=-1,
         tensor_parallel_size=args.tensor_parallel_size,
         gpu_memory_utilization=args.gpu_memory_utilization,
         max_model_len=512,
