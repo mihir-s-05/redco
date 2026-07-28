@@ -16,6 +16,9 @@ class ToyModel(torch.nn.Module):
         super().__init__()
         self.layer = torch.nn.Linear(3, 2, bias=False)
 
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return self.layer(inputs)
+
 
 def main() -> None:
     base_weight = torch.tensor([[1.0, 2.0, 3.0], [-1.0, 0.5, 2.0]])
