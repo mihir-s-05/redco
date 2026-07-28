@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c2-powered-warmstart-and-credit",
+  "generated_at_local_date": "2026-07-28",
+  "decisions": {
+    "integration_passed": true,
+    "mechanistic_credit_positive": false,
+    "replay_equivalence_passed": true
+  },
+  "authoritative_final_action_5_mass_temperature_2": {
+    "full_suffix": 0.9975516931259703,
+    "broadcast": 0.9999624760300176,
+    "sliced": 0.998339911417551
+  },
+  "mass_minus_broadcast": {
+    "full_suffix": -0.0024107829040473927,
+    "sliced": -0.0016225646124666815
+  },
+  "replay_equivalence": {
+    "absolute_full_suffix_sliced_mass_difference": 0.0007882182915807112,
+    "maximum_allowed": 0.05,
+    "greedy_action_full_suffix": "5",
+    "greedy_action_sliced": "5"
+  },
+  "training": {
+    "full_suffix": {
+      "optimizer_steps": 12,
+      "policy_calls": 1152,
+      "branch_groups": 96,
+      "informative_branch_groups": 78,
+      "informative_branch_group_rate": 0.8125,
+      "zero_advantage_record_rate": 0.1875,
+      "valid_action_rate": 0.9857954545454546,
+      "gradient_norm_maximum": 8.258281707763672,
+      "final_eval_mean_reward": 1.25
+    },
+    "broadcast": {
+      "optimizer_steps": 72,
+      "policy_calls": 1152,
+      "valid_action_rate": 1.0,
+      "gradient_norm_maximum": 1.3815600872039795,
+      "final_eval_mean_reward": 1.25
+    },
+    "sliced": {
+      "optimizer_steps": 12,
+      "policy_calls": 1152,
+      "branch_groups": 96,
+      "informative_branch_groups": 79,
+      "informative_branch_group_rate": 0.8229166666666666,
+      "zero_advantage_record_rate": 0.17708333333333334,
+      "valid_action_rate": 0.9876893939393939,
+      "gradient_norm_maximum": 8.869288444519043,
+      "final_eval_mean_reward": 1.25
+    }
+  },
+  "structural_audit": {
+    "every_arm_completed_frozen_step_and_call_budget": true,
+    "redco_episodes_per_arm": 96,
+    "one_context_per_redco_episode": true,
+    "contiguous_branch_indices_0_through_10": true,
+    "branch_temperature_2": true,
+    "single_sampled_token_per_branch": true,
+    "seed_recorded_per_branch": true,
+    "pre_action_selection_only": true,
+    "replay_equivalent_per_branch": true,
+    "finite_gradients_all_arms": true
+  },
+  "evidence_sha256": {
+    "full_result_json": "0704c91466bb8a50664dea3a351b762ac850bbe5e1c16e9d7401d1e38f04e864",
+    "final_policy_scores_json": "84a28e3dda0f788b6016043f44041760b931788860628f853230e45f495e1ca1",
+    "full_suffix_final_adapter_raw": "193a9512d581db9d782a672d73b124b9aea3775eb67244ac818d01a7e3da81e8",
+    "broadcast_final_adapter_raw": "c4e8e0b20020be6ff721c5166f0228b2bf381576c7cf6f9c2c2b144432dcaa8b",
+    "sliced_final_adapter_raw": "41b09bc2defdadfbe1d738b291ad654bbf69e166daf79825bd02a5bd5926fe7e",
+    "analysis_script_executed": "2fbd46caecea7376389b34d57f164a58f319657eb3871fdf7bb293911482e773",
+    "analysis_script_tracked_comment_only_cleanup": "5fe206784ee555fb4efc9f6babe33ff1437e8c3a606abcc245f0011d80ef8aa2"
+  },
+  "resource_use": {
+    "gpu": "non-spot 2xL40S 48GB",
+    "rate_usd_per_hour": 2.0,
+    "pod_charge_usd": 2.88,
+    "active_pods_after_teardown": 0,
+    "persistent_disks_after_teardown": 0,
+    "wallet_balance_after_teardown_usd": 36.24
+  },
+  "statistical_scope": "Exact descriptive differences only. Repeated evaluation traces are not treated as independent statistical units."
+}
