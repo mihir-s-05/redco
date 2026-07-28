@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c2-exact-prefix-backend-parity",
+  "status": "frozen_before_any_vllm_parity_score",
+  "frozen_at_local_date": "2026-07-28",
+  "purpose": "Resolve the retained full-suffix adapter disagreement before using offline checkpoint probabilities to design or select another warm start.",
+  "scope": {
+    "scientific_claim": "The direct Hugging Face LoRA scorer and the pinned vLLM inference backend agree on next-token probabilities for byte-identical rendered Stage C prefixes.",
+    "not_a_learning_gate": true,
+    "no_reward_or_heldout_outcome_used": true
+  },
+  "model": {
+    "name": "Qwen/Qwen3-4B-Instruct-2507",
+    "dtype": "bfloat16",
+    "vllm_version": "0.24.0+cu129",
+    "maximum_context_length": 512
+  },
+  "inputs": {
+    "cases": "configs/stage-c2/policy-audit-cases.json",
+    "case_count": 8,
+    "prefix_contract": "Pass the recorded prefix_token_ids directly to each backend; no tokenization or chat-template rendering is permitted during scoring.",
+    "temperatures": [
+      1.0,
+      2.0
+    ],
+    "models": [
+      {
+        "name": "base",
+        "adapter": null
+      },
+      {
+        "name": "full_suffix_29",
+        "adapter": "runs/stage-c/gate-gc-live-learning-v3/full_suffix/run_default/broadcasts/step_29"
+      },
+      {
+        "name": "full_suffix_30",
+        "adapter": "runs/stage-c/gate-gc-live-learning-v3/full_suffix/run_default/broadcasts/step_30"
+      },
+      {
+        "name": "sliced_29",
+        "adapter": "runs/stage-c/gate-gc-live-learning-v3/sliced/run_default/broadcasts/step_29"
+      },
+      {
+        "name": "broadcast_74",
+        "adapter": "runs/stage-c/gate-gc-live-learning-v4/broadcast/run_default/broadcasts/step_74"
+      }
+    ]
+  },
+  "comparison": {
+    "action_tokens": "Every allowed digit token in each exact case",
+    "maximum_absolute_logprob_difference": 0.1,
+    "maximum_adapter_relative_logprob_difference": 0.1,
+    "required_greedy_token_mismatches": 0,
+    "adapter_relative_definition": "(adapter logprob - base logprob) compared between backends",
+    "pass": "Every frozen bound passes for all models, cases, actions, and temperatures.",
+    "failure": "Do not use direct Hugging Face scores for checkpoint selection. Treat vLLM exact-prefix scores as authoritative for subsequent calibration and report the offline-scoring discrepancy without changing these bounds."
+  },
+  "execution": {
+    "run_hugging_face_and_vllm_in_separate_processes": true,
+    "vllm_logprobs": "all vocabulary via SamplingParams(logprobs=-1)",
+    "maximum_model_calls": 80,
+    "gpu_policy": {
+      "count": 1,
+      "minimum_memory_gb": 24,
+      "pricing": "non-spot",
+      "maximum_rate_usd_per_hour": 1.0,
+      "excluded_gpu_types": [
+        "A100",
+        "H100"
+      ],
+      "persistent_storage": false
+    },
+    "artifact_root": "runs/stage-c2/backend-parity",
+    "terminate_after_artifact_sync": true
+  },
+  "frozen_sha256": {
+    "configs/stage-c2/policy-audit-cases.json": "259ff6e94e2f692a5f50a34137a39f77aa247633d0ced481b931784f386e1dcc",
+    "scripts/score_stage_c_policies.py": "e516972c902eb4e4c042b2cb84f1cba687e81bc524bf1cf6239645a97307b35d",
+    "scripts/score_stage_c_policies_vllm.py": "0dfc9b75b1433b79a67f6516d6b7dafe7f9df837967b1e678d0c0b781c479e2d",
+    "src/redco/analysis/stage_c_backend_parity.py": "2a30f06a56ac5d91052f95a5dac2b9c637797f29c86c7cd4478fcb5e5341ef42",
+    "full_suffix_29_adapter_model.safetensors": "46cd2571ecfbe959b3286bb413fd9f737f3637efddb6e9f3a45873bab0c20561",
+    "full_suffix_30_adapter_model.safetensors": "6ce868aa127bde05c7e5f05714ac4ea4845c9835d5d33d7c1c219d192b9be167",
+    "sliced_29_adapter_model.safetensors": "77ece0405f96a777b1d0a28ec13d01dae6fd7746f8dfad8256ee4c7f9281e5f9",
+    "broadcast_74_adapter_model.safetensors": "72342e6a2a6b5d8156eaf3b97784bdc37e305b39a6d2ff7e6f82b3a6a91fab7f"
+  },
+  "artifact_policy": "Retain raw backend scores, the signed comparison report, logs, resource snapshots, and checksums locally. Do not copy model caches or duplicate adapters."
+}
