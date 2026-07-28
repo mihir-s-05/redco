@@ -4,8 +4,8 @@ index b3282475a..5fdc36958 100644
 +++ b/packages/prime-rl-configs/src/prime_rl/configs/algorithm.py
 @@ -200,6 +200,19 @@ class GRPOAlgoConfig(BaseAlgoConfig):
      """Linear length penalty subtracted from each reward before the GRPO baseline (see ``LinearLengthPenaltyConfig``): a ``pass_rate``-scaled sum of output-token, input-token, and turns terms, each normalized by the group's own max for that quantity. None disables it."""
- 
- 
+
+
 +class RedcoAlgoConfig(BaseAlgoConfig):
 +    type: Literal["redco"] = "redco"
 +    """Clean Stage-C graph-sliced counterfactual credit."""
@@ -23,8 +23,8 @@ index b3282475a..5fdc36958 100644
      type: Literal["echo"] = "echo"  # type: ignore[assignment]
      """ECHO: group-relative advantage on action tokens (GRPO), plus weighted
 @@ -305,7 +318,13 @@ class SFTAlgoConfig(BaseAlgoConfig):
- 
- 
+
+
  AlgoConfig: TypeAlias = Annotated[
 -    GRPOAlgoConfig | EchoAlgoConfig | MaxRLAlgoConfig | OPDAlgoConfig | OPSDAlgoConfig | SFTAlgoConfig,
 +    GRPOAlgoConfig
@@ -39,12 +39,80 @@ index b3282475a..5fdc36958 100644
  """The training algorithm: sampling plus the per-token training signal (credit
 @@ -313,6 +332,7 @@ assignment and loss routing, fused). The ``type`` selects the algorithm, and
  its class defaults are the vetted setting.
- 
+
  - ``grpo`` — policy group sampling, group-relative advantage, RL loss (the default).
 +- ``redco`` — clean Stage-C four-action counterfactual credit.
  - ``max_rl`` — GRPO with mean-normalized advantages (maximum-likelihood RL).
  - ``opd`` — on-policy distillation: policy samples, per-token reverse KL against a reference model. Needs ``teacher``.
  - ``opsd`` — SDFT: policy samples, demo-conditioned reverse KL against the live policy (the teacher is the policy itself).
+diff --git a/packages/prime-rl-configs/src/prime_rl/configs/orchestrator.py b/packages/prime-rl-configs/src/prime_rl/configs/orchestrator.py
+index fe6b69620..575d09640 100644
+--- a/packages/prime-rl-configs/src/prime_rl/configs/orchestrator.py
++++ b/packages/prime-rl-configs/src/prime_rl/configs/orchestrator.py
+@@ -546,6 +546,15 @@ class OrchestratorConfig(BaseConfig):
+     max_off_policy_steps: int = Field(8, ge=0)
+     """Maximum policies allowed to generate a single rollout. Rollouts generated more than ``max_off_policy_steps`` ahead of training are discarded. Higher values yield better throughput at the cost of off-policy noise."""
+
++    strict_snapshot_batches: bool = False
++    """Run an exact number of complete train groups per policy version and
++    wait for that version's weight update before opening the next cohort.
++    This low-throughput mode provides exact per-snapshot rollout budgets."""
++
++    train_groups_per_policy: int = Field(1, ge=1)
++    """Complete train groups opened for each policy version when
++    ``strict_snapshot_batches`` is enabled."""
++
+     bench: bool = False
+     """Benchmark mode. Sets ``max_steps`` to 5 and disables W&B."""
+
+@@ -712,6 +721,12 @@ class OrchestratorConfig(BaseConfig):
+         if self.max_inflight_rollouts is not None and self.max_inflight_rollouts < self.group_size:
+             raise ValueError("max_inflight_rollouts must be at least the number of rollouts per example")
+
++        if self.strict_snapshot_batches:
++            if self.max_off_policy_steps != 0:
++                raise ValueError("strict_snapshot_batches requires max_off_policy_steps = 0")
++            if self.weight_broadcast.type != "filesystem":
++                raise ValueError("strict_snapshot_batches requires filesystem weight broadcast")
++
+         # Propagate the top-level ``group_size`` into each train env that didn't set its own.
+         for env_cfg in self.train.env:
+             if "group_size" not in env_cfg.model_fields_set:
+diff --git a/skills/configs/SKILL.md b/skills/configs/SKILL.md
+index 1aa0d0068..e7329fb8f 100644
+--- a/skills/configs/SKILL.md
++++ b/skills/configs/SKILL.md
+@@ -74,6 +74,30 @@ enable_token_export = true
+
+ Leave it unset for normal training. When enabled, it exports every sequence from each exporting rank.
+
++## Exact snapshot rollout budgets
++
++Experiments that require every optimizer batch to use exactly one policy
++snapshot can enable the orchestrator's low-throughput strict mode:
++
++```toml
++[orchestrator]
++max_off_policy_steps = 0
++strict_snapshot_batches = true
++train_groups_per_policy = 1
++
++[weight_broadcast]
++type = "filesystem"
++```
++
++`train_groups_per_policy` is the number of complete environment groups needed
++to fill one optimizer batch. Strict mode stops opening groups after that
++number, waits until the trainer's filesystem checkpoint has been fully applied
++to inference, runs any evaluation scheduled for that snapshot to completion,
++and only then opens the next training cohort. Use it for exact call accounting
++and snapshot-aligned evaluation, not throughput-oriented production runs. The
++config validator rejects nonzero `max_off_policy_steps` and non-filesystem
++weight broadcast in this mode.
++
+ ## Key files
+
+ - `packages/prime-rl-configs/src/prime_rl/` — config classes under `configs/`; `utils/config.py` re-exports `BaseConfig` and `cli`
 diff --git a/src/prime_rl/orchestrator/algo/__init__.py b/src/prime_rl/orchestrator/algo/__init__.py
 index 8d1baa60a..c2e014d2d 100644
 --- a/src/prime_rl/orchestrator/algo/__init__.py
@@ -64,7 +132,7 @@ index 8d1baa60a..c2e014d2d 100644
 +    "redco": RedcoAlgorithm,
      "sft": SFTDistillAlgorithm,
  }
- 
+
 @@ -72,6 +74,7 @@ __all__ = [
      "MaxRLAlgorithm",
      "OPDAlgorithm",
@@ -73,12 +141,24 @@ index 8d1baa60a..c2e014d2d 100644
      "Rollout",
      "SFTDistillAlgorithm",
      "build_algorithm",
+diff --git a/src/prime_rl/orchestrator/algo/base.py b/src/prime_rl/orchestrator/algo/base.py
+index b12d17df6..cc5738699 100644
+--- a/src/prime_rl/orchestrator/algo/base.py
++++ b/src/prime_rl/orchestrator/algo/base.py
+@@ -118,6 +118,7 @@ class Algorithm:
+     renderer is not threaded in."""
+
+     action_loss_type: ClassVar[ActionLossType] = "rl"
++    requires_complete_group: ClassVar[bool] = False
+
+     def __init__(self, config: AlgoConfig, policy_pool: InferencePool):
+         self.policy_pool = policy_pool
 diff --git a/src/prime_rl/orchestrator/algo/redco.py b/src/prime_rl/orchestrator/algo/redco.py
 new file mode 100644
-index 000000000..b7e844fc4
+index 000000000..d34a2dbbf
 --- /dev/null
 +++ b/src/prime_rl/orchestrator/algo/redco.py
-@@ -0,0 +1,182 @@
+@@ -0,0 +1,163 @@
 +from __future__ import annotations
 +
 +from collections import defaultdict
@@ -136,6 +216,8 @@ index 000000000..b7e844fc4
 +class RedcoAlgorithm(Algorithm):
 +    """Stage-C all-branch LOO credit with decision-unit normalization."""
 +
++    requires_complete_group = True
++
 +    def __init__(self, config: RedcoAlgoConfig, policy_pool: InferencePool):
 +        super().__init__(config, policy_pool)
 +        self.replay_mode = config.replay_mode
@@ -148,17 +230,9 @@ index 000000000..b7e844fc4
 +        if any(rollout.off_policy_steps != 0 for rollout in group):
 +            raise ValueError("clean Stage C refuses off-policy rollouts")
 +        (policy_version,) = policy_versions
-+        if (
-+            self._latest_policy_version is not None
-+            and policy_version < self._latest_policy_version
-+        ):
-+            raise ValueError(
-+                "clean Stage C refuses a stale policy snapshot after version advance"
-+            )
-+        if (
-+            self._latest_policy_version is None
-+            or policy_version > self._latest_policy_version
-+        ):
++        if self._latest_policy_version is not None and policy_version < self._latest_policy_version:
++            raise ValueError("clean Stage C refuses a stale policy snapshot after version advance")
++        if self._latest_policy_version is None or policy_version > self._latest_policy_version:
 +            self._latest_policy_version = policy_version
 +
 +        by_episode: dict[str, list[Rollout]] = defaultdict(list)
@@ -177,16 +251,8 @@ index 000000000..b7e844fc4
 +        for episode_id, rollouts in sorted(by_episode.items()):
 +            if not episode_id:
 +                raise ValueError("ReDCO branch records require an episode id")
-+            context = [
-+                rollout
-+                for rollout in rollouts
-+                if _metadata(rollout).get("record_kind") == "context"
-+            ]
-+            branches = [
-+                rollout
-+                for rollout in rollouts
-+                if _metadata(rollout).get("record_kind") == "branch"
-+            ]
++            context = [rollout for rollout in rollouts if _metadata(rollout).get("record_kind") == "context"]
++            branches = [rollout for rollout in rollouts if _metadata(rollout).get("record_kind") == "branch"]
 +            if len(context) != 1:
 +                raise ValueError("each ReDCO episode requires one context trace")
 +            ordered = sorted(
@@ -198,17 +264,14 @@ index 000000000..b7e844fc4
 +                raise ValueError("each ReDCO episode requires branch indices 0..3")
 +            if _metadata(ordered[0]).get("action_source") != "original":
 +                raise ValueError("branch zero must be the original action")
-+            if any(
-+                _metadata(rollout).get("action_source") != "sampled"
-+                for rollout in ordered[1:]
-+            ):
++            if any(_metadata(rollout).get("action_source") != "sampled" for rollout in ordered[1:]):
 +                raise ValueError("branches one through three must be sampled")
 +            contexts.append(context[0])
 +            ordered_episodes.append((context[0], ordered))
 +
-+        trajectory_advantages = trajectory_rloo(
-+            tuple(rollout.reward for rollout in contexts)
-+        )
++        if len(contexts) < 2:
++            raise ValueError("ReDCO trajectory LOO requires at least two complete episodes")
++        trajectory_advantages = trajectory_rloo(tuple(rollout.reward for rollout in contexts))
 +        for trajectory_advantage, (context, branches) in zip(
 +            trajectory_advantages,
 +            ordered_episodes,
@@ -216,9 +279,7 @@ index 000000000..b7e844fc4
 +        ):
 +            context_sample = _single_sample(context)
 +            context.assign_advantages(float(trajectory_advantage))
-+            context_sample.rl_weights = [
-+                1.0 if trainable else 0.0 for trainable in context_sample.mask
-+            ]
++            context_sample.rl_weights = [1.0 if trainable else 0.0 for trainable in context_sample.mask]
 +            context_sample.rl_normalizer = 1.0
 +
 +            original = branches[0]
@@ -261,14 +322,91 @@ index 000000000..b7e844fc4
 +                    "redco_branch_advantage",
 +                    record.advantages[action_span.start],
 +                )
+diff --git a/src/prime_rl/orchestrator/dispatcher.py b/src/prime_rl/orchestrator/dispatcher.py
+index 998ff6fd5..812ef8ab7 100644
+--- a/src/prime_rl/orchestrator/dispatcher.py
++++ b/src/prime_rl/orchestrator/dispatcher.py
+@@ -132,6 +132,8 @@ class RolloutDispatcher:
+         max_inflight_rollouts: int,
+         tasks_per_minute: float | None,
+         max_off_policy_steps: int,
++        strict_snapshot_batches: bool = False,
++        train_groups_per_policy: int = 1,
+     ) -> None:
+         self.policy = policy
+         self.train_envs = train_envs
+@@ -142,6 +144,9 @@ class RolloutDispatcher:
+         self.train_source = train_source
+         self.eval_source = eval_source
+         self.max_off_policy_steps = max_off_policy_steps
++        self.strict_snapshot_batches = strict_snapshot_batches
++        self.train_groups_per_policy = train_groups_per_policy
++        self.train_groups_started_by_policy: Counter[int] = Counter()
+
+         self.max_inflight = max_inflight_rollouts
+         self.inflight_permits = 0
+@@ -340,6 +345,16 @@ class RolloutDispatcher:
+         get_logger().info(f"Switching dispatcher mode to prefer {prefer} rollouts because {reason}")
+         self.mode = new_mode
+
++    def can_open_fresh_train_group(self) -> bool:
++        """Whether strict snapshot accounting permits a new train group."""
++        if not self.strict_snapshot_batches:
++            return True
++        return (
++            self.train_groups_started_by_policy[self.policy.version] < self.train_groups_per_policy
++            and not self.eval_has_work
++            and self.inflight_eval_count == 0
++        )
++
+     async def try_schedule(self, kind: RolloutKind) -> bool:
+         """Schedule one rollout of ``kind``: prefer continuing an existing
+         group (keeps prefix-cache hits); otherwise open a fresh group from
+@@ -359,11 +374,16 @@ class RolloutDispatcher:
+             if cost <= self.available_permits:
+                 return await self.schedule_group_rollout(gid, group)
+
++        if kind == "train" and not self.can_open_fresh_train_group():
++            return False
++
+         fresh = self.next_fresh_group(kind, envs)
+         if fresh is None:
+             return False
+         gid = uuid.uuid4()
+         self.groups[gid] = fresh
++        if kind == "train" and self.strict_snapshot_batches:
++            self.train_groups_started_by_policy[fresh.policy_version_at_start] += 1
+         return await self.schedule_group_rollout(gid, fresh)
+
+     def next_fresh_group(self, kind: RolloutKind, envs) -> GroupState | None:
 diff --git a/src/prime_rl/orchestrator/orchestrator.py b/src/prime_rl/orchestrator/orchestrator.py
-index 400d078f7..66fcb05be 100644
+index 400d078f7..cd56062de 100644
 --- a/src/prime_rl/orchestrator/orchestrator.py
 +++ b/src/prime_rl/orchestrator/orchestrator.py
-@@ -380,7 +380,10 @@ class Orchestrator:
+@@ -149,6 +149,8 @@ class Orchestrator:
+     lora_name: str | None
+     resume_step: int | None
+     lag_task: asyncio.Task | None
++    version_applied: asyncio.Event
++    applied_policy_version: int
+
+     def __init__(self, config: OrchestratorConfig) -> None:
+         self.config = config
+@@ -178,6 +180,8 @@ class Orchestrator:
+         self.gate_closed_at = None
+         # Pulsed by the version hooks so a held ship can re-check ``policy.version``
+         self.version_advanced = asyncio.Event()
++        self.version_applied = asyncio.Event()
++        self.applied_policy_version = 0
+         self.wait_for_policy_time = 0.0
+         self.component_tasks = []
+
+@@ -379,8 +383,12 @@ class Orchestrator:
+                 self.policy_inference.update_model_name(self.lora_name)
                  self.policy.model_name = self.lora_name
              self.policy.version = sync_version
- 
++            self.applied_policy_version = sync_version
+
 -        self.train_source = TrainSource(self.train_envs, seed=42)
 +        self.train_source = TrainSource(
 +            self.train_envs,
@@ -277,14 +415,131 @@ index 400d078f7..66fcb05be 100644
          self.eval_source: EvalSource | None = (
              EvalSource(
                  self.eval_envs,
+@@ -404,6 +412,8 @@ class Orchestrator:
+             max_inflight_rollouts=config.max_inflight_rollouts,
+             tasks_per_minute=config.tasks_per_minute,
+             max_off_policy_steps=config.max_off_policy_steps,
++            strict_snapshot_batches=config.strict_snapshot_batches,
++            train_groups_per_policy=config.train_groups_per_policy,
+         )
+         self.train_sink = TrainSink(
+             config,
+@@ -469,9 +479,13 @@ class Orchestrator:
+             asyncio.create_task(self.watcher.start(), name="watcher"),
+         ]
+
++        if config.strict_snapshot_batches:
++            self.dispatcher.dispatch_allowed.clear()
+         # Base-model eval (policy v0) — fires before any train rollouts, logged at the first
+         # step, unless ``eval.skip_first_step=True`` (or this is a resume)
+-        self.maybe_trigger_eval(self.progress.step)
++        eval_fired = self.maybe_trigger_eval(self.progress.step)
++        if config.strict_snapshot_batches and not eval_fired:
++            self.dispatcher.dispatch_allowed.set()
+
+         # Anchor step-time clock so the first step measures startup → first batch
+         self.last_batch_at = time.perf_counter()
+@@ -643,7 +657,10 @@ class Orchestrator:
+
+         await self.sender.send(TrainingBatch(examples=batch.samples, step=step))
+         self.progress.step += 1
+-        self.update_dispatch_gate()
++        if config.strict_snapshot_batches:
++            self.dispatcher.dispatch_allowed.clear()
++        else:
++            self.update_dispatch_gate()
+         # Checkpoint the step we just shipped (resume point: continue at step + 1).
+         save_ckpt_time = await self.maybe_save_ckpt(step)
+         trim_process_memory()
+@@ -716,17 +733,31 @@ class Orchestrator:
+         self.log_train_batch(batch, step=step, step_time=step_time)
+
+         self.train_sink.reset_pre_filter_stats()
+-        self.maybe_trigger_eval(self.progress.step)
++        if config.strict_snapshot_batches:
++            await self.wait_for_applied_policy(step)
++            if config.max_steps is not None and step >= config.max_steps:
++                self.draining = True
++                self.dispatcher.disable_train_scheduling()
++                n_cancelled = await self.dispatcher.cancel_inflight_train_rollouts()
++                get_logger().info(
++                    f"Final train step applied; draining pipeline (cancelled {n_cancelled} in-flight train rollout(s))"
++                )
++            else:
++                eval_fired = self.maybe_trigger_eval(self.progress.step)
++                if not eval_fired:
++                    self.dispatcher.dispatch_allowed.set()
++        else:
++            self.maybe_trigger_eval(self.progress.step)
+         trim_process_memory()
+
+-    def maybe_trigger_eval(self, step: int) -> None:
++    def maybe_trigger_eval(self, step: int) -> bool:
+         """Fire eligible eval epochs and flip to ``PREFER_EVAL`` if anything
+         fires. No-op when eval is not configured."""
+         if self.eval_source is None:
+-            return
++            return False
+         fired = self.eval_source.trigger(step)
+         if not fired:
+-            return
++            return False
+         reason = f"eval was triggered at step {step}"
+         self.dispatcher.switch_mode(DispatcherMode.PREFER_EVAL, reason=reason)
+         now = time.perf_counter()
+@@ -738,6 +769,16 @@ class Orchestrator:
+             for env_name in fired
+         )
+         get_logger().info(f"Starting evals in {', '.join(fired)} ({total_rollouts} total rollouts)")
++        return True
++
++    async def wait_for_applied_policy(self, version: int) -> None:
++        """Wait until inference has applied ``version`` rather than merely
++        observed its stable broadcast marker."""
++        while self.applied_policy_version < version:
++            self.version_applied.clear()
++            if self.applied_policy_version >= version:
++                break
++            await self.version_applied.wait()
+
+     def collect_pipeline_view(self) -> tuple[str, dict[str, float]]:
+         """Pipeline view for the orchestrator's ``PeriodicLogger``. Returns
+@@ -874,6 +915,15 @@ class Orchestrator:
+         metrics[f"eval/{batch.env_name}/policy_version"] = float(policy_version)
+         metrics["step"] = float(batch.step)
+         self.monitor.log(metrics, step=batch.step)
++        if (
++            self.config.strict_snapshot_batches
++            and not self.draining
++            and not self.dispatcher.eval_has_work
++            and self.dispatcher.inflight_eval_count == 0
++            and self.eval_sink is not None
++            and not self.eval_sink.batch_progress()
++        ):
++            self.dispatcher.dispatch_allowed.set()
+
+         # Success line — reward / turns / truncation over the effective set, error rate + branches
+         # over the full returned cohort. ``Stat.mean()`` is 0.0 for an empty set.
+@@ -947,7 +997,10 @@ class Orchestrator:
+         re-evaluate the dispatch gate (may resume if the trainer caught up)."""
+         if self.model_express is not None:
+             await asyncio.to_thread(self.model_express.set_status, p2p_pb2.SOURCE_STATUS_INITIALIZING)
+-        self.update_dispatch_gate()
++        self.applied_policy_version = step
++        self.version_applied.set()
++        if not self.config.strict_snapshot_batches:
++            self.update_dispatch_gate()
+
+     async def stop(self) -> None:
+         """Bounded best-effort teardown of all components. Has a global
 diff --git a/src/prime_rl/orchestrator/train_sink.py b/src/prime_rl/orchestrator/train_sink.py
-index 2b135ae50..9e9e94af8 100644
+index 2b135ae50..e06b9c23f 100644
 --- a/src/prime_rl/orchestrator/train_sink.py
 +++ b/src/prime_rl/orchestrator/train_sink.py
 @@ -45,6 +45,14 @@ def payload_tokens(rollout: Rollout) -> int:
      return sum(len(sample.token_ids) for sample in rollout.samples) or rollout.num_total_tokens
- 
- 
+
+
 +def rollout_temperature(rollout: Rollout, fallback: float) -> float:
 +    """Resolve the actual per-trace sampling temperature used by the policy."""
 +    if rollout.agent is None:
@@ -295,11 +550,36 @@ index 2b135ae50..9e9e94af8 100644
 +
  class TrainSink:
      """Three-level train sink. Constructed once, fed via ``add(rollout)``."""
- 
-@@ -211,10 +219,11 @@ class TrainSink:
+
+@@ -191,12 +199,18 @@ class TrainSink:
+         # Group-scoring envs: any failure makes survivors' rewards unsafe
+         # (computed relative to the missing ones)
+         env = self.train_envs.get(env_name)
+-        if num_errored > 0 and env.requires_group_scoring:
+-            get_logger().debug(
+-                f"Finished group | env={env_name} task_idx={task_idx} | "
+-                f"rollouts={len(group)} (errored={num_errored}) | dropped: group-scored partial"
+-            )
+-            return
++        if num_errored > 0:
++            if env.algorithm.requires_complete_group:
++                raise ValueError(
++                    f"{type(env.algorithm).__name__} requires a complete group; "
++                    f"{num_errored} of {len(group)} rollouts failed"
++                )
++            if env.requires_group_scoring:
++                get_logger().debug(
++                    f"Finished group | env={env_name} task_idx={task_idx} | "
++                    f"rollouts={len(group)} (errored={num_errored}) | dropped: group-scored partial"
++                )
++                return
+         # Untrainable traces carry no samples and must not skew the group baseline.
+         survivors = [r for r in survivors if r.trainable]
+         if not survivors:
+@@ -211,10 +225,11 @@ class TrainSink:
          # owns the grouping mechanics.
          await env.algorithm.finalize_group(survivors)
- 
+
 -        # The env has a single sampling temperature; fan it out per token
 -        # (context tokens are masked out, so their temperature is don't-care).
 -        temperature = env.sampling_args["temperature"]
@@ -310,7 +590,7 @@ index 2b135ae50..9e9e94af8 100644
 +            temperature = rollout_temperature(r, fallback_temperature)
              for sample in r.samples:
                  sample.temperatures = [temperature] * len(sample.token_ids)
- 
+
 diff --git a/src/prime_rl/trainer/batch.py b/src/prime_rl/trainer/batch.py
 index 4eb8ff4ba..6c7a6e0c4 100644
 --- a/src/prime_rl/trainer/batch.py
@@ -334,7 +614,7 @@ index 4eb8ff4ba..6c7a6e0c4 100644
 +        rl_normalizers=rl_normalizers,
          seq_lens=[len(input_ids)],
      )
- 
+
 @@ -313,6 +319,9 @@ def _materialize_bin(bin_content: _MicroBatchBin, num_loras: int) -> MicroBatch:
      # A weight stream materializes as soon as one packed sample carries it; the
      # samples that lack it get the stream's identity fill (STREAM_FILL).
@@ -342,7 +622,7 @@ index 4eb8ff4ba..6c7a6e0c4 100644
 +    has_rl_normalizers = any(
 +        sample.rl_normalizers is not None for _, sample in bin_content.samples
 +    )
- 
+
      input_ids: list[int] = []
      loss_mask: list[bool] = []
 @@ -325,6 +334,7 @@ def _materialize_bin(bin_content: _MicroBatchBin, num_loras: int) -> MicroBatch:
@@ -373,9 +653,9 @@ index 4eb8ff4ba..6c7a6e0c4 100644
 +        rl_normalizers=rl_normalizers,
          seq_lens=seq_lens,
      )
- 
+
 @@ -553,6 +570,7 @@ def _assert_token_arrays_aligned(micro_batch: MicroBatch) -> None:
- 
+
  def _make_dummy_batch(source: MicroBatch) -> MicroBatch:
      """Create a zero-loss dummy batch from an existing batch, preserving its modality."""
 +    uses_decision_normalizer = source.rl_normalizers is not None
@@ -388,8 +668,8 @@ index 4eb8ff4ba..6c7a6e0c4 100644
      dummy.ref_kl_weights = None
 +    dummy.rl_normalizers = [0.0] if uses_decision_normalizer else None
      return dummy
- 
- 
+
+
 diff --git a/src/prime_rl/trainer/rl/data.py b/src/prime_rl/trainer/rl/data.py
 index 1ad250cf7..2850ac2c0 100644
 --- a/src/prime_rl/trainer/rl/data.py
@@ -401,7 +681,7 @@ index 1ad250cf7..2850ac2c0 100644
 +    rl_normalizers: list[float] | None
      ce_weights: Float[Tensor, "batch seq"] | None
      ref_kl_weights: Float[Tensor, "batch seq"] | None
- 
+
 @@ -135,6 +136,7 @@ class FakeDataLoader:
              "mm_kwargs": None,
              "mm_token_type_ids": None,
@@ -447,7 +727,7 @@ index 7d9dcce88..dd953b6ac 100644
 +        rl_scale: Global RL denominator (tokens by default, decision units when supplied)
          ce_scale: Global ce-token count normalizing the ce component
          ref_kl_scale: Global ref_kl-token count normalizing the ref_kl component
- 
+
 diff --git a/src/prime_rl/trainer/rl/redco_loss.py b/src/prime_rl/trainer/rl/redco_loss.py
 new file mode 100644
 index 000000000..e6e4d5c72
@@ -501,14 +781,14 @@ index 295d3ad15..6a8d3c090 100644
 +++ b/src/prime_rl/trainer/rl/train.py
 @@ -1,6 +1,7 @@
  import prime_rl._compat  # noqa: F401 — patch ring_flash_attn compat before import
- 
+
  from contextlib import nullcontext
 +import os
  import time
  from datetime import timedelta
- 
+
 @@ -72,6 +73,21 @@ from torchtitan.distributed.utils import clip_grad_norm_
- 
+
  @clean_exit
  def train(config: TrainerConfig):
 +    seed = int(os.environ.get("REDCO_RUN_SEED", "0"))
@@ -575,7 +855,7 @@ index 295d3ad15..6a8d3c090 100644
 +        rl_scale = max(float(reduced_scales[0]), 1.0)
 +        ce_scale = max(int(reduced_scales[1]), 1)
 +        ref_kl_scale = max(int(reduced_scales[2]), 1)
- 
+
          logger.debug(f"Starting forward and backward pass ({batch_size=})")
          tensors = Tensors()  # Used to accumulate tensor statistics across micro-batches and ranks for logging
 diff --git a/src/prime_rl/transport/types.py b/src/prime_rl/transport/types.py
@@ -585,19 +865,19 @@ index 121da68d9..9d697fe00 100644
 @@ -68,6 +68,11 @@ class TrainingSample(msgspec.Struct, array_like=True, gc=False, omit_defaults=Tr
      # samples without live rl member tokens (the trainer raises otherwise).
      advantages: list[float] | None = None
- 
+
 +    # Optional clean-objective denominator contribution. None preserves the
 +    # stock per-token normalization; ReDCO records use fractional contributions
 +    # so one four-action branch group counts as one decision unit.
 +    rl_normalizer: float | None = None
 +
- 
+
  class TrainingBatch(msgspec.Struct, array_like=True, gc=False, omit_defaults=True):
      """A batch of training examples with metadata for transport."""
 @@ -106,6 +111,10 @@ class MicroBatch(msgspec.Struct, array_like=True, gc=False, omit_defaults=True):
      ce_weights: list[float] | None = None
      ref_kl_weights: list[float] | None = None
- 
+
 +    # Per-sequence RL denominator contributions, aligned with
 +    # ``sequence_lengths``. None preserves stock token normalization.
 +    rl_normalizers: list[float] | None = None
@@ -606,7 +886,7 @@ index 121da68d9..9d697fe00 100644
      run_id: str | None = None
      run_step: int | None = None
 diff --git a/tests/unit/orchestrator/test_advantage.py b/tests/unit/orchestrator/test_advantage.py
-index 153a08bc2..fac3b2bdd 100644
+index 153a08bc2..5a3b5c55c 100644
 --- a/tests/unit/orchestrator/test_advantage.py
 +++ b/tests/unit/orchestrator/test_advantage.py
 @@ -7,9 +7,11 @@ from prime_rl.configs.algorithm import (
@@ -620,11 +900,11 @@ index 153a08bc2..fac3b2bdd 100644
 +from prime_rl.orchestrator.algo.redco import RedcoAlgorithm
  from prime_rl.orchestrator.trajectories import trace_to_samples
  from prime_rl.orchestrator.types import Rollout
- 
-@@ -183,6 +185,75 @@ def test_max_rl_mean_normalized():
+
+@@ -183,6 +185,98 @@ def test_max_rl_mean_normalized():
      assert _max_rl(_make_group(rewards=[1.0, 1.0])) == pytest.approx([0.0, 0.0])
- 
- 
+
+
 +def test_redco_assigns_all_branch_loo_with_one_unit_per_episode():
 +    group: list[Rollout] = []
 +    reward_groups = (
@@ -650,9 +930,7 @@ index 153a08bc2..fac3b2bdd 100644
 +            rollout.info["redco"] = {
 +                "record_kind": "branch",
 +                "branch_index": branch_index,
-+                "action_source": "original"
-+                if branch_index == 0
-+                else "sampled",
++                "action_source": "original" if branch_index == 0 else "sampled",
 +                "target_node_id": "subcall-0",
 +                "selected_pre_action": True,
 +                "replay_mode": "sliced",
@@ -664,16 +942,11 @@ index 153a08bc2..fac3b2bdd 100644
 +    asyncio.run(algorithm.finalize_group(group))
 +
 +    for episode_index, rewards in enumerate(reward_groups):
-+        expected = [
-+            reward - (sum(rewards) - reward) / 3
-+            for reward in rewards
-+        ]
++        expected = [reward - (sum(rewards) - reward) / 3 for reward in rewards]
 +        episode = group[episode_index * 5 : (episode_index + 1) * 5]
 +        context, *branches = episode
 +        expected_trajectory = rewards[0] - reward_groups[1 - episode_index][0]
-+        assert context.samples[0].advantages == pytest.approx(
-+            [0.0, expected_trajectory, expected_trajectory]
-+        )
++        assert context.samples[0].advantages == pytest.approx([0.0, expected_trajectory, expected_trajectory])
 +        assert context.samples[0].rl_weights == [0.0, 1.0, 1.0]
 +        assert context.samples[0].rl_normalizer == 1.0
 +        for rollout, advantage in zip(branches, expected, strict=True):
@@ -694,6 +967,36 @@ index 153a08bc2..fac3b2bdd 100644
 +        asyncio.run(algorithm.finalize_group(group))
 +
 +
++def test_redco_rejects_singleton_trajectory_group_explicitly():
++    context = _make_rollout(1.0, completion_len=2)
++    context.episode_id = "episode-0"
++    context.info["redco"] = {
++        "record_kind": "context",
++        "target_node_id": "subcall-0",
++        "selected_pre_action": True,
++        "replay_mode": "sliced",
++        "replay_equivalent": True,
++    }
++    group = [context]
++    for branch_index, reward in enumerate((1.0, 0.0, 0.5, -1.0)):
++        rollout = _make_rollout(reward, completion_len=2)
++        rollout.episode_id = "episode-0"
++        rollout.info["redco"] = {
++            "record_kind": "branch",
++            "branch_index": branch_index,
++            "action_source": "original" if branch_index == 0 else "sampled",
++            "target_node_id": "subcall-0",
++            "selected_pre_action": True,
++            "replay_mode": "sliced",
++            "replay_equivalent": True,
++        }
++        group.append(rollout)
++
++    algorithm = RedcoAlgorithm(RedcoAlgoConfig(), policy_pool=None)
++    with pytest.raises(ValueError, match="at least two complete episodes"):
++        asyncio.run(algorithm.finalize_group(group))
++
++
  # --------------------------------------------------------------------------
  # GRPO linear length penalty: pass_rate-scaled penalty before the baseline.
  # --------------------------------------------------------------------------
@@ -703,8 +1006,8 @@ index 8b4b31f7e..a14b06971 100644
 +++ b/tests/unit/orchestrator/test_batch.py
 @@ -285,6 +285,43 @@ def test_prepare_sample_propagates_weight_streams(make_training_example):
      assert micro_batch.rl_weights == [0.0, 0.0, 0.0, 0.0]
- 
- 
+
+
 +def test_prepare_batch_preserves_decision_unit_normalizers(make_training_example):
 +    first = make_training_example(rl_weights=[0.0, 0.0, 0.25, 0.25])
 +    second = make_training_example(rl_weights=[0.0, 0.0, 0.25, 0.25])
@@ -744,7 +1047,71 @@ index 8b4b31f7e..a14b06971 100644
 +
  def test_prepare_sample_uniform_rl_keeps_streams_none(make_training_example):
      micro_batch = prepare_sample(make_training_example(), seq_len=16)
- 
+
+diff --git a/tests/unit/orchestrator/test_orchestrator_setup.py b/tests/unit/orchestrator/test_orchestrator_setup.py
+index 73768a769..4725249b0 100644
+--- a/tests/unit/orchestrator/test_orchestrator_setup.py
++++ b/tests/unit/orchestrator/test_orchestrator_setup.py
+@@ -1,9 +1,13 @@
+ import asyncio
++from collections import Counter
+ from types import SimpleNamespace
+ from unittest.mock import AsyncMock, patch
+
+ from renderers import Qwen3VLRendererConfig
+
++from prime_rl.orchestrator.dispatcher import RolloutDispatcher
++from prime_rl.orchestrator.orchestrator import Orchestrator
++from prime_rl.orchestrator.types import Policy
+ from prime_rl.orchestrator.utils import setup_policy_inference_pool
+
+
+@@ -96,3 +100,45 @@ def test_setup_policy_inference_pool_keeps_renderer_without_policy_sampling():
+         )
+
+     asyncio.run(run())
++
++
++def test_strict_snapshot_dispatch_limits_groups_and_waits_for_eval_tail():
++    dispatcher = object.__new__(RolloutDispatcher)
++    dispatcher.strict_snapshot_batches = True
++    dispatcher.train_groups_per_policy = 2
++    dispatcher.train_groups_started_by_policy = Counter({4: 1})
++    dispatcher.policy = Policy(version=4, model_name="policy")
++    dispatcher.eval_source = None
++    dispatcher.groups = {}
++    dispatcher.inflight = {}
++
++    assert dispatcher.can_open_fresh_train_group()
++
++    dispatcher.train_groups_started_by_policy[4] = 2
++    assert not dispatcher.can_open_fresh_train_group()
++
++    dispatcher.policy.version = 5
++    assert dispatcher.can_open_fresh_train_group()
++
++    dispatcher.eval_source = [object()]
++    assert not dispatcher.can_open_fresh_train_group()
++
++
++def test_strict_snapshot_waits_until_weights_are_fully_applied():
++    async def run() -> None:
++        orchestrator = object.__new__(Orchestrator)
++        orchestrator.applied_policy_version = 2
++        orchestrator.version_applied = asyncio.Event()
++
++        waiter = asyncio.create_task(orchestrator.wait_for_applied_policy(3))
++        await asyncio.sleep(0)
++        assert not waiter.done()
++
++        orchestrator.applied_policy_version = 3
++        orchestrator.version_applied.set()
++        await asyncio.wait_for(waiter, timeout=1)
++
++        # An already-applied snapshot must not wait for another event pulse.
++        await asyncio.wait_for(orchestrator.wait_for_applied_policy(3), timeout=1)
++
++    asyncio.run(run())
 diff --git a/tests/unit/orchestrator/test_rollout_temperature.py b/tests/unit/orchestrator/test_rollout_temperature.py
 new file mode 100644
 index 000000000..69d7cc9cf
@@ -768,6 +1135,42 @@ index 000000000..69d7cc9cf
 +    rollout = SimpleNamespace(agent=None)
 +
 +    assert rollout_temperature(rollout, 0.7) == 0.7
+diff --git a/tests/unit/test_configs.py b/tests/unit/test_configs.py
+index df50c6db4..1000d2734 100644
+--- a/tests/unit/test_configs.py
++++ b/tests/unit/test_configs.py
+@@ -610,6 +610,31 @@ def test_orchestrator_explicit_default_renderer_with_unmapped_model():
+     assert config.renderer.tool_parser == "qwen3"
+
+
++def test_strict_snapshot_requires_zero_off_policy_steps():
++    with pytest.raises(ValidationError, match="max_off_policy_steps = 0"):
++        OrchestratorConfig.model_validate(
++            {
++                "model": {"name": "Qwen/Qwen3-0.6B"},
++                "strict_snapshot_batches": True,
++                "max_off_policy_steps": 1,
++            }
++        )
++
++
++def test_strict_snapshot_accepts_exact_group_budget_with_filesystem_broadcast():
++    config = OrchestratorConfig.model_validate(
++        {
++            "model": {"name": "Qwen/Qwen3-0.6B"},
++            "strict_snapshot_batches": True,
++            "train_groups_per_policy": 2,
++            "max_off_policy_steps": 0,
++            "weight_broadcast": {"type": "filesystem"},
++        }
++    )
++    assert config.strict_snapshot_batches
++    assert config.train_groups_per_policy == 2
++
++
+ def test_shared_model_name_resolves_inference_parsers():
+     """Shared [model] name must reach inference.model BEFORE ModelConfig's after-validator
+     runs auto_resolve_parsers — i.e. the parsers resolve from the propagated name, not
 diff --git a/tests/unit/train/rl/test_redco_frozen_batch_cpu.py b/tests/unit/train/rl/test_redco_frozen_batch_cpu.py
 new file mode 100644
 index 000000000..a0e02040e

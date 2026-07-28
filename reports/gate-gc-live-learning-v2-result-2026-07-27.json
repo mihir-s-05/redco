@@ -33,10 +33,12 @@
   "observed_sliced_arm": {
     "stored_train_step_directories": 31,
     "stored_train_traces_all_steps": 1268,
+    "recorded_policy_calls_all_steps": 1225,
     "stored_branch_records_all_steps": 980,
     "stored_context_records_all_steps": 245,
     "stored_errored_or_unscored_traces_all_steps": 43,
     "stored_train_traces_steps_1_through_30": 1256,
+    "recorded_policy_calls_steps_1_through_30": 1220,
     "stored_branch_records_steps_1_through_30": 976,
     "stored_context_records_steps_1_through_30": 244,
     "stored_errored_or_unscored_traces_steps_1_through_30": 36,
@@ -68,5 +70,5 @@
     "persistent_disks_after_cleanup": 0
   },
   "decision": "Gate GC is not cleared. The full_suffix and broadcast arms were not launched, and no learning or replay-mode comparison is valid.",
-  "signed_payload_sha256": "1fe35265b2be3a5adb6e8fde458f95c7ed16d19ec46da68a0a6cf8af12e2fbb9"
+  "signed_payload_sha256": "84445fb6043ba9ed176ed212ab9d7cd0b64468ccef41209a3a56ccc76622088a"
 }

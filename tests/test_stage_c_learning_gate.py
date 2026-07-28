@@ -38,18 +38,22 @@ def test_eval_rewards_uses_only_original_role(tmp_path: Path) -> None:
                     "agent": {"name": "context"},
                     "task": task,
                     "rewards": {"trajectory_reward": -99.0},
+                    "info": {"policy_version": 4},
+                    "calls": [{}],
                 },
                 {
                     "agent": {"name": "original"},
                     "task": task,
                     "rewards": {"deterministic_reward": float(index)},
+                    "info": {"policy_version": 4},
+                    "calls": [{}],
                 },
             ]
         )
     path = tmp_path / "traces.jsonl"
     path.write_text("".join(json.dumps(row) + "\n" for row in rows))
 
-    rewards = _eval_rewards(path)
+    rewards = _eval_rewards(path, expected_policy_version=4)
 
     assert len(rewards) == 32
     assert rewards[("probe-7", 7)] == 7.0

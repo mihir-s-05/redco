@@ -47,9 +47,24 @@ def _one_per_step(run_dir: Path, pattern: str) -> dict[int, Path]:
     return result
 
 
-def _eval_rewards(path: Path) -> dict[tuple[str, int], float]:
+def _eval_rewards(
+    path: Path,
+    *,
+    expected_policy_version: int,
+) -> dict[tuple[str, int], float]:
     rewards: dict[tuple[str, int], float] = {}
     for trace in _read_jsonl(path):
+        info = trace.get("info")
+        if not isinstance(info, dict):
+            raise ValueError("eval trace is missing info")
+        if info.get("policy_version") != expected_policy_version:
+            raise ValueError(
+                f"eval trace uses policy {info.get('policy_version')}; "
+                f"expected {expected_policy_version}"
+            )
+        calls = trace.get("calls")
+        if not isinstance(calls, list) or len(calls) != 1:
+            raise ValueError("each eval trace must contain exactly one policy call")
         agent = trace.get("agent")
         if not isinstance(agent, dict) or agent.get("name") != "original":
             continue
@@ -142,6 +157,9 @@ def _summarize_arm(
             info = trace.get("info")
             if not isinstance(info, dict):
                 raise ValueError("training trace is missing info")
+            calls = trace.get("calls")
+            if not isinstance(calls, list) or len(calls) != 1:
+                raise ValueError("each training trace must contain exactly one policy call")
             if info.get("policy_version") != step - 1:
                 invalid_snapshots += 1
             if trace.get("ok") is not True or trace.get("errors") not in ([], None):
@@ -181,10 +199,18 @@ def _summarize_arm(
     if max_steps not in eval_paths:
         raise ValueError(f"{name} is missing its final evaluation")
     curves = {
-        step: fmean(_eval_rewards(path).values())
+        step: fmean(
+            _eval_rewards(
+                path,
+                expected_policy_version=step - 1,
+            ).values()
+        )
         for step, path in eval_paths.items()
     }
-    final_rewards = _eval_rewards(eval_paths[max_steps])
+    final_rewards = _eval_rewards(
+        eval_paths[max_steps],
+        expected_policy_version=max_steps - 1,
+    )
     adapter_matches = sorted(
         run_dir.glob(
             f"**/broadcasts/step_{max_steps}/adapter_model.safetensors"

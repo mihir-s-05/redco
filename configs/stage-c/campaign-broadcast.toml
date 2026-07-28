@@ -26,6 +26,8 @@ batch_size = 16
 group_size = 8
 max_inflight_rollouts = 8
 max_off_policy_steps = 0
+strict_snapshot_batches = true
+train_groups_per_policy = 2
 post_batch_filters = [
   { type = "gibberish", enforce = false },
   { type = "repetition", enforce = false },
