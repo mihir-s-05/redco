@@ -1,0 +1,222 @@
+{
+  "schema_version": 3,
+  "experiment": "gate-gc-live-learning-v3",
+  "status": "frozen_after_v2_terminal_integration_failure_before_any_v3_model_call",
+  "frozen_at_local_date": "2026-07-27",
+  "supersedes": {
+    "path": "configs/stage-c/gate-gc-live-learning-preregistration-v2.json",
+    "reason": "The v2 sliced arm exposed an asynchronous lifecycle defect: speculative groups crossed policy updates, exceeded the call budget, and left a singleton ReDCO group during terminal drain. V3 changes only lifecycle enforcement and evidence validation; the scientific arms, order, seeds, exposure, thresholds, and confidence procedure are unchanged."
+  },
+  "prior_failed_run": {
+    "experiment": "gate-gc-live-learning-v2",
+    "report_commit": "2c53431",
+    "corrective_commit": "45acaac",
+    "status": "terminal integration failure with no learning comparison",
+    "corrected_result_path": "reports/gate-gc-live-learning-v2-result-2026-07-27.json",
+    "corrected_signed_payload_sha256": "84445fb6043ba9ed176ed212ab9d7cd0b64468ccef41209a3a56ccc76622088a",
+    "exclusion": "All v2 sliced-arm outcomes are excluded from v3 estimation and decision-making. They were used only to diagnose the lifecycle failure. No v2 reward, gradient, or adapter result changed v3 seeds, order, sample counts, thresholds, confidence, or model settings."
+  },
+  "purpose": "Test whether exact-snapshot branch credit improves learning over trajectory broadcast on identifiable finite probes, while requiring full-suffix and sliced replay to agree in-loop.",
+  "prerequisites": {
+    "cpu_estimator_gate": "pass",
+    "live_smoke": {
+      "experiment": "gate-gc-live-smoke-v8",
+      "report_commit": "8c9d2c5",
+      "status": "pass",
+      "signed_payload_sha256": "af1a02f1bc1987b2c8c06e4d1d1b88d9d9ffa61fc9e6299037a059615dc3729d"
+    },
+    "v2_failure_diagnosed": true,
+    "strict_lifecycle_cpu_regressions": "pass"
+  },
+  "scope": {
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "adaptation": "LoRA rank 32 alpha 64",
+    "optimizer_lr": 0.00001,
+    "arms": [
+      {
+        "name": "sliced",
+        "config": "configs/stage-c/campaign-redco-sliced.toml",
+        "steps": 30,
+        "traces_per_step": 40,
+        "policy_calls": 1200,
+        "branch_evaluations": 960,
+        "complete_train_groups_per_policy": 1
+      },
+      {
+        "name": "full_suffix",
+        "config": "configs/stage-c/campaign-redco-full-suffix.toml",
+        "steps": 30,
+        "traces_per_step": 40,
+        "policy_calls": 1200,
+        "branch_evaluations": 960,
+        "complete_train_groups_per_policy": 1
+      },
+      {
+        "name": "broadcast",
+        "config": "configs/stage-c/campaign-broadcast.toml",
+        "steps": 75,
+        "traces_per_step": 16,
+        "policy_calls": 1200,
+        "branch_evaluations": 0,
+        "complete_train_groups_per_policy": 2
+      }
+    ],
+    "fixed_run_order": [
+      "sliced",
+      "full_suffix",
+      "broadcast"
+    ],
+    "run_order_derivation": "Unchanged from v2: Python random.Random(7202605).shuffle over the lexically declared arm list before any live observation.",
+    "run_seed_all_arms": 7202604,
+    "one_v3_campaign_per_arm": true,
+    "training_probe_suite": "the unchanged eight standard probes; the v8 integration-only needle is excluded",
+    "heldout_evaluation": {
+      "examples": 32,
+      "interval_steps": 5,
+      "temperature": 0.0,
+      "exogenous_seed_offset": 9000,
+      "paired_key": [
+        "probe_name",
+        "exogenous_seed"
+      ]
+    }
+  },
+  "strict_snapshot_lifecycle_contract": {
+    "enabled": true,
+    "max_off_policy_steps": 0,
+    "filesystem_weight_broadcast_required": true,
+    "complete_groups_only": true,
+    "no_fresh_group_after_per_policy_limit": true,
+    "close_training_gate_immediately_after_optimizer_batch_ship": true,
+    "wait_for_checkpoint_to_be_fully_applied_to_inference": true,
+    "trigger_scheduled_evaluation_only_after_application": true,
+    "keep_training_gate_closed_until_evaluation_tail_finishes": true,
+    "final_drain_begins_immediately_after_final_checkpoint_application": true,
+    "incomplete_redco_group": "hard integration failure before advantage computation",
+    "required_policy_version_at_train_step": "step minus one",
+    "required_policy_version_at_evaluation_step": "step minus one",
+    "exactly_one_policy_call_per_serialized_training_or_evaluation_trace": true,
+    "exactly_one_optimizer_update_per_collected_snapshot": true
+  },
+  "rollout_and_filter_contract": {
+    "max_inflight_rollouts_equals_group_size": true,
+    "post_batch_zero_advantage_enforce": false,
+    "reason": "Zero-advantage samples retain explicit zero weights and contribute zero gradient. Keeping rather than dropping them preserves the frozen 1200-call budget and prevents stochastic empty-batch retries from changing arm exposure.",
+    "gibberish_and_repetition_enforce": false,
+    "all_generated_traces_must_be_serialized_and_counted": true
+  },
+  "evidence_and_storage_contract": {
+    "trainer_file_monitor": "metrics.jsonl",
+    "orchestrator_file_monitor": "metrics.jsonl",
+    "trainer_metrics_selection": "**/output/metrics.jsonl",
+    "checkpoint_interval": null,
+    "checkpoint_keep_last": 1,
+    "skip_gather_master_weights": true,
+    "required_per_arm": [
+      "all train and evaluation traces",
+      "trainer and orchestrator metrics",
+      "final filesystem-broadcast LoRA adapter",
+      "control and resource logs",
+      "SHA-256 manifest"
+    ],
+    "prohibited": [
+      "gathered full-model safetensors",
+      "retained interval adapter history",
+      "duplicate local transfer archives"
+    ]
+  },
+  "source": {
+    "parent_commit": "45acaac4d95d2bbb9c5b34c5b0432cc6fdfbd0dc",
+    "prime_rl_commit": "3b22dd951cad1036d1fe8dd0a0bfc40807a9b360",
+    "sha256": {
+      "configs/stage-c/campaign-broadcast.toml": "4d39acda94ef2ff0babf1f9e2358de792ab3e71242e9ff309782e169074db834",
+      "configs/stage-c/campaign-redco-full-suffix.toml": "f581407514886452c6dbae15025dc4e1c3c8e04b5dd06a13cf1bea7c8af6944e",
+      "configs/stage-c/campaign-redco-sliced.toml": "f6183158eb788f68635a3dec7d981be28e6af4dc650e6f2776e578b6da6d8378",
+      "src/redco/analysis/stage_c_learning_gate.py": "b7845e82b9775632abc56dd5474ebd9c6a19c95f98243e67934441cdd0747359",
+      "environments/redco_credit_v1/redco_credit_v1/taskset.py": "4ddf5a7578b056c5b71cf2da546e9f98766d99ff554938631b5b30f34c8364cb",
+      "src/redco/env/tasks/credit_probes.py": "fd751a38c09f4a354a3b1a5296e359c0218bfee0c9503fe283f50b2897b19454",
+      "patches/prime-rl-redco-stage-c.patch": "fcfc33858c582097654e957b3f4d1b47946fce13a6abdb6f26c554d5b2c488d7",
+      "scripts/run_stage_c_live.sh": "af65d86daf071936f0d1bf230a410055dba6e257f8413f6ec766be6623b36170",
+      "configs/stage-c/gate-gc-estimator-cpu-preregistration.json": "14fc510271f625ea8acc4e09e1bb3b76f297d66c8b850deaf35d493bdd71c82a",
+      "runs/stage-c/gate-gc-estimator-cpu/report.json": "698ce2241bf89781db3809c0127d9eae6a356430d369e3b12bf93b021b886d87",
+      "runs/stage-c/gate-gc-live-smoke-v8/local-verification.json": "2a386fb1f0d9fe766b9f6dff4ff0268fbd3e04c18ff245ed976b32322d097958",
+      "reports/gate-gc-live-learning-v2-result-2026-07-27.json": "4518e010f3e90242052fe64f5d6518b1430399367f1049fe5d01c4a86a3cbd5d",
+      "external/prime-rl/uv.lock": "188b23ec2c723b8ca0c8ca80278747e0628f680449061a5404622f39114d42f5"
+    }
+  },
+  "validated_before_freeze": {
+    "root_tests": 85,
+    "prime_and_environment_targeted_tests": 48,
+    "prime_schema_campaign_configs": 3,
+    "ruff": "pass",
+    "mypy": "pass",
+    "prime_patch_reverse_apply_check": "pass"
+  },
+  "statistical_analysis": {
+    "unit": "held-out probe and exogenous-seed pair",
+    "paired_tasks": 32,
+    "bootstrap": "paired percentile bootstrap",
+    "bootstrap_samples": 20000,
+    "confidence": 0.9,
+    "bootstrap_seed": 7202603,
+    "branch_improvement": {
+      "minimum_point_difference": 0.02,
+      "lower_confidence_bound_must_exceed": 0.0,
+      "required_for": [
+        "full_suffix minus broadcast",
+        "sliced minus broadcast"
+      ]
+    },
+    "replay_mode_equivalence": {
+      "maximum_absolute_point_difference": 0.05,
+      "confidence_interval_must_be_within": [
+        -0.15,
+        0.15
+      ],
+      "comparison": "sliced minus full_suffix"
+    }
+  },
+  "decision_rule": {
+    "integration": [
+      "all three v3 arms complete their frozen step counts with exactly the frozen serialized trace and policy-call totals",
+      "every training and evaluation trace contains exactly one policy call",
+      "every training and evaluation trace uses policy version step minus one",
+      "all traces complete without errors",
+      "both ReDCO arms contain exactly 960 branch records",
+      "every ReDCO target is committed before action sampling",
+      "every ReDCO branch reports exact sliced/full reward equivalence",
+      "each arm has at least one positive finite gradient step",
+      "each arm saves its final LoRA adapter",
+      "no arm writes gathered full-model weights"
+    ],
+    "learning": [
+      "both branch-credit arms meet the unchanged preregistered improvement point threshold over broadcast",
+      "both paired 90 percent lower confidence bounds exceed zero",
+      "sliced and full-suffix meet the unchanged preregistered equivalence margins"
+    ],
+    "pass": "the frozen CPU estimator prerequisite, v8 live integration smoke, all v3 integration checks, learning checks, and replay-mode equivalence check all pass",
+    "failure": "report Gate GC v3 as failed without changing thresholds or retrying an observed v3 arm"
+  },
+  "resource_policy": {
+    "preferred_resource_id": "8b33a6",
+    "preferred_hardware": "non-spot 2x A6000 48GB",
+    "preferred_price_usd_per_hour": 1.08,
+    "alternative_policy": "A different non-spot 2x48GB non-A100/non-H100 resource at no more than 2.00 USD/hour requires a committed hardware-only amendment before provisioning.",
+    "maximum_total_pod_lifetime_minutes": 180,
+    "maximum_total_pod_charge_usd": 3.24,
+    "per_arm_training_timeout_seconds": 3600,
+    "use_one_pod_sequentially": true,
+    "persistent_disks": 0,
+    "verify_ssh_before_sync_or_model_call": true,
+    "sync_and_verify_each_completed_arm_locally_before_starting_the_next": true,
+    "stop_on_integration_failure": true,
+    "terminate_compute_after_final_artifact_sync": true,
+    "no_retry_after_any_v3_model_call_in_an_arm": true
+  },
+  "scope_limitations": {
+    "budget_match": "1200 total policy calls per arm; branch evaluations are reported and are not equal because broadcast has no counterfactual branches",
+    "physical_savings_claimed": false,
+    "reason": "The restricted deterministic verifier deliberately executes both reward paths in-loop, so full and sliced modes have identical model-call topology and do not measure accelerator savings.",
+    "headline_if_passed": "minimal synthetic learning and estimator result only, not evidence on real RLM tasks"
+  }
+}
