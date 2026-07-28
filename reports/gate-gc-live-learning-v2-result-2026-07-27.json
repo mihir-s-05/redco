@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "experiment": "gate-gc-live-learning-v2",
+  "status": "fail",
+  "execution_status": "sliced arm reached 30 optimizer steps, then the orchestrator failed while draining a singleton rollout group",
+  "learning_comparison_status": "not_run",
+  "failure": {
+    "arm": "sliced",
+    "phase": "post-step-30 orchestrator drain and forced cleanup",
+    "exception_type": "ValueError",
+    "exception_message": "LOO requires at least two rewards",
+    "source": "redco.algo.branching.leave_one_out_advantages",
+    "cause": "Prime cancelled seven over-age in-flight rollouts after the trainer reached max_steps, then finalized one surviving rollout as a singleton group; RedcoAlgorithm.score_group passed that one-element trajectory reward tuple to trajectory_rloo.",
+    "prior_cuda_error_reproduced": false,
+    "second_arm_started": false,
+    "retry_performed": false
+  },
+  "frozen_contract_checks": {
+    "launcher_exit_zero": false,
+    "exact_train_steps_present": false,
+    "unexpected_step_31_present": true,
+    "exact_policy_calls_1200": false,
+    "exact_branch_records_960": false,
+    "policy_version_is_step_minus_one": false,
+    "all_traces_complete_without_errors": false,
+    "all_replay_records_equivalent": false,
+    "thirty_optimizer_steps": true,
+    "at_least_one_positive_finite_gradient": true,
+    "final_evaluation_present": true,
+    "final_adapter_present": true,
+    "gathered_full_model_weight_files_zero": true
+  },
+  "observed_sliced_arm": {
+    "stored_train_step_directories": 31,
+    "stored_train_traces_all_steps": 1268,
+    "stored_branch_records_all_steps": 980,
+    "stored_context_records_all_steps": 245,
+    "stored_errored_or_unscored_traces_all_steps": 43,
+    "stored_train_traces_steps_1_through_30": 1256,
+    "stored_branch_records_steps_1_through_30": 976,
+    "stored_context_records_steps_1_through_30": 244,
+    "stored_errored_or_unscored_traces_steps_1_through_30": 36,
+    "invalid_policy_version_records_all_steps": 1188,
+    "optimizer_steps": 30,
+    "positive_gradient_steps": 30,
+    "final_eval_original_traces": 32,
+    "final_eval_mean_reward": 0.96875,
+    "final_adapter_bytes": 264300328,
+    "final_adapter_sha256": "0a38018aa60da9a712f8299b8d61439007b5b22f98424897248913aeb79b02fe",
+    "gathered_full_model_weight_files": 0
+  },
+  "artifact_integrity": {
+    "remote_manifest_entries_verified_locally": 164,
+    "remote_manifest_sha256": "eb580cb378ce61d30638b0b4ce90b4a35830511b09d42927ceaae2fa85faafe7",
+    "remote_summary_sha256": "a102641676309457c2822b7fe08a6c3f9f68d47d2293d6e1e99a98269d9e708c",
+    "local_artifact_files": 166,
+    "local_artifact_bytes": 559879579,
+    "duplicate_transfer_archive_retained": false
+  },
+  "resource": {
+    "pod_id": "f24c84d674fd4d88adc6c5cf67f11c95",
+    "hardware": "2x A6000 48GB",
+    "resource_id": "8b33a6",
+    "rate_usd_per_hour": 1.08,
+    "total_shared_smoke_and_campaign_pod_charge_usd": 0.6904,
+    "wallet_after_termination_usd": 42.53,
+    "active_pods_after_cleanup": 0,
+    "persistent_disks_after_cleanup": 0
+  },
+  "decision": "Gate GC is not cleared. The full_suffix and broadcast arms were not launched, and no learning or replay-mode comparison is valid.",
+  "signed_payload_sha256": "1fe35265b2be3a5adb6e8fde458f95c7ed16d19ec46da68a0a6cf8af12e2fbb9"
+}
