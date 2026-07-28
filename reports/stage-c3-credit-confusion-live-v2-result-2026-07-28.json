@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c3-credit-confusion-live-v2",
+  "status": "terminal_smoke_failure_no_scientific_gate",
+  "scientific_gate_evaluated": false,
+  "scientific_arms_started": 0,
+  "protocol": {
+    "path": "configs/stage-c3/credit-confusion-live-preregistration-v2.json",
+    "commit": "cdf7bcf",
+    "decision_rule_canonical_sha256": "73453e9424f79b85542cba46f0656561c789b4a3d00d01755b04ab608f8c2d3b",
+    "audit_commit": "58dcf18",
+    "audit_passed": true
+  },
+  "validation": {
+    "linux_wsl_affected_tests_passed": 26,
+    "pod_substantive_tests_passed": 45,
+    "rendered_configs_parsed": 9,
+    "merged_warmstart_exact_match": true,
+    "upstream_generic_config_sweep": "Scoped warning preserved; unrelated upstream example/debug configs failed while all nine frozen configs parsed directly."
+  },
+  "smoke": {
+    "probe": "confusion_redundant",
+    "arm": "broadcast",
+    "seed": 9400,
+    "training_policy_calls": 16,
+    "episodes": 8,
+    "invariant_path": "runs/stage-c3/credit-confusion-live-v2/smoke/invariant.json",
+    "passed": false,
+    "supervisor_exit_code": 42,
+    "observed": {
+      "valid_route_fraction": 1.0,
+      "error_fraction": 0.0,
+      "truncation_fraction": 0.5,
+      "reward_min": 0.0,
+      "reward_mean": 0.0,
+      "reward_max": 0.0,
+      "trainable_fraction": 0.0,
+      "root_routes": {
+        "gamma": 8
+      },
+      "target_actions": {
+        "1": 2,
+        "2": 2,
+        "3": 1,
+        "4": 3,
+        "5": 0
+      }
+    },
+    "interpretation": "The root-budget/parser fix passed. The small stochastic smoke had no rewarding route or target action, so its frozen informativeness invariant stopped the campaign."
+  },
+  "integrity": {
+    "expanded_root": "runs/stage-c3/credit-confusion-live-v2",
+    "artifact_manifest": "runs/stage-c3/credit-confusion-live-v2/artifact-sha256sums.txt",
+    "compact_bundle": "runs/stage-c3/credit-confusion-live-v2-terminal-failure-v2.tar.gz",
+    "compact_bundle_sha256": "550caf8c1128eaa0694920755d2faa039fb6be555fefa50280de558f9fac561b",
+    "excluded_zero_signal_adapter_sha256": "ec0e2e0f139cfa0dbb483ecdddec3b8c2dff1562e75ee4d99f97e680fd2cc2d5"
+  },
+  "billing": {
+    "pod_id": "fcc3663dc39745af98d4195acdd7b446",
+    "hourly_rate_usd": 2.0,
+    "v2_billed_usd": 0.51,
+    "v1_plus_v2_terminal_attempts_usd": 0.94,
+    "wallet_after_teardown_usd": 35.31
+  },
+  "teardown": {
+    "active_pods": 0,
+    "persistent_disks": 0
+  },
+  "next_action": "Do not retry v2. Any v3 must be separately reviewed and should separate deterministic integration checks from a power-calibrated informativeness gate."
+}

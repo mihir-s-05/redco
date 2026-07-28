@@ -1,0 +1,10 @@
+{
+  "arm": "broadcast",
+  "output": "configs/stage-c3/rendered-v2/confusion_irrelevant-broadcast-s9401.toml",
+  "probe": "confusion_irrelevant",
+  "schema_version": 1,
+  "seed": 9401,
+  "sha256": "47ba4bb2402eada5879ad6bcd7dc7c0f1404fdf12224e9ecfd95f31d561f4d61",
+  "smoke": false,
+  "template": "configs/stage-c3/credit-confusion-broadcast-template.toml"
+}

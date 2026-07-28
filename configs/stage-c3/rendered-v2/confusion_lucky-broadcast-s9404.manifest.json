@@ -1,0 +1,10 @@
+{
+  "arm": "broadcast",
+  "output": "configs/stage-c3/rendered-v2/confusion_lucky-broadcast-s9404.toml",
+  "probe": "confusion_lucky",
+  "schema_version": 1,
+  "seed": 9404,
+  "sha256": "f97a9361771b2d03901cabbc78912d771555ba422bacf23c9128de451fb42ce6",
+  "smoke": false,
+  "template": "configs/stage-c3/credit-confusion-broadcast-template.toml"
+}

@@ -1,0 +1,10 @@
+{
+  "arm": "broadcast",
+  "output": "configs/stage-c3/rendered-v2/confusion_redundant-broadcast-s9403.toml",
+  "probe": "confusion_redundant",
+  "schema_version": 1,
+  "seed": 9403,
+  "sha256": "1270b920cccfd55ba03e73d64fbf1ba7168902c2a357d83ce1298eee4a63eecd",
+  "smoke": false,
+  "template": "configs/stage-c3/credit-confusion-broadcast-template.toml"
+}

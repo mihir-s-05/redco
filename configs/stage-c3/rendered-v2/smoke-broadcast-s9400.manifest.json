@@ -1,0 +1,10 @@
+{
+  "arm": "broadcast",
+  "output": "configs/stage-c3/rendered-v2/smoke-broadcast-s9400.toml",
+  "probe": "confusion_redundant",
+  "schema_version": 1,
+  "seed": 9400,
+  "sha256": "fef1c8a74e8b341ab5e21fd57bc31fccd51897513f016321844e5efda4851f1a",
+  "smoke": true,
+  "template": "configs/stage-c3/credit-confusion-broadcast-template.toml"
+}
