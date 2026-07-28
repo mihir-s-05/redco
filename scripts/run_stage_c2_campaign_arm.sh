@@ -10,7 +10,7 @@ run_seed="${REDCO_RUN_SEED:-7202901}"
 cd "$repo_root"
 test -f "$config_path"
 test ! -e "$output_dir"
-test -d runs/stage-c2/warmstart-merged-v2
+test -d runs/stage-c2/warmstart-merged-candidates-v2/step_23
 test -s patches/prime-rl-redco-stage-c2.patch
 git -C external/prime-rl apply --no-index --reverse --check \
   "$repo_root/patches/prime-rl-redco-stage-c2.patch"
