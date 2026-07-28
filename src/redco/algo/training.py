@@ -178,8 +178,10 @@ def compile_stage_c_records(
         target = by_node[target_node_id]
     except KeyError as error:
         raise ValueError("target_node_id must identify a decision span") from error
-    if len(branches) != 4:
-        raise ValueError("clean Stage C requires original plus three alternatives")
+    if len(branches) < 2:
+        raise ValueError(
+            "clean Stage C requires an original plus at least one alternative"
+        )
     if branches[0].action_source != "original":
         raise ValueError("the first branch must be the precommitted original action")
     if any(branch.action_source != "sampled" for branch in branches[1:]):

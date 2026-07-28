@@ -69,6 +69,14 @@ def _score(
             int(token_id): _logprob(value) for token_id, value in logprobs.items()
         }
         greedy_token = max(raw_logprobs, key=raw_logprobs.__getitem__)
+        greedy_allowed = next(
+            (
+                action
+                for action, token_id in action_ids.items()
+                if token_id == greedy_token
+            ),
+            None,
+        )
         for temperature in (1.0, 2.0):
             selected = retemper_selected_logprobs(
                 raw_logprobs,
@@ -85,6 +93,7 @@ def _score(
                     "context_route": case["context_route"],
                     "temperature": temperature,
                     "greedy_token_id": int(greedy_token),
+                    "greedy_allowed_action": greedy_allowed,
                     "action_logprobabilities": action_logprobs,
                     "action_probabilities": {
                         action: math.exp(logprob)

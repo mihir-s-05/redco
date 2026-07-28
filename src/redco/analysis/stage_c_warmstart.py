@@ -122,17 +122,20 @@ def select_warmstart_checkpoint(
             step = int(name.removeprefix("sft_step_"))
         except ValueError as error:
             raise ValueError(f"invalid SFT checkpoint name: {name}") from error
+        if isinstance(model.get("temperatures"), dict):
+            scored_rows = model["temperatures"].get("2.0", [])
+            mass_field = "action_probabilities"
+        else:
+            scored_rows = model.get("cases", [])
+            mass_field = "full_vocab_action_probabilities_t2"
         rows = [
             row
-            for row in model.get("cases", [])
+            for row in scored_rows
             if row.get("probe_name") == "planted_needle"
         ]
         if not rows:
             raise ValueError(f"{name} has no planted-needle scoring cases")
-        masses = [
-            float(row["full_vocab_action_probabilities_t2"]["5"])
-            for row in rows
-        ]
+        masses = [float(row[mass_field]["5"]) for row in rows]
         greedy_rate = sum(
             row.get("greedy_allowed_action") == "5" for row in rows
         ) / len(rows)

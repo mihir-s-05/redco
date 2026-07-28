@@ -92,3 +92,33 @@ def test_selection_fails_closed_when_support_is_too_low() -> None:
 
     assert report["status"] == "fail"
     assert report["selected"] is None
+
+
+def test_selection_accepts_authoritative_vllm_score_shape() -> None:
+    report = select_warmstart_checkpoint(
+        {
+            "models": [
+                {
+                    "name": "sft_step_4",
+                    "temperatures": {
+                        "2.0": [
+                            {
+                                "probe_name": "planted_needle",
+                                "action_probabilities": {"5": 0.09},
+                                "greedy_allowed_action": "3",
+                            }
+                        ]
+                    },
+                }
+            ]
+        },
+        minimum_needle_mass_t2=0.08,
+        maximum_needle_mass_t2=0.12,
+        maximum_needle_greedy_rate=0.0,
+        branch_count=11,
+        groups_per_step=8,
+        minimum_expected_informative_groups=4.75,
+    )
+
+    assert report["status"] == "pass"
+    assert report["selected"]["step"] == 4

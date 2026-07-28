@@ -10,6 +10,7 @@ from pydantic import Field, field_validator
 
 from redco.contracts import SeedNamespace
 from redco.env.tasks.credit_probes import credit_probe_by_name, standard_credit_probes
+from redco.integrations.stage_c_roles import stage_c_branch_roles
 
 ACTION_PATTERN = re.compile(r"<action>\s*([^<\r\n]+?)\s*</action>", re.IGNORECASE)
 SELF_TAG_PATTERN = re.compile(
@@ -17,7 +18,6 @@ SELF_TAG_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ROUTE_PATTERN = re.compile(r"<route>\s*([^<\r\n]+?)\s*</route>", re.IGNORECASE)
-ROLE_ORDER = ("original", "alternative_1", "alternative_2", "alternative_3")
 ROUTES = ("alpha", "beta", "gamma", "delta")
 ROUTE_REWARD = {"alpha": -0.25, "beta": 0.0, "gamma": 0.25, "delta": 0.5}
 BRANCH_SEED_MASTER = "redco-stage-c-branch-v1"
@@ -178,14 +178,23 @@ class RedcoCreditEnvConfig(vf.EnvConfig):
     alternative_1: vf.AgentConfig = vf.AgentConfig(max_turns=1)
     alternative_2: vf.AgentConfig = vf.AgentConfig(max_turns=1)
     alternative_3: vf.AgentConfig = vf.AgentConfig(max_turns=1)
+    alternative_4: vf.AgentConfig = vf.AgentConfig(max_turns=1)
+    alternative_5: vf.AgentConfig = vf.AgentConfig(max_turns=1)
+    alternative_6: vf.AgentConfig = vf.AgentConfig(max_turns=1)
+    alternative_7: vf.AgentConfig = vf.AgentConfig(max_turns=1)
+    alternative_8: vf.AgentConfig = vf.AgentConfig(max_turns=1)
+    alternative_9: vf.AgentConfig = vf.AgentConfig(max_turns=1)
+    alternative_10: vf.AgentConfig = vf.AgentConfig(max_turns=1)
     branching_enabled: bool = True
+    branch_group_size: int = Field(4, ge=2, le=11)
     replay_mode: Literal["full_suffix", "sliced"] = "sliced"
     branch_temperature: float = Field(1.0, ge=0, le=2.0)
 
 
 class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
     async def setup(self, agents: vf.Agents) -> None:
-        for role in ("context", *ROLE_ORDER):
+        roles = stage_c_branch_roles(self.config.branch_group_size)
+        for role in ("context", *roles):
             getattr(agents, role).trainable = True
 
     async def run(self, task: vf.Task, agents: vf.Agents) -> None:
@@ -211,8 +220,9 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             task.config,
         )
         seed_namespace = _branch_seed_namespace(context.id, target_node_id)
+        roles = stage_c_branch_roles(self.config.branch_group_size)
         sampled_roles = (
-            ROLE_ORDER if self.config.branching_enabled else ("original",)
+            roles if self.config.branching_enabled else ("original",)
         )
         for branch_index, role in enumerate(sampled_roles):
             agent = getattr(agents, role)
@@ -230,7 +240,7 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             await agents.original.run(branch_task)
             return
         async with asyncio.TaskGroup() as task_group:
-            for role in ROLE_ORDER:
+            for role in roles:
                 task_group.create_task(getattr(agents, role).run(branch_task))
 
     async def finalize(self, task: vf.Task, episode: vf.Episode) -> None:
@@ -250,15 +260,18 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
                     "branch_evaluations": 0,
                 }
             return
-        if len(episode.traces) != 5:
-            raise ValueError("clean Stage C requires context plus four branch traces")
+        roles = stage_c_branch_roles(self.config.branch_group_size)
+        if len(episode.traces) != 1 + len(roles):
+            raise ValueError(
+                "clean Stage C requires context plus the configured branch traces"
+            )
         by_role = {trace.agent_name: trace for trace in episode.traces}
-        if set(by_role) != {"context", *ROLE_ORDER}:
+        if set(by_role) != {"context", *roles}:
             raise ValueError("episode is missing a declared ReDCO branch role")
 
         target_node_id: str | None = None
         context = by_role["context"]
-        for branch_index, role in enumerate(ROLE_ORDER):
+        for branch_index, role in enumerate(roles):
             trace = by_role[role]
             data = trace.task.data
             if not isinstance(data, RedcoCreditData):

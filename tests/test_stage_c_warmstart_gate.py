@@ -42,3 +42,32 @@ def test_merge_equivalence_rejects_greedy_mismatch() -> None:
     )
 
     assert result["pass"] is False
+
+
+def test_merge_equivalence_accepts_vllm_score_shape() -> None:
+    def raw(name: str, probability: float) -> dict:
+        row = {
+            "case_id": "planted_needle:gamma",
+            "greedy_token_id": 20,
+            "action_probabilities": {"5": probability},
+        }
+        return {
+            "models": [
+                {
+                    "name": name,
+                    "temperatures": {
+                        "1.0": [row],
+                        "2.0": [row],
+                    },
+                }
+            ]
+        }
+
+    result = _merge_equivalence(
+        raw("sft_step_4", 0.09),
+        raw("merged", 0.090001),
+        selected_name="sft_step_4",
+        tolerance=2e-5,
+    )
+
+    assert result["pass"]

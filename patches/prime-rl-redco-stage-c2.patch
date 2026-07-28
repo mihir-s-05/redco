@@ -1,5 +1,5 @@
 diff --git a/packages/prime-rl-configs/src/prime_rl/configs/algorithm.py b/packages/prime-rl-configs/src/prime_rl/configs/algorithm.py
-index b3282475a..5fdc36958 100644
+index b3282475a..71dd1c993 100644
 --- a/packages/prime-rl-configs/src/prime_rl/configs/algorithm.py
 +++ b/packages/prime-rl-configs/src/prime_rl/configs/algorithm.py
 @@ -200,6 +200,19 @@ class GRPOAlgoConfig(BaseAlgoConfig):
@@ -12,7 +12,7 @@ index b3282475a..5fdc36958 100644
 +
 +    action_loss_type: ClassVar[ActionLossType] = "rl"
 +
-+    branch_group_size: Literal[4] = 4
++    branch_group_size: int = Field(4, ge=2, le=11)
 +    continuations: Literal[1] = 1
 +    eta: Literal[1] = 1
 +    cost_penalty: Literal[0] = 0
@@ -229,10 +229,10 @@ index b12d17df6..cc5738699 100644
          self.policy_pool = policy_pool
 diff --git a/src/prime_rl/orchestrator/algo/redco.py b/src/prime_rl/orchestrator/algo/redco.py
 new file mode 100644
-index 000000000..d34a2dbbf
+index 000000000..45928a11f
 --- /dev/null
 +++ b/src/prime_rl/orchestrator/algo/redco.py
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,171 @@
 +from __future__ import annotations
 +
 +from collections import defaultdict
@@ -295,6 +295,7 @@ index 000000000..d34a2dbbf
 +    def __init__(self, config: RedcoAlgoConfig, policy_pool: InferencePool):
 +        super().__init__(config, policy_pool)
 +        self.replay_mode = config.replay_mode
++        self.branch_group_size = config.branch_group_size
 +        self._latest_policy_version: int | None = None
 +
 +    async def score_group(self, group: list[Rollout]) -> None:
@@ -334,12 +335,17 @@ index 000000000..d34a2dbbf
 +                key=lambda rollout: int(_metadata(rollout)["branch_index"]),
 +            )
 +            indices = [int(_metadata(rollout)["branch_index"]) for rollout in ordered]
-+            if indices != [0, 1, 2, 3]:
-+                raise ValueError("each ReDCO episode requires branch indices 0..3")
++            if indices != list(range(self.branch_group_size)):
++                raise ValueError(
++                    "each ReDCO episode requires contiguous configured branch indices"
++                )
 +            if _metadata(ordered[0]).get("action_source") != "original":
 +                raise ValueError("branch zero must be the original action")
-+            if any(_metadata(rollout).get("action_source") != "sampled" for rollout in ordered[1:]):
-+                raise ValueError("branches one through three must be sampled")
++            if any(
++                _metadata(rollout).get("action_source") != "sampled"
++                for rollout in ordered[1:]
++            ):
++                raise ValueError("all alternative branches must be sampled")
 +            contexts.append(context[0])
 +            ordered_episodes.append((context[0], ordered))
 +
@@ -383,8 +389,10 @@ index 000000000..d34a2dbbf
 +                target_node_id=target_node_id,
 +                branches=branch_examples,
 +            )
-+            if len(records) != 4:
-+                raise RuntimeError("single-decision Stage C must emit four records")
++            if len(records) != self.branch_group_size:
++                raise RuntimeError(
++                    "single-decision Stage C must emit one record per branch"
++                )
 +            for branch, record in zip(branches, records, strict=True):
 +                branch.assign_advantages(list(record.advantages))
 +                sample = _single_sample(branch)
@@ -1124,7 +1132,7 @@ index 121da68d9..9d697fe00 100644
      run_id: str | None = None
      run_step: int | None = None
 diff --git a/tests/unit/orchestrator/test_advantage.py b/tests/unit/orchestrator/test_advantage.py
-index 153a08bc2..5a3b5c55c 100644
+index 153a08bc2..8c3459ce3 100644
 --- a/tests/unit/orchestrator/test_advantage.py
 +++ b/tests/unit/orchestrator/test_advantage.py
 @@ -7,9 +7,11 @@ from prime_rl.configs.algorithm import (
@@ -1139,7 +1147,7 @@ index 153a08bc2..5a3b5c55c 100644
  from prime_rl.orchestrator.trajectories import trace_to_samples
  from prime_rl.orchestrator.types import Rollout
  
-@@ -183,6 +185,98 @@ def test_max_rl_mean_normalized():
+@@ -183,6 +185,151 @@ def test_max_rl_mean_normalized():
      assert _max_rl(_make_group(rewards=[1.0, 1.0])) == pytest.approx([0.0, 0.0])
  
  
@@ -1233,6 +1241,59 @@ index 153a08bc2..5a3b5c55c 100644
 +    algorithm = RedcoAlgorithm(RedcoAlgoConfig(), policy_pool=None)
 +    with pytest.raises(ValueError, match="at least two complete episodes"):
 +        asyncio.run(algorithm.finalize_group(group))
++
++
++def test_redco_supports_eleven_branch_power_analysis_group():
++    group: list[Rollout] = []
++    reward_groups = (
++        tuple(float(index == 5) for index in range(11)),
++        tuple(float(index in {2, 5}) for index in range(11)),
++    )
++    for episode_index, rewards in enumerate(reward_groups):
++        context = _make_rollout(rewards[0], completion_len=2)
++        context.episode_id = f"episode-{episode_index}"
++        context.policy_version = 7
++        context.info["redco"] = {
++            "record_kind": "context",
++            "target_node_id": "subcall-0",
++            "selected_pre_action": True,
++            "replay_mode": "sliced",
++            "replay_equivalent": True,
++        }
++        group.append(context)
++        for branch_index, reward in enumerate(rewards):
++            rollout = _make_rollout(reward, completion_len=2)
++            rollout.episode_id = f"episode-{episode_index}"
++            rollout.policy_version = 7
++            rollout.info["redco"] = {
++                "record_kind": "branch",
++                "branch_index": branch_index,
++                "action_source": "original" if branch_index == 0 else "sampled",
++                "target_node_id": "subcall-0",
++                "selected_pre_action": True,
++                "replay_mode": "sliced",
++                "replay_equivalent": True,
++            }
++            group.append(rollout)
++
++    algorithm = RedcoAlgorithm(
++        RedcoAlgoConfig(branch_group_size=11),
++        policy_pool=None,
++    )
++    asyncio.run(algorithm.finalize_group(group))
++
++    for episode_index, rewards in enumerate(reward_groups):
++        episode = group[episode_index * 12 : (episode_index + 1) * 12]
++        _, *branches = episode
++        expected = [
++            reward - (sum(rewards) - reward) / (len(rewards) - 1)
++            for reward in rewards
++        ]
++        for rollout, advantage in zip(branches, expected, strict=True):
++            sample = rollout.samples[0]
++            assert sample.advantages == pytest.approx([0.0, advantage, advantage])
++            assert sample.rl_weights == [0.0, 1.0 / 11.0, 1.0 / 11.0]
++            assert sample.rl_normalizer == pytest.approx(1.0 / 11.0)
 +
 +
  # --------------------------------------------------------------------------
@@ -1374,10 +1435,31 @@ index 000000000..69d7cc9cf
 +
 +    assert rollout_temperature(rollout, 0.7) == 0.7
 diff --git a/tests/unit/test_configs.py b/tests/unit/test_configs.py
-index df50c6db4..880ba539f 100644
+index df50c6db4..4b513708e 100644
 --- a/tests/unit/test_configs.py
 +++ b/tests/unit/test_configs.py
-@@ -610,6 +610,31 @@ def test_orchestrator_explicit_default_renderer_with_unmapped_model():
+@@ -6,6 +6,7 @@ import tomli_w
+ from pydantic import BaseModel, Field, ValidationError
+ from pydantic_config import ConfigFileError
+ 
++from prime_rl.configs.algorithm import RedcoAlgoConfig
+ from prime_rl.configs.inference import InferenceConfig
+ from prime_rl.configs.orchestrator import OrchestratorConfig
+ from prime_rl.configs.rl import RLConfig
+@@ -156,6 +157,12 @@ def test_removed_fused_lm_head_chunk_size_field_is_rejected():
+         TrainerModelConfig.model_validate({"fused_lm_head_chunk_size": "auto"})
+ 
+ 
++def test_redco_branch_group_size_bounds():
++    assert RedcoAlgoConfig(branch_group_size=11).branch_group_size == 11
++    with pytest.raises(ValidationError, match="less than or equal to 11"):
++        RedcoAlgoConfig(branch_group_size=12)
++
++
+ def test_to_toml_dict_roundtrips_explicit_none(tmp_path):
+     """An explicit None override survives the write/re-parse round-trip used by SLURM launches."""
+     config = cli(TrainerConfig, args=["--model.compile", "None", "--optim.max_norm", "None"])
+@@ -610,6 +617,31 @@ def test_orchestrator_explicit_default_renderer_with_unmapped_model():
      assert config.renderer.tool_parser == "qwen3"
  
  
@@ -1409,7 +1491,7 @@ index df50c6db4..880ba539f 100644
  def test_shared_model_name_resolves_inference_parsers():
      """Shared [model] name must reach inference.model BEFORE ModelConfig's after-validator
      runs auto_resolve_parsers — i.e. the parsers resolve from the propagated name, not
-@@ -641,3 +666,29 @@ def test_explicit_inference_parser_wins_over_auto():
+@@ -641,3 +673,29 @@ def test_explicit_inference_parser_wins_over_auto():
      )
      assert config.inference is not None
      assert config.inference.model.tool_call_parser == "hermes"

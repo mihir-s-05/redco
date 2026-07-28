@@ -36,6 +36,25 @@ def _model(raw: dict[str, Any], name: str) -> dict[str, Any]:
     return matches[0]
 
 
+def _temperature_rows(
+    model: dict[str, Any],
+    temperature: str,
+) -> tuple[dict[str, dict[str, Any]], str]:
+    temperatures = model.get("temperatures")
+    if isinstance(temperatures, dict):
+        rows = temperatures.get(temperature)
+        probability_field = "action_probabilities"
+    else:
+        rows = model.get("cases")
+        probability_field = f"full_vocab_action_probabilities_t{temperature[0]}"
+    if not isinstance(rows, list):
+        raise ValueError(f"scored model has no temperature {temperature} rows")
+    return (
+        {str(row["case_id"]): row for row in rows},
+        probability_field,
+    )
+
+
 def _merge_equivalence(
     selected_raw: dict[str, Any],
     merged_raw: dict[str, Any],
@@ -45,27 +64,30 @@ def _merge_equivalence(
 ) -> dict[str, Any]:
     selected = _model(selected_raw, selected_name)
     merged = _model(merged_raw, "merged")
-    selected_cases = {row["case_id"]: row for row in selected["cases"]}
-    merged_cases = {row["case_id"]: row for row in merged["cases"]}
-    if set(selected_cases) != set(merged_cases):
-        raise ValueError("selected-adapter and merged scoring cases differ")
     maximum = 0.0
     greedy_mismatches = 0
     compared = 0
-    for case_id in sorted(selected_cases):
-        left = selected_cases[case_id]
-        right = merged_cases[case_id]
-        greedy_mismatches += int(
-            left["greedy_token_id"] != right["greedy_token_id"]
+    for temperature in ("1.0", "2.0"):
+        selected_cases, selected_field = _temperature_rows(
+            selected,
+            temperature,
         )
-        for field in (
-            "full_vocab_action_probabilities_t1",
-            "full_vocab_action_probabilities_t2",
-        ):
-            if set(left[field]) != set(right[field]):
+        merged_cases, merged_field = _temperature_rows(merged, temperature)
+        if set(selected_cases) != set(merged_cases):
+            raise ValueError("selected-adapter and merged scoring cases differ")
+        for case_id in sorted(selected_cases):
+            left = selected_cases[case_id]
+            right = merged_cases[case_id]
+            greedy_mismatches += int(
+                left["greedy_token_id"] != right["greedy_token_id"]
+            )
+            if set(left[selected_field]) != set(right[merged_field]):
                 raise ValueError(f"action set differs in {case_id}")
-            for action in left[field]:
-                difference = abs(float(left[field][action]) - float(right[field][action]))
+            for action in left[selected_field]:
+                difference = abs(
+                    float(left[selected_field][action])
+                    - float(right[merged_field][action])
+                )
                 maximum = max(maximum, difference)
                 compared += 1
     return {
@@ -84,6 +106,12 @@ def verify_warmstart_gate(
     selected_scores: dict[str, Any],
     merged_scores: dict[str, Any],
     expected_steps: int = 12,
+    minimum_needle_mass_t2: float = 0.15,
+    maximum_needle_mass_t2: float = 0.25,
+    maximum_needle_greedy_rate: float = 0.5,
+    branch_count: int = 6,
+    groups_per_step: int = 8,
+    minimum_expected_informative_groups: float = 4.75,
 ) -> dict[str, Any]:
     metrics = _read_jsonl(run_dir / "metrics.jsonl")
     metric_steps = {
@@ -126,12 +154,14 @@ def verify_warmstart_gate(
 
     selection = select_warmstart_checkpoint(
         raw_scores,
-        minimum_needle_mass_t2=0.15,
-        maximum_needle_mass_t2=0.25,
-        maximum_needle_greedy_rate=0.5,
-        branch_count=6,
-        groups_per_step=8,
-        minimum_expected_informative_groups=4.75,
+        minimum_needle_mass_t2=minimum_needle_mass_t2,
+        maximum_needle_mass_t2=maximum_needle_mass_t2,
+        maximum_needle_greedy_rate=maximum_needle_greedy_rate,
+        branch_count=branch_count,
+        groups_per_step=groups_per_step,
+        minimum_expected_informative_groups=(
+            minimum_expected_informative_groups
+        ),
     )
     selected = selection["selected"]
     merge = (
@@ -180,6 +210,17 @@ def main() -> None:
     parser.add_argument("--raw-scores", type=Path, required=True)
     parser.add_argument("--selected-scores", type=Path, required=True)
     parser.add_argument("--merged-scores", type=Path, required=True)
+    parser.add_argument("--expected-steps", type=int, default=12)
+    parser.add_argument("--minimum-needle-mass-t2", type=float, default=0.15)
+    parser.add_argument("--maximum-needle-mass-t2", type=float, default=0.25)
+    parser.add_argument("--maximum-needle-greedy-rate", type=float, default=0.5)
+    parser.add_argument("--branch-count", type=int, default=6)
+    parser.add_argument("--groups-per-step", type=int, default=8)
+    parser.add_argument(
+        "--minimum-expected-informative-groups",
+        type=float,
+        default=4.75,
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     report = verify_warmstart_gate(
@@ -187,6 +228,15 @@ def main() -> None:
         raw_scores=json.loads(args.raw_scores.read_text()),
         selected_scores=json.loads(args.selected_scores.read_text()),
         merged_scores=json.loads(args.merged_scores.read_text()),
+        expected_steps=args.expected_steps,
+        minimum_needle_mass_t2=args.minimum_needle_mass_t2,
+        maximum_needle_mass_t2=args.maximum_needle_mass_t2,
+        maximum_needle_greedy_rate=args.maximum_needle_greedy_rate,
+        branch_count=args.branch_count,
+        groups_per_step=args.groups_per_step,
+        minimum_expected_informative_groups=(
+            args.minimum_expected_informative_groups
+        ),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
