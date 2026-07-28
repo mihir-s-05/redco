@@ -8,7 +8,7 @@ from pathlib import Path
 
 import torch
 from safetensors.torch import save_file
-from stage_c_lora import adapter_hooks, merge_adapter
+from stage_c_lora import _module_name, adapter_hooks, merge_adapter
 
 
 class ToyModel(torch.nn.Module):
@@ -21,6 +21,11 @@ class ToyModel(torch.nn.Module):
 
 
 def main() -> None:
+    assert _module_name("model.layer.lora_A.weight") == "model.layer"
+    assert (
+        _module_name("base_model.model.model.layer.lora_A.weight")
+        == "model.layer"
+    )
     base_weight = torch.tensor([[1.0, 2.0, 3.0], [-1.0, 0.5, 2.0]])
     a = torch.tensor([[0.5, -1.0, 2.0]])
     b = torch.tensor([[1.5], [-0.25]])

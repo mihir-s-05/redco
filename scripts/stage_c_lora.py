@@ -23,9 +23,10 @@ def _adapter_state(adapter_dir: Path) -> tuple[dict[str, torch.Tensor], float]:
 def _module_name(lora_a_key: str) -> str:
     prefix = "base_model.model."
     suffix = ".lora_A.weight"
-    if not lora_a_key.startswith(prefix) or not lora_a_key.endswith(suffix):
+    if not lora_a_key.endswith(suffix):
         raise ValueError(f"unsupported LoRA tensor name: {lora_a_key}")
-    return lora_a_key[len(prefix) : -len(suffix)]
+    name = lora_a_key[: -len(suffix)]
+    return name.removeprefix(prefix)
 
 
 def _pairs(
