@@ -7,9 +7,7 @@ output_dir="${2:?usage: run_stage_c2_campaign_arm.sh CONFIG OUTPUT_DIR}"
 timeout_seconds="${REDCO_TIMEOUT_SECONDS:-10800}"
 run_seed="${REDCO_RUN_SEED:-7202901}"
 prime_patch="${REDCO_PRIME_PATCH:-patches/prime-rl-redco-stage-c2.patch}"
-required_model_dir="${
-  REDCO_REQUIRED_MODEL_DIR:-runs/stage-c2/warmstart-merged-candidates-v2/step_23
-}"
+required_model_dir="${REDCO_REQUIRED_MODEL_DIR:-runs/stage-c2/warmstart-merged-candidates-v2/step_23}"
 
 cd "$repo_root"
 test -f "$config_path"
