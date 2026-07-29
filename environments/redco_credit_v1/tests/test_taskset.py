@@ -12,6 +12,7 @@ from redco_credit_v1.taskset import (
     _forced_smoke_choices,
     branch_sampling,
     confusion_reward,
+    constrain_root_routes,
     context_sampling,
     parse_action,
     parse_route,
@@ -176,6 +177,33 @@ def test_context_sampling_preserves_multitoken_route_budget() -> None:
     assert parse_route("<route>delta</route>") == "delta"
 
 
+def test_constrain_root_routes_preserves_sampling_and_defines_four_choices() -> None:
+    base = vf.SamplingConfig(
+        temperature=2.0,
+        max_tokens=64,
+        seed=123,
+        extra_body={"cache_salt": "snapshot-0", "top_k": 20},
+    )
+
+    result = constrain_root_routes(base)
+
+    assert result.temperature == 2.0
+    assert result.max_tokens == 64
+    assert result.seed == 123
+    assert result.extra_body == {
+        "cache_salt": "snapshot-0",
+        "top_k": 20,
+        "structured_outputs": {
+            "choice": [
+                "<route>alpha</route>",
+                "<route>beta</route>",
+                "<route>gamma</route>",
+                "<route>delta</route>",
+            ]
+        },
+    }
+
+
 def test_context_seed_is_stable_per_episode_and_distinct_across_episodes() -> None:
     first = _context_seed("confusion_redundant-0241", "0:episode:0")
     repeated = _context_seed("confusion_redundant-0241", "0:episode:0")
@@ -242,6 +270,40 @@ def test_forced_smoke_sets_single_choice_on_root_and_target() -> None:
     }
     assert original.ctx.sampling.extra_body["structured_outputs"] == {
         "choice": ["5"]
+    }
+
+
+def test_constrained_root_rollout_uses_four_choices() -> None:
+    env = RedcoCreditEnv(
+        RedcoCreditEnvConfig(
+            taskset={
+                "id": "redco-credit-v1",
+                "repeats_per_probe": 1,
+                "probe_names": ["confusion_redundant"],
+            },
+            branching_enabled=False,
+            constrained_root_routes=True,
+        )
+    )
+    task = env.taskset.load()[0]
+    context = _MockAgent("<route>gamma</route>")
+    original = _MockAgent("5")
+    context.ctx = _MockContext(
+        context.ctx.sampling.model_copy(
+            update={"extra_body": {"cache_salt": "0:episode:0"}}
+        )
+    )
+    agents = SimpleNamespace(context=context, original=original)
+
+    asyncio.run(env.run(task, agents))
+
+    assert context.ctx.sampling.extra_body["structured_outputs"] == {
+        "choice": [
+            "<route>alpha</route>",
+            "<route>beta</route>",
+            "<route>gamma</route>",
+            "<route>delta</route>",
+        ]
     }
 
 

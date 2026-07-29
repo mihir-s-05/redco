@@ -103,6 +103,17 @@ def context_sampling(
     return vf.SamplingConfig(**raw)
 
 
+def constrain_root_routes(sampling: vf.SamplingConfig) -> vf.SamplingConfig:
+    """Define the root policy over exactly the four canonical route strings."""
+    raw = sampling.model_dump(exclude_none=True)
+    extra_body = dict(raw.pop("extra_body", None) or {})
+    extra_body["structured_outputs"] = {
+        "choice": [f"<route>{route}</route>" for route in ROUTES]
+    }
+    raw["extra_body"] = extra_body
+    return vf.SamplingConfig(**raw)
+
+
 def _branch_seed_namespace(context_id: str, target_node_id: str) -> SeedNamespace:
     return SeedNamespace(
         master_seed=BRANCH_SEED_MASTER,
@@ -270,6 +281,7 @@ class RedcoCreditEnvConfig(vf.EnvConfig):
     replay_mode: Literal["full_suffix", "sliced"] = "sliced"
     branch_temperature: float = Field(1.0, ge=0, le=2.0)
     context_temperature: float = Field(0.7, ge=0, le=2.0)
+    constrained_root_routes: bool = False
     forced_integration_smoke: bool = False
 
 
@@ -337,6 +349,8 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             cache_salt_suffix=(f"{data.name}:{episode_address}:context"),
             temperature=self.config.context_temperature,
         )
+        if self.config.constrained_root_routes:
+            context_config = constrain_root_routes(context_config)
         if forced_context is not None:
             context_config = _force_single_choice(
                 context_config,
