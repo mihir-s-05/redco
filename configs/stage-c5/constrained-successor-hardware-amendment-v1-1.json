@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c5-bounded-constrained-successor-v1",
+  "amendment": "hardware-only-v1-1",
+  "status": "frozen_before_provisioning",
+  "controlling_protocol": "configs/stage-c5/constrained-successor-preregistration-v1.json",
+  "controlling_protocol_commit": "3c8b744",
+  "passing_protocol_audit_commit": "06d13cd",
+  "hardware": {
+    "resource_id": "cc7cf9",
+    "cloud_id": "gpu_2x_6000_ada",
+    "gpu_type": "RTX6000Ada 48GB",
+    "gpu_count": 2,
+    "gpu_memory_total_gb": 96,
+    "provider": "massedcompute",
+    "location": "US",
+    "stock_status": "Available",
+    "spot": false,
+    "hourly_rate_usd": 1.5,
+    "persistent_storage": false
+  },
+  "selection_reason": "This was the cheapest genuinely available non-spot resource satisfying the frozen exact 2x48GB GPU type and price envelope.",
+  "read_only_preflight": {
+    "active_pods": 0,
+    "persistent_disks": 0,
+    "wallet_balance_usd": 28.5957,
+    "next_eligible_resource": {
+      "resource_id": "6705b0",
+      "gpu_type": "L40S 48GB",
+      "gpu_count": 2,
+      "hourly_rate_usd": 1.64
+    }
+  },
+  "unchanged_experimental_fields": "Constraint semantics, model, inherited adapter, corpus, renderer, seed, optimizer, horizon, candidate cadence and order, thresholds, selection rule, smoke gate, stopping rule, scientific outcomes, one-run policy, timeouts, artifact policy, and maximum charge are unchanged.",
+  "ssh_key": "C:/Users/mihir/.ssh/id_rsa",
+  "ssh_rule": "Verify SSH noninteractively immediately after provisioning and terminate without model calls if SSH fails."
+}
