@@ -6,18 +6,20 @@ sft_timeout="${REDCO_SFT_TIMEOUT_SECONDS:-3600}"
 smoke_timeout="${REDCO_SMOKE_TIMEOUT_SECONDS:-1800}"
 prime_env="${REDCO_UV_ENVIRONMENT:-/workspace/.venv-prime-stage-c5}"
 prime_cache="${REDCO_UV_CACHE_DIR:-/workspace/.uv-cache-prime-stage-c5}"
-config="configs/stage-c5/factorized-warmstart-sft-v1.toml"
-smoke_config="configs/stage-c5/constrained-interface-smoke-v1.toml"
+campaign_version="${REDCO_STAGE_C5_CAMPAIGN_VERSION:-v1}"
+run_seed="${REDCO_STAGE_C5_RUN_SEED:-7203005}"
+config="configs/stage-c5/factorized-warmstart-sft-${campaign_version}.toml"
+smoke_config="configs/stage-c5/constrained-interface-smoke-${campaign_version}.toml"
 dataset="datasets/stage-c4/factorized-warmstart.jsonl"
 dataset_manifest="datasets/stage-c4/factorized-warmstart-manifest.json"
 action_cases="configs/stage-c4/selection-action-cases.json"
 root_cases="configs/stage-c4/selection-root-cases.json"
 stage_c2_adapter="runs/stage-c2/warmstart-selected-v2/step_23/lora_adapters"
-base_merged="runs/stage-c5/base-merged-step23-v1"
-smoke_run="runs/stage-c5/constrained-interface-smoke-v1"
-sft_run="runs/stage-c5/warmstart-sft-v1"
-selection_root="runs/stage-c5/warmstart-selection-v1"
-selected_root="runs/stage-c5/warmstart-selected-v1"
+base_merged="runs/stage-c5/base-merged-step23-${campaign_version}"
+smoke_run="runs/stage-c5/constrained-interface-smoke-${campaign_version}"
+sft_run="runs/stage-c5/warmstart-sft-${campaign_version}"
+selection_root="runs/stage-c5/warmstart-selection-${campaign_version}"
+selected_root="runs/stage-c5/warmstart-selected-${campaign_version}"
 candidate_merged="$selection_root/work/merged-candidate"
 
 cd "$repo_root"
@@ -61,7 +63,7 @@ finish() {
 trap finish EXIT
 
 cleanup_candidate_merged() {
-  local expected="$repo_root/runs/stage-c5/warmstart-selection-v1/work/merged-candidate"
+  local expected="$repo_root/runs/stage-c5/warmstart-selection-${campaign_version}/work/merged-candidate"
   local resolved="$repo_root/$candidate_merged"
   if test "$resolved" != "$expected"; then
     echo "Refusing unsafe candidate cleanup: $resolved" >&2
@@ -117,7 +119,7 @@ CUDA_VISIBLE_DEVICES=1 "${uv_prime[@]}" python scripts/run_signed_vllm_scorer.py
   >"$selection_root/base-root-score.log" 2>&1
 
 export REDCO_PRIME_PATCH="patches/prime-rl-redco-stage-c3-v3.patch"
-export REDCO_RUN_SEED=7203005
+export REDCO_RUN_SEED="$run_seed"
 export REDCO_TIMEOUT_SECONDS="$smoke_timeout"
 export REDCO_REQUIRED_MODEL_DIR="$base_merged"
 "${uv_prime[@]}" python scripts/run_stage_c3_supervised_arm.py \
