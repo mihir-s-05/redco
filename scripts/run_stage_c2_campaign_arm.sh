@@ -6,14 +6,15 @@ config_path="${1:?usage: run_stage_c2_campaign_arm.sh CONFIG OUTPUT_DIR}"
 output_dir="${2:?usage: run_stage_c2_campaign_arm.sh CONFIG OUTPUT_DIR}"
 timeout_seconds="${REDCO_TIMEOUT_SECONDS:-10800}"
 run_seed="${REDCO_RUN_SEED:-7202901}"
+prime_patch="${REDCO_PRIME_PATCH:-patches/prime-rl-redco-stage-c2.patch}"
 
 cd "$repo_root"
 test -f "$config_path"
 test ! -e "$output_dir"
 test -d runs/stage-c2/warmstart-merged-candidates-v2/step_23
-test -s patches/prime-rl-redco-stage-c2.patch
+test -s "$prime_patch"
 git -C external/prime-rl apply --no-index --reverse --check \
-  "$repo_root/patches/prime-rl-redco-stage-c2.patch"
+  "$repo_root/$prime_patch"
 
 mkdir -p "$(dirname "$output_dir")"
 control_log="${output_dir}.control.log"

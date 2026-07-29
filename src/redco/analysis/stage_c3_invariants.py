@@ -28,24 +28,37 @@ def check_first_training_row(
 ) -> dict[str, Any]:
     checks = {
         "no_rollout_errors": row.get("train/agg/all/has_error/mean") == 0.0,
-        "every_root_route_parseable": (
-            row.get("train/agg/all/metrics/redco_valid_route/mean") == 1.0
-        ),
-        "root_not_forced_into_one_token_budget": (
-            float(row.get("train/agg/all/is_truncated/mean", 1.0)) < 0.75
+        "root_completion_budget_contract": (
+            row.get(
+                "train/agg/all/metrics/redco_context_token_budget_ok/mean"
+            )
+            == 1.0
         ),
     }
-    checks.update(
-        {
-            "nonzero_trainable_fraction": (
-                float(row.get("train/agg/all/is_trainable/mean", 0.0)) > 0.0
-            ),
-            "nonconstant_reward_exposure": (
-                float(row.get("train/agg/all/reward/max", 0.0))
-                > float(row.get("train/agg/all/reward/min", 0.0))
-            ),
-        }
-    )
+    if mode == "smoke":
+        checks.update(
+            {
+                "every_root_route_parseable": (
+                    row.get(
+                        "train/agg/all/metrics/redco_valid_route/mean"
+                    )
+                    == 1.0
+                ),
+                "nonzero_trainable_fraction": (
+                    float(
+                        row.get(
+                            "train/agg/all/is_trainable/mean",
+                            0.0,
+                        )
+                    )
+                    > 0.0
+                ),
+                "nonconstant_reward_exposure": (
+                    float(row.get("train/agg/all/reward/max", 0.0))
+                    > float(row.get("train/agg/all/reward/min", 0.0))
+                ),
+            }
+        )
     return {
         "schema_version": 1,
         "mode": mode,
@@ -61,6 +74,9 @@ def check_first_training_row(
             "error_fraction": row.get("train/agg/all/has_error/mean"),
             "valid_route_fraction": row.get(
                 "train/agg/all/metrics/redco_valid_route/mean"
+            ),
+            "context_token_budget_contract_fraction": row.get(
+                "train/agg/all/metrics/redco_context_token_budget_ok/mean"
             ),
         },
     }

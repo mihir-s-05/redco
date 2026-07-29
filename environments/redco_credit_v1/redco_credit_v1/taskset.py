@@ -108,9 +108,11 @@ def _branch_seed_namespace(context_id: str, target_node_id: str) -> SeedNamespac
     )
 
 
-def _context_seed(task_name: str) -> int:
+def _context_seed(task_name: str, episode_address: str) -> int:
+    if not episode_address:
+        raise ValueError("context sampling requires a stable episode address")
     digest = hashlib.sha256(
-        f"{CONTEXT_SEED_MASTER}:{task_name}".encode()
+        f"{CONTEXT_SEED_MASTER}:{task_name}:{episode_address}".encode()
     ).digest()
     return int.from_bytes(digest[:4], "big")
 
@@ -279,6 +281,47 @@ class RedcoCreditEnvConfig(vf.EnvConfig):
     replay_mode: Literal["full_suffix", "sliced"] = "sliced"
     branch_temperature: float = Field(1.0, ge=0, le=2.0)
     context_temperature: float = Field(0.7, ge=0, le=2.0)
+    forced_integration_smoke: bool = False
+
+
+def _episode_index(episode_address: str) -> int:
+    marker = ":episode:"
+    if marker not in episode_address:
+        if episode_address.startswith("episode:"):
+            value = episode_address.removeprefix("episode:")
+        else:
+            raise ValueError("episode address is missing an episode index")
+    else:
+        value = episode_address.rsplit(marker, maxsplit=1)[1]
+    if not value.isdigit():
+        raise ValueError("episode address has an invalid episode index")
+    return int(value)
+
+
+def _forced_smoke_choices(episode_address: str) -> tuple[str, str]:
+    """Cover every route/action plus all reward regions without sampling."""
+    choices = (
+        ("<route>gamma</route>", "5"),
+        ("<route>delta</route>", "1"),
+        ("<route>gamma</route>", "0"),
+        ("<route>alpha</route>", "2"),
+        ("<route>beta</route>", "3"),
+        ("<route>gamma</route>", "4"),
+        ("<route>alpha</route>", "6"),
+        ("<route>beta</route>", "7"),
+    )
+    return choices[_episode_index(episode_address) % len(choices)]
+
+
+def _force_single_choice(
+    sampling: vf.SamplingConfig,
+    choice: str,
+) -> vf.SamplingConfig:
+    raw = sampling.model_dump(exclude_none=True)
+    extra_body = dict(raw.pop("extra_body", None) or {})
+    extra_body["structured_outputs"] = {"choice": [choice]}
+    raw["extra_body"] = extra_body
+    return vf.SamplingConfig(**raw)
 
 
 class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
@@ -291,16 +334,43 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
         if not isinstance(task, RedcoSeedTask):
             raise TypeError("ReDCO environment requires a RedcoSeedTask")
         data = task.data
+        parent_extra = agents.context.ctx.sampling.extra_body or {}
+        episode_address = str(parent_extra.get("cache_salt", ""))
+        forced_context: str | None = None
+        forced_action: str | None = None
+        if self.config.forced_integration_smoke:
+            if self.config.branching_enabled:
+                raise ValueError(
+                    "forced integration smoke requires broadcast mode"
+                )
+            forced_context, forced_action = _forced_smoke_choices(
+                episode_address
+            )
+        context_config = context_sampling(
+            agents.context.ctx.sampling,
+            seed=_context_seed(data.name, episode_address),
+            cache_salt_suffix=(
+                f"{data.name}:{episode_address}:context"
+            ),
+            temperature=self.config.context_temperature,
+        )
+        if forced_context is not None:
+            context_config = _force_single_choice(
+                context_config,
+                forced_context,
+            )
         agents.context.ctx = replace(
             agents.context.ctx,
-            sampling=context_sampling(
-                agents.context.ctx.sampling,
-                seed=_context_seed(data.name),
-                cache_salt_suffix=f"{data.name}:context",
-                temperature=self.config.context_temperature,
-            ),
+            sampling=context_config,
         )
         context = await agents.context.run(task)
+        context.record_metric(
+            "redco_context_token_budget_ok",
+            float(
+                context_config.max_tokens is not None
+                and context_config.max_tokens >= 8
+            ),
+        )
         context_route = parse_route(context.last_reply)
         episode_luck = 1 if data.exogenous_seed % 2 == 0 else -1
         target_node_id = f"{data.name}:depth-one-subcall"
@@ -331,14 +401,20 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
         for branch_index, role in enumerate(sampled_roles):
             agent = getattr(agents, role)
             seed = seed_namespace.action_seed(branch_index + 1)
+            branch_config = branch_sampling(
+                agent.ctx.sampling,
+                seed=seed,
+                cache_salt_suffix=f"{context.id}:{role}",
+                temperature=self.config.branch_temperature,
+            )
+            if forced_action is not None:
+                branch_config = _force_single_choice(
+                    branch_config,
+                    forced_action,
+                )
             agent.ctx = replace(
                 agent.ctx,
-                sampling=branch_sampling(
-                    agent.ctx.sampling,
-                    seed=seed,
-                    cache_salt_suffix=f"{context.id}:{role}",
-                    temperature=self.config.branch_temperature,
-                ),
+                sampling=branch_config,
             )
         if not self.config.branching_enabled:
             await agents.original.run(branch_task)

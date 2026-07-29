@@ -16,9 +16,9 @@ PROBES = (
     "confusion_lucky",
 )
 RUNS = {
-    "confusion_irrelevant": (9401, 9402),
-    "confusion_redundant": (9403,),
-    "confusion_lucky": (9404,),
+    "confusion_irrelevant": (9501, 9502),
+    "confusion_redundant": (9503,),
+    "confusion_lucky": (9504,),
 }
 ARMS = ("broadcast", "sliced")
 TARGET_THRESHOLD = 0.5
@@ -209,8 +209,8 @@ def verify_campaign(run_root: Path, score_path: Path) -> dict[str, Any]:
     }
     causal_sanity: dict[str, bool] = {}
     for probe, seed in (
-        ("confusion_redundant", 9403),
-        ("confusion_lucky", 9404),
+        ("confusion_redundant", 9503),
+        ("confusion_lucky", 9504),
     ):
         improvements = [
             float(runs[f"{probe}--{arm}--s{seed}"]["mean_target_action_mass"])

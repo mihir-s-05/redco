@@ -8,6 +8,8 @@ from redco_credit_v1.taskset import (
     RedcoCreditEnvConfig,
     RedcoCreditTaskset,
     RedcoCreditTasksetConfig,
+    _context_seed,
+    _forced_smoke_choices,
     branch_sampling,
     confusion_reward,
     context_sampling,
@@ -39,9 +41,12 @@ class _MockAgent:
 
     async def run(self, task: vf.Task) -> SimpleNamespace:
         self.tasks.append(task)
+        metrics: dict[str, float] = {}
         trace = SimpleNamespace(
             id=f"mock-trace-{len(self.traces)}",
             last_reply=self.reply,
+            metrics=metrics,
+            record_metric=metrics.__setitem__,
         )
         self.traces.append(trace)
         return trace
@@ -171,6 +176,75 @@ def test_context_sampling_preserves_multitoken_route_budget() -> None:
     assert parse_route("<route>delta</route>") == "delta"
 
 
+def test_context_seed_is_stable_per_episode_and_distinct_across_episodes() -> None:
+    first = _context_seed("confusion_redundant-0241", "0:episode:0")
+    repeated = _context_seed("confusion_redundant-0241", "0:episode:0")
+    second = _context_seed("confusion_redundant-0241", "0:episode:1")
+
+    assert first == repeated
+    assert first != second
+
+
+def test_forced_smoke_covers_all_reward_regions_without_sampling() -> None:
+    assert _forced_smoke_choices("0:episode:0") == (
+        "<route>gamma</route>",
+        "5",
+    )
+    assert _forced_smoke_choices("0:episode:1") == (
+        "<route>delta</route>",
+        "1",
+    )
+    assert _forced_smoke_choices("0:episode:2") == (
+        "<route>gamma</route>",
+        "0",
+    )
+    assert {
+        _forced_smoke_choices(f"0:episode:{index}")[0]
+        for index in range(8)
+    } == {
+        "<route>alpha</route>",
+        "<route>beta</route>",
+        "<route>gamma</route>",
+        "<route>delta</route>",
+    }
+    assert {
+        _forced_smoke_choices(f"0:episode:{index}")[1]
+        for index in range(8)
+    } == set("01234567")
+
+
+def test_forced_smoke_sets_single_choice_on_root_and_target() -> None:
+    env = RedcoCreditEnv(
+        RedcoCreditEnvConfig(
+            taskset={
+                "id": "redco-credit-v1",
+                "repeats_per_probe": 1,
+                "probe_names": ["confusion_redundant"],
+            },
+            branching_enabled=False,
+            forced_integration_smoke=True,
+        )
+    )
+    task = env.taskset.load()[0]
+    context = _MockAgent("<route>gamma</route>")
+    original = _MockAgent("5")
+    context.ctx = _MockContext(
+        context.ctx.sampling.model_copy(
+            update={"extra_body": {"cache_salt": "0:episode:0"}}
+        )
+    )
+    agents = SimpleNamespace(context=context, original=original)
+
+    asyncio.run(env.run(task, agents))
+
+    assert context.ctx.sampling.extra_body["structured_outputs"] == {
+        "choice": ["<route>gamma</route>"]
+    }
+    assert original.ctx.sampling.extra_body["structured_outputs"] == {
+        "choice": ["5"]
+    }
+
+
 def test_mock_model_rollout_parses_root_and_emits_trainable_credit() -> None:
     env = RedcoCreditEnv(
         RedcoCreditEnvConfig(
@@ -201,6 +275,7 @@ def test_mock_model_rollout_parses_root_and_emits_trainable_credit() -> None:
     asyncio.run(env.run(task, agents))
 
     assert context.ctx.sampling.max_tokens == 64
+    assert len(context.tasks) == 1
     assert parse_route(context.traces[0].last_reply) == "beta"
     branch_agents = (original, alternative_1, alternative_2, alternative_3)
     assert all(agent.tasks[0].data.context_route == "beta" for agent in branch_agents)
