@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c3-credit-confusion-live-v3",
+  "status": "terminal_exact_power_failure_no_scientific_arms",
+  "scientific_gate_evaluated": false,
+  "scientific_arms_started": 0,
+  "protocol": {
+    "path": "configs/stage-c3/credit-confusion-live-preregistration-v3.json",
+    "implementation_commit": "c681955",
+    "rendered_config_commit": "fe6135f",
+    "preregistration_commit": "2f7195a",
+    "audit_commit": "e05d57d",
+    "decision_rule_canonical_sha256": "73453e9424f79b85542cba46f0656561c789b4a3d00d01755b04ab608f8c2d3b",
+    "audit_passed": true
+  },
+  "validation": {
+    "root_tests_passed": 147,
+    "selected_prime_wsl_tests_passed": 113,
+    "targeted_pod_tests_passed": 87,
+    "rendered_configs_parsed": 10,
+    "merged_warmstart_exact_match": true,
+    "selected_adapter_exact_match": true
+  },
+  "forced_integration_smoke": {
+    "passed": true,
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "warmstart_step": 23,
+    "episodes": 8,
+    "training_policy_calls": 16,
+    "sampled_pass_conditions": 0,
+    "observed": {
+      "error_fraction": 0.0,
+      "valid_route_fraction": 1.0,
+      "context_token_budget_contract_fraction": 1.0,
+      "reward_min": 0.0,
+      "reward_mean": 0.25,
+      "reward_max": 1.0,
+      "trainable_fraction": 1.0
+    },
+    "forced_rewards_exact": true,
+    "all_routes_represented": true,
+    "all_digits_represented": true,
+    "trace_token_serialization_present": true
+  },
+  "exact_power_gate": {
+    "evaluated_after_artifact_recovery_with_frozen_analyzer": true,
+    "status": "failed",
+    "passed_checks": 7,
+    "total_checks": 10,
+    "measurements": {
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.008479066615861041,
+        "beta": 0.01805329143480606,
+        "gamma": 0.8688159315241605,
+        "delta": 0.005169276672380111
+      },
+      "valid_route_sequence_mass_t2": 0.9005175662472077,
+      "mean_digit_5_mass_t2": 0.06281332379766019,
+      "mean_normalized_digit_entropy_t2": 1.892453857425808,
+      "mean_valid_digit_mass_t2": 0.9748907108086869,
+      "root_group_informative_probability": 0.67534490654897,
+      "target_branch_group_informative_probability": 0.5212958008564987,
+      "expected_target_informative_groups_per_sliced_step": 4.17036640685199,
+      "redundant_broadcast_group_informative_probability_lower": 0.4546507078498656,
+      "sampling_false_abort_probability": 0.0
+    },
+    "failed_checks": {
+      "delta_route_mass_at_least_0_02": false,
+      "expected_target_informative_groups_per_sliced_step_at_least_5": false,
+      "redundant_broadcast_group_informative_probability_at_least_0_50": false
+    },
+    "signed_payload_sha256": "e7987fa3ef824036860d2a6af3cf3c233c4bcfa8697268482e0144169c1ac925",
+    "interpretation": "The target digit policy has usable support, but the root policy is too concentrated on gamma to power the frozen redundant-workflow comparison."
+  },
+  "terminal_process": {
+    "campaign_marker": "runs/stage-c3/credit-confusion-live-v3/CAMPAIGN_TERMINAL_FAILURE",
+    "failure": "vLLM/Python PyEval_SaveThread fatal error during root-scorer finalization after root-scores.json was fully written",
+    "retry_performed": false,
+    "structural_smoke_started": false,
+    "scientific_run_started": false,
+    "counterfactual_without_shutdown_error": "The unchanged frozen exact-power analyzer still fails three mandatory checks and would have stopped the campaign."
+  },
+  "integrity": {
+    "expanded_metadata_root": "runs/stage-c3/credit-confusion-live-v3",
+    "remote_raw_manifest": "runs/stage-c3/staging-v3/stage-c3-v3-raw-sha256.txt",
+    "remote_raw_manifest_sha256": "f0dac6942419ec14cac7a1b1f1051ef1c2cf3b24959695ff110b069596087b76",
+    "all_extracted_metadata_hashes_match": true,
+    "metadata_bundle": "runs/stage-c3/staging-v3/stage-c3-v3-metadata.tar.zst",
+    "metadata_bundle_sha256": "abe5fa7c4e087fb3d8efccc084cb5e77a39e1b8db58341db91e3c3afeab27c01",
+    "compressed_smoke_adapter": "runs/stage-c3/staging-v3/stage-c3-v3-smoke-adapter.safetensors.zst",
+    "compressed_smoke_adapter_sha256": "b9e8d9ca1982206fe7c82270239cefd2a4477b3514dbaa60a2773d78b3d5876d",
+    "decompressed_smoke_adapter_sha256": "28d5398b49c53b9f9f8ae849c15b2a2acb5863a2087602d797037d9d81899abe",
+    "compressed_adapter_roundtrip_verified": true
+  },
+  "billing": {
+    "pod_id": "6629f3b75aef4e37860429ca20bc386b",
+    "hourly_rate_usd": 2.0,
+    "v3_billed_usd": 0.8041,
+    "v1_plus_v2_plus_v3_terminal_attempts_usd": 1.7391,
+    "wallet_after_teardown_usd": 34.5059
+  },
+  "teardown": {
+    "active_pods": 0,
+    "persistent_disks": 0
+  },
+  "scientific_disposition": "Stage C3 v3 is terminal and cannot be retried. The credit-confusion hypothesis remains untested.",
+  "next_action": "Design a separately reviewed campaign whose symmetrically applied root initialization or exploration mechanism passes an exact preregistered support gate before training."
+}
