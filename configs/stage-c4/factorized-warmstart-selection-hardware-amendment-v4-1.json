@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c4-factorized-warmstart-selection-v4",
+  "amendment": "hardware-only-v4-1",
+  "status": "frozen_before_any_stage_c4_v4_model_load_or_optimizer_step",
+  "frozen_at_utc": "2026-07-29T18:36:22Z",
+  "reason": "The v4 preregistration intentionally froze an eligibility envelope while no qualifying resource was available. Prime now lists resource cc7cf9 as the cheapest genuinely available eligible resource; no pod, disk, v4 model load, or v4 optimizer step has occurred.",
+  "controlling_protocol": "configs/stage-c4/factorized-warmstart-selection-preregistration-v4.json",
+  "controlling_protocol_commit": "85d1bb4",
+  "passing_audit": "reports/stage-c4-warmstart-selection-v4-preregistration-audit-2026-07-29.json",
+  "passing_audit_signature": "63f91c8de22d554540d9a9f0306f7edb5c692f51be254e000acfa678e2e3e0a7",
+  "unchanged": [
+    "all source and source hashes",
+    "base model and inherited adapter",
+    "factorized reward-blind corpus",
+    "prime-qwen3 renderer and exact alignment gate",
+    "SFT seed 7203004 and optimizer hyperparameters",
+    "32-step horizon and even checkpoint cadence",
+    "candidate order and earliest-passing selection rule",
+    "all support, power, validity, concentration, and factorization thresholds",
+    "one-run and terminal-failure rules",
+    "2.5-hour whole-selection timeout",
+    "compact artifact policy",
+    "no persistent storage",
+    "no A100 or H100",
+    "non-spot requirement"
+  ],
+  "availability_snapshot": {
+    "active_pods": 0,
+    "persistent_disks": 0,
+    "wallet_balance_usd": 30.0543,
+    "eligible_resources": [
+      {
+        "resource_id": "cc7cf9",
+        "gpu": "2x RTX 6000 Ada 48GB",
+        "hourly_rate_usd": 1.5
+      },
+      {
+        "resource_id": "6705b0",
+        "gpu": "2x L40S 48GB",
+        "hourly_rate_usd": 1.64
+      },
+      {
+        "resource_id": "9260ad",
+        "gpu": "2x L40 48GB",
+        "hourly_rate_usd": 1.72
+      }
+    ]
+  },
+  "selected_hardware": {
+    "resource_id": "cc7cf9",
+    "cloud_id": "gpu_2x_6000_ada",
+    "gpu": "2x RTX 6000 Ada 48GB",
+    "provider": "massedcompute",
+    "location": "US",
+    "security": "datacenter",
+    "spot": false,
+    "hourly_rate_usd": 1.5,
+    "maximum_compute_charge_usd": 3.75,
+    "ephemeral_disk_gb": 700,
+    "persistent_storage": false,
+    "stock_status_at_freeze": "Available",
+    "selection_reason": "Cheapest genuinely available resource inside the frozen non-spot 2x48GB, at-most-$2/hour eligibility envelope."
+  },
+  "provisioning_rule": "Provision at most one pod named redco-stage-c4-selection-v4. If cc7cf9 disappears before creation, make no model call and commit another hardware-only amendment before choosing a replacement.",
+  "ssh_rule": "Verify C:/Users/mihir/.ssh/id_rsa noninteractively immediately after provisioning; terminate without model calls if SSH fails.",
+  "teardown_rule": "Always recover compact artifacts, terminate compute, and confirm zero persistent disks."
+}
