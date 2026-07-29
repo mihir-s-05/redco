@@ -11,6 +11,11 @@ from pydantic import Field, field_validator
 
 from redco.contracts import SeedNamespace
 from redco.env.tasks.credit_probes import credit_probe_by_name, standard_credit_probes
+from redco.integrations.stage_c_prompts import (
+    ROUTES,
+    stage_c_branch_prompt,
+    stage_c_root_prompt,
+)
 from redco.integrations.stage_c_roles import stage_c_branch_roles
 
 ACTION_PATTERN = re.compile(r"<action>\s*([^<\r\n]+?)\s*</action>", re.IGNORECASE)
@@ -19,7 +24,6 @@ SELF_TAG_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ROUTE_PATTERN = re.compile(r"<route>\s*([^<\r\n]+?)\s*</route>", re.IGNORECASE)
-ROUTES = ("alpha", "beta", "gamma", "delta")
 ROUTE_REWARD = {"alpha": -0.25, "beta": 0.0, "gamma": 0.25, "delta": 0.5}
 BRANCH_SEED_MASTER = "redco-stage-c-branch-v1"
 CONTEXT_SEED_MASTER = "redco-stage-c-context-v1"
@@ -207,9 +211,7 @@ class RedcoCreditTasksetConfig(vf.TasksetConfig):
 
     @field_validator("probe_names")
     @classmethod
-    def validate_probe_names(
-        cls, probe_names: tuple[str, ...] | None
-    ) -> tuple[str, ...] | None:
+    def validate_probe_names(cls, probe_names: tuple[str, ...] | None) -> tuple[str, ...] | None:
         if probe_names is None:
             return None
         if not probe_names:
@@ -221,34 +223,21 @@ class RedcoCreditTasksetConfig(vf.TasksetConfig):
         return probe_names
 
 
-class RedcoCreditTaskset(
-    vf.Taskset[RedcoSeedTask, RedcoCreditTasksetConfig]
-):
+class RedcoCreditTaskset(vf.Taskset[RedcoSeedTask, RedcoCreditTasksetConfig]):
     def load(self) -> list[RedcoSeedTask]:
         tasks: list[RedcoSeedTask] = []
         index = 0
         probes = (
-            tuple(
-                credit_probe_by_name(probe_name)
-                for probe_name in self.config.probe_names
-            )
+            tuple(credit_probe_by_name(probe_name) for probe_name in self.config.probe_names)
             if self.config.probe_names is not None
             else standard_credit_probes()
         )
         for repeat in range(self.config.repeats_per_probe):
             for probe in probes:
                 action_map = tuple(
-                    (str(action_index), action)
-                    for action_index, action in enumerate(probe.actions)
+                    (str(action_index), action) for action_index, action in enumerate(probe.actions)
                 )
-                prompt = (
-                    "Choose a routing label for a later sub-call. The route adds a "
-                    "deterministic background contribution to the final reward, "
-                    "while the sub-call action supplies the targeted contribution. "
-                    "Your final reply must end with exactly "
-                    f"<route>VALUE</route>, replacing VALUE with one of: "
-                    f"{', '.join(ROUTES)}."
-                )
+                prompt = stage_c_root_prompt()
                 data = RedcoCreditData(
                     idx=index,
                     name=f"{probe.name}-{repeat:04d}",
@@ -340,18 +329,12 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
         forced_action: str | None = None
         if self.config.forced_integration_smoke:
             if self.config.branching_enabled:
-                raise ValueError(
-                    "forced integration smoke requires broadcast mode"
-                )
-            forced_context, forced_action = _forced_smoke_choices(
-                episode_address
-            )
+                raise ValueError("forced integration smoke requires broadcast mode")
+            forced_context, forced_action = _forced_smoke_choices(episode_address)
         context_config = context_sampling(
             agents.context.ctx.sampling,
             seed=_context_seed(data.name, episode_address),
-            cache_salt_suffix=(
-                f"{data.name}:{episode_address}:context"
-            ),
+            cache_salt_suffix=(f"{data.name}:{episode_address}:context"),
             temperature=self.config.context_temperature,
         )
         if forced_context is not None:
@@ -366,22 +349,14 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
         context = await agents.context.run(task)
         context.record_metric(
             "redco_context_token_budget_ok",
-            float(
-                context_config.max_tokens is not None
-                and context_config.max_tokens >= 8
-            ),
+            float(context_config.max_tokens is not None and context_config.max_tokens >= 8),
         )
         context_route = parse_route(context.last_reply)
         episode_luck = 1 if data.exogenous_seed % 2 == 0 else -1
         target_node_id = f"{data.name}:depth-one-subcall"
-        branch_prompt = (
-            "You are the trainable depth-one sub-call in a deterministic "
-            "credit-assignment probe. The already-sampled root context is quoted "
-            f"below; do not modify it:\n<context>{context.last_reply}</context>\n"
-            "Choose one allowed action. Reply with exactly one digit and no other "
-            f"text. Allowed digits: {', '.join(data.actions)}. The decoder samples "
-            "one token from the model's complete vocabulary; any other token is "
-            "retained as an invalid action and receives the failure reward."
+        branch_prompt = stage_c_branch_prompt(
+            context.last_reply,
+            data.actions,
         )
         branch_task = RedcoCreditTask(
             data.model_copy(
@@ -395,9 +370,7 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
         )
         seed_namespace = _branch_seed_namespace(context.id, target_node_id)
         roles = stage_c_branch_roles(self.config.branch_group_size)
-        sampled_roles = (
-            roles if self.config.branching_enabled else ("original",)
-        )
+        sampled_roles = roles if self.config.branching_enabled else ("original",)
         for branch_index, role in enumerate(sampled_roles):
             agent = getattr(agents, role)
             seed = seed_namespace.action_seed(branch_index + 1)
@@ -446,9 +419,7 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             return
         roles = stage_c_branch_roles(self.config.branch_group_size)
         if len(episode.traces) != 1 + len(roles):
-            raise ValueError(
-                "clean Stage C requires context plus the configured branch traces"
-            )
+            raise ValueError("clean Stage C requires context plus the configured branch traces")
         by_role = {trace.agent_name: trace for trace in episode.traces}
         if set(by_role) != {"context", *roles}:
             raise ValueError("episode is missing a declared ReDCO branch role")
@@ -480,9 +451,7 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             if not equivalent:
                 raise RuntimeError("sliced and full-suffix replay disagree in-loop")
             expected_reward = (
-                full_reward
-                if self.config.replay_mode == "full_suffix"
-                else sliced_reward
+                full_reward if self.config.replay_mode == "full_suffix" else sliced_reward
             )
             if trace.rewards.get("deterministic_reward") != expected_reward:
                 raise RuntimeError("task reward differs from replayed branch reward")
@@ -493,22 +462,16 @@ class RedcoCreditEnv(vf.Env[RedcoCreditEnvConfig]):
             ).action_seed(branch_index + 1)
             sampling = trace.agent.sampling if trace.agent is not None else None
             sampling_payload = (
-                sampling.model_dump(exclude_none=True)
-                if sampling is not None
-                else {}
+                sampling.model_dump(exclude_none=True) if sampling is not None else {}
             )
             if sampling_payload.get("seed") != expected_seed:
                 raise RuntimeError("branch trace did not preserve its structural seed")
             if sampling_payload.get("max_tokens") != 1:
-                raise RuntimeError(
-                    "branch trace did not preserve its one-token action space"
-                )
+                raise RuntimeError("branch trace did not preserve its one-token action space")
             if sampling_payload.get("allowed_token_ids") is not None:
                 raise RuntimeError("branch trace unexpectedly constrained token support")
             if sampling_payload.get("temperature") != self.config.branch_temperature:
-                raise RuntimeError(
-                    "branch trace did not preserve its behavior temperature"
-                )
+                raise RuntimeError("branch trace did not preserve its behavior temperature")
             sampled_action_token_ids = [
                 token_id
                 for node in trace.nodes

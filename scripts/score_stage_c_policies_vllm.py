@@ -8,6 +8,7 @@ cannot enter the backend-parity diagnostic.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -27,6 +28,15 @@ def _logprob(value: Any) -> float:
     raise TypeError(f"unsupported vLLM logprob value: {type(value)}")
 
 
+def _shutdown_llm(llm: LLM) -> None:
+    """Stop vLLM's background engine before Python extension finalization."""
+    engine = getattr(llm, "llm_engine", None)
+    engine_core = getattr(engine, "engine_core", None)
+    shutdown = getattr(engine_core, "shutdown", None)
+    if callable(shutdown):
+        shutdown()
+
+
 def _score(
     llm: LLM,
     cases: list[dict[str, Any]],
@@ -34,8 +44,7 @@ def _score(
     lora_request: LoRARequest | None,
 ) -> dict[str, list[dict[str, Any]]]:
     prompts = [
-        {"prompt_token_ids": [int(token) for token in case["prefix_token_ids"]]}
-        for case in cases
+        {"prompt_token_ids": [int(token) for token in case["prefix_token_ids"]]} for case in cases
     ]
     params = SamplingParams(
         temperature=1.0,
@@ -57,24 +66,15 @@ def _score(
             raise ValueError("vLLM did not return one generated-token logprob map")
         logprobs = completion.logprobs[0]
         action_ids = {
-            action: int(token_id)
-            for action, token_id in case["action_token_ids"].items()
+            action: int(token_id) for action, token_id in case["action_token_ids"].items()
         }
-        missing = [
-            token_id for token_id in action_ids.values() if token_id not in logprobs
-        ]
+        missing = [token_id for token_id in action_ids.values() if token_id not in logprobs]
         if missing:
             raise ValueError(f"vLLM omitted action token logprobs: {missing}")
-        raw_logprobs = {
-            int(token_id): _logprob(value) for token_id, value in logprobs.items()
-        }
+        raw_logprobs = {int(token_id): _logprob(value) for token_id, value in logprobs.items()}
         greedy_token = max(raw_logprobs, key=raw_logprobs.__getitem__)
         greedy_allowed = next(
-            (
-                action
-                for action, token_id in action_ids.items()
-                if token_id == greedy_token
-            ),
+            (action for action, token_id in action_ids.items() if token_id == greedy_token),
             None,
         )
         for temperature in (1.0, 2.0):
@@ -96,8 +96,7 @@ def _score(
                     "greedy_allowed_action": greedy_allowed,
                     "action_logprobabilities": action_logprobs,
                     "action_probabilities": {
-                        action: math.exp(logprob)
-                        for action, logprob in action_logprobs.items()
+                        action: math.exp(logprob) for action, logprob in action_logprobs.items()
                     },
                 }
             )
@@ -139,49 +138,57 @@ def main() -> None:
         max_model_len=512,
         trust_remote_code=False,
     )
-    models = []
-    for index, (name, path) in enumerate(
-        [(args.model_name, None), *adapters],
-        start=0,
-    ):
-        request = (
-            None
-            if path is None
-            else LoRARequest(
-                lora_name=name,
-                lora_int_id=index,
-                lora_path=str(path),
+    try:
+        models = []
+        for index, (name, path) in enumerate(
+            [(args.model_name, None), *adapters],
+            start=0,
+        ):
+            request = (
+                None
+                if path is None
+                else LoRARequest(
+                    lora_name=name,
+                    lora_int_id=index,
+                    lora_path=str(path),
+                )
             )
-        )
-        models.append(
-            {
-                "name": name,
-                "temperatures": _score(
-                    llm,
-                    cases,
-                    lora_request=request,
-                ),
-            }
-        )
-    payload = {
-        "schema_version": 1,
-        "backend": "vllm",
-        "temperature_semantics": (
-            "vLLM raw full-vocabulary logprobs retempered exactly as "
-            "softmax(logits / temperature)"
-        ),
-        "source": {
-            "model": args.model,
-            "cases_sha256": case_payload["signed_payload_sha256"],
-            "adapters": [
-                {"name": name, "path": str(path.as_posix())}
-                for name, path in adapters
-            ],
-        },
-        "models": models,
-    }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+            models.append(
+                {
+                    "name": name,
+                    "temperatures": _score(
+                        llm,
+                        cases,
+                        lora_request=request,
+                    ),
+                }
+            )
+        payload = {
+            "schema_version": 1,
+            "backend": "vllm",
+            "temperature_semantics": (
+                "vLLM raw full-vocabulary logprobs retempered exactly as "
+                "softmax(logits / temperature)"
+            ),
+            "source": {
+                "model": args.model,
+                "cases_sha256": case_payload["signed_payload_sha256"],
+                "adapters": [
+                    {"name": name, "path": str(path.as_posix())} for name, path in adapters
+                ],
+            },
+            "models": models,
+        }
+        signed = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        payload["signed_payload_sha256"] = hashlib.sha256(signed).hexdigest()
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    finally:
+        _shutdown_llm(llm)
 
 
 if __name__ == "__main__":

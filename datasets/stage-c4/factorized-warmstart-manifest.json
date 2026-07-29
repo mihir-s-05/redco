@@ -1,0 +1,92 @@
+{
+  "checks": {
+    "empirical_joint_equals_product_exactly": true,
+    "every_route_digit_pair_occurs_once": true,
+    "exact_example_count_40": true,
+    "exact_root_example_count_8": true,
+    "exact_target_example_count_32": true,
+    "no_joint_complete_episode_supervision": true,
+    "no_reward_or_causality_supervision_fields": true,
+    "no_unknown_example_kind": true,
+    "root_routes_exactly_balanced": true,
+    "target_digits_exactly_balanced": true,
+    "target_routes_exactly_balanced": true
+  },
+  "counts": {
+    "examples": 40,
+    "root_examples": 8,
+    "root_route_counts": {
+      "alpha": 2,
+      "beta": 2,
+      "delta": 2,
+      "gamma": 2
+    },
+    "target_digit_counts": {
+      "0": 4,
+      "1": 4,
+      "2": 4,
+      "3": 4,
+      "4": 4,
+      "5": 4,
+      "6": 4,
+      "7": 4
+    },
+    "target_examples": 32,
+    "target_joint_counts": {
+      "alpha:0": 1,
+      "alpha:1": 1,
+      "alpha:2": 1,
+      "alpha:3": 1,
+      "alpha:4": 1,
+      "alpha:5": 1,
+      "alpha:6": 1,
+      "alpha:7": 1,
+      "beta:0": 1,
+      "beta:1": 1,
+      "beta:2": 1,
+      "beta:3": 1,
+      "beta:4": 1,
+      "beta:5": 1,
+      "beta:6": 1,
+      "beta:7": 1,
+      "delta:0": 1,
+      "delta:1": 1,
+      "delta:2": 1,
+      "delta:3": 1,
+      "delta:4": 1,
+      "delta:5": 1,
+      "delta:6": 1,
+      "delta:7": 1,
+      "gamma:0": 1,
+      "gamma:1": 1,
+      "gamma:2": 1,
+      "gamma:3": 1,
+      "gamma:4": 1,
+      "gamma:5": 1,
+      "gamma:6": 1,
+      "gamma:7": 1
+    },
+    "target_route_counts": {
+      "alpha": 8,
+      "beta": 8,
+      "delta": 8,
+      "gamma": 8
+    }
+  },
+  "dataset": "stage-c4-factorized-format-warmstart",
+  "factorization": {
+    "empirical_mutual_information_nats": 0.0,
+    "empirical_total_variation": 0.0
+  },
+  "schema_version": 1,
+  "signed_payload_sha256": "8e9127885182678545a8997d1f682b7cd3ee105a4d50f0fe40f262d3ad04ceaf",
+  "status": "passed",
+  "supervision": {
+    "label_specific_reward_information": false,
+    "note": "The exact campaign prompt mentions reward generically, but the generator contains no route/digit reward mapping or outcome-derived label.",
+    "purpose": "format and marginal diversity only",
+    "reward_or_causality_fields": 0,
+    "root_and_target_labels_in_same_example": 0,
+    "task_interface_mentions_generic_reward": true
+  }
+}

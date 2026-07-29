@@ -22,6 +22,15 @@ def _logprob(value: Any) -> float:
     raise TypeError(f"unsupported vLLM logprob value: {type(value)}")
 
 
+def _shutdown_llm(llm: LLM) -> None:
+    """Stop vLLM's background engine before Python extension finalization."""
+    engine = getattr(llm, "llm_engine", None)
+    engine_core = getattr(engine, "engine_core", None)
+    shutdown = getattr(engine_core, "shutdown", None)
+    if callable(shutdown):
+        shutdown()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", type=Path, required=True)
@@ -57,67 +66,66 @@ def main() -> None:
         detokenize=False,
         seed=9601,
     )
-    outputs = llm.generate(prompts, params, use_tqdm=False)
-    route_logprobs: dict[str, float] = {}
-    token_details: dict[str, list[dict[str, Any]]] = {}
-    for case, output in zip(cases, outputs, strict=True):
-        prompt_logprobs = output.prompt_logprobs
-        if prompt_logprobs is None:
-            raise ValueError("vLLM omitted prompt logprobs")
-        prefix_length = len(case["prefix_token_ids"])
-        completion = [int(value) for value in case["completion_token_ids"]]
-        details = []
-        total = 0.0
-        for offset, token_id in enumerate(completion):
-            values = prompt_logprobs[prefix_length + offset]
-            if values is None:
-                raise ValueError("vLLM omitted a completion prompt logprob")
-            raw = {
-                int(key): _logprob(value) for key, value in values.items()
-            }
-            selected = retemper_selected_logprobs(
-                raw,
-                [token_id],
-                temperature=2.0,
-            )[token_id]
-            total += selected
-            details.append(
-                {
-                    "token_id": token_id,
-                    "temperature_2_logprob": selected,
-                }
-            )
-        route = str(case["route"])
-        route_logprobs[route] = total
-        token_details[route] = details
-    probabilities = {
-        route: math.exp(value) for route, value in route_logprobs.items()
-    }
-    payload: dict[str, Any] = {
-        "schema_version": 1,
-        "analysis": "stage-c3-root-route-sequence-scores",
-        "temperature_2": {
-            "route_sequence_logprobabilities": route_logprobs,
-            "route_sequence_probabilities": probabilities,
-            "valid_route_sequence_mass": math.fsum(probabilities.values()),
-            "token_details": token_details,
-        },
-        "source": {
-            "model": args.model,
-            "cases_sha256": case_payload["signed_payload_sha256"],
-        },
-    }
-    signed = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
-    payload["signed_payload_sha256"] = hashlib.sha256(signed).hexdigest()
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    try:
+        outputs = llm.generate(prompts, params, use_tqdm=False)
+        route_logprobs: dict[str, float] = {}
+        token_details: dict[str, list[dict[str, Any]]] = {}
+        for case, output in zip(cases, outputs, strict=True):
+            prompt_logprobs = output.prompt_logprobs
+            if prompt_logprobs is None:
+                raise ValueError("vLLM omitted prompt logprobs")
+            prefix_length = len(case["prefix_token_ids"])
+            completion = [int(value) for value in case["completion_token_ids"]]
+            details = []
+            total = 0.0
+            for offset, token_id in enumerate(completion):
+                values = prompt_logprobs[prefix_length + offset]
+                if values is None:
+                    raise ValueError("vLLM omitted a completion prompt logprob")
+                raw = {int(key): _logprob(value) for key, value in values.items()}
+                selected = retemper_selected_logprobs(
+                    raw,
+                    [token_id],
+                    temperature=2.0,
+                )[token_id]
+                total += selected
+                details.append(
+                    {
+                        "token_id": token_id,
+                        "temperature_2_logprob": selected,
+                    }
+                )
+            route = str(case["route"])
+            route_logprobs[route] = total
+            token_details[route] = details
+        probabilities = {route: math.exp(value) for route, value in route_logprobs.items()}
+        payload: dict[str, Any] = {
+            "schema_version": 1,
+            "analysis": "stage-c3-root-route-sequence-scores",
+            "temperature_2": {
+                "route_sequence_logprobabilities": route_logprobs,
+                "route_sequence_probabilities": probabilities,
+                "valid_route_sequence_mass": math.fsum(probabilities.values()),
+                "token_details": token_details,
+            },
+            "source": {
+                "model": args.model,
+                "cases_sha256": case_payload["signed_payload_sha256"],
+            },
+        }
+        signed = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        payload["signed_payload_sha256"] = hashlib.sha256(signed).hexdigest()
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    finally:
+        _shutdown_llm(llm)
 
 
 if __name__ == "__main__":
