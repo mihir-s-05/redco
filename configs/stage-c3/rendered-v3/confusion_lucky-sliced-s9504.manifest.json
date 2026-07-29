@@ -1,0 +1,10 @@
+{
+  "arm": "sliced",
+  "output": "configs/stage-c3/rendered-v3/confusion_lucky-sliced-s9504.toml",
+  "probe": "confusion_lucky",
+  "schema_version": 1,
+  "seed": 9504,
+  "sha256": "d3b227407daa00e9cca7c0e699c5e1b7b020103a29c5729358a471308a363d53",
+  "smoke": false,
+  "template": "configs/stage-c3/credit-confusion-sliced-template.toml"
+}
