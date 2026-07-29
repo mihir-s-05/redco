@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -12,6 +11,11 @@ from typing import Any
 from vllm import LLM, SamplingParams
 
 from redco.analysis.vllm_temperature import retemper_selected_logprobs
+from redco.integrations.signed_subprocess import (
+    atomic_write_json,
+    run_and_hard_exit,
+    sign_payload,
+)
 
 
 def _logprob(value: Any) -> float:
@@ -113,20 +117,10 @@ def main() -> None:
                 "cases_sha256": case_payload["signed_payload_sha256"],
             },
         }
-        signed = json.dumps(
-            payload,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-        payload["signed_payload_sha256"] = hashlib.sha256(signed).hexdigest()
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(
-            json.dumps(payload, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        atomic_write_json(args.output, sign_payload(payload))
     finally:
         _shutdown_llm(llm)
 
 
 if __name__ == "__main__":
-    main()
+    run_and_hard_exit(main)
