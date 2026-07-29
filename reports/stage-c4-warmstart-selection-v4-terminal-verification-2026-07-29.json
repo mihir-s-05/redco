@@ -1,0 +1,276 @@
+{
+  "analysis": "stage-c4-warmstart-selection-v4-terminal-verification",
+  "candidate_reports_verified": 16,
+  "candidate_scorer_pairs_verified": 16,
+  "curve": [
+    {
+      "expected_target_informative_groups": 4.299465329292596,
+      "mean_digit_5_mass_t2": 0.06659858776637262,
+      "normalized_root_entropy_nats": 0.20508713243620855,
+      "redundant_group_informative_probability": 0.47205268402778133,
+      "route_digit_joint_tv": 0.011715660904943016,
+      "route_digit_mutual_information_nats": 0.0026170305034415417,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.00958494336691363,
+        "beta": 0.020404198574576055,
+        "delta": 0.005775820680206113,
+        "gamma": 0.8668302432900081
+      },
+      "step": 2,
+      "valid_route_sequence_mass_t2": 0.902595205911704
+    },
+    {
+      "expected_target_informative_groups": 4.362451453573749,
+      "mean_digit_5_mass_t2": 0.07090098659968988,
+      "normalized_root_entropy_nats": 0.2556547539964465,
+      "redundant_group_informative_probability": 0.48576140240308974,
+      "route_digit_joint_tv": 0.013664849218005967,
+      "route_digit_mutual_information_nats": 0.002789440407524776,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.013782777725103619,
+        "beta": 0.02592304386714144,
+        "delta": 0.007412240557708498,
+        "gamma": 0.8573384337716211
+      },
+      "step": 4,
+      "valid_route_sequence_mass_t2": 0.9044564959215746
+    },
+    {
+      "expected_target_informative_groups": 4.568829033239815,
+      "mean_digit_5_mass_t2": 0.07512517013581863,
+      "normalized_root_entropy_nats": 0.3403857861188541,
+      "redundant_group_informative_probability": 0.5193579236143705,
+      "route_digit_joint_tv": 0.018512715904276836,
+      "route_digit_mutual_information_nats": 0.0035678314033908577,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.022038517464711846,
+        "beta": 0.036429675638377686,
+        "delta": 0.00926842138386324,
+        "gamma": 0.8313809238405688
+      },
+      "step": 6,
+      "valid_route_sequence_mass_t2": 0.8991175383275216
+    },
+    {
+      "expected_target_informative_groups": 4.58039269408811,
+      "mean_digit_5_mass_t2": 0.07904526037939218,
+      "normalized_root_entropy_nats": 0.4827535173364457,
+      "redundant_group_informative_probability": 0.5468632328461249,
+      "route_digit_joint_tv": 0.02514573515343167,
+      "route_digit_mutual_information_nats": 0.004692317027349958,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.03935973879507396,
+        "beta": 0.05074842953196855,
+        "delta": 0.016398107271068843,
+        "gamma": 0.7941941054527072
+      },
+      "step": 8,
+      "valid_route_sequence_mass_t2": 0.9007003810508185
+    },
+    {
+      "expected_target_informative_groups": 4.762622341291977,
+      "mean_digit_5_mass_t2": 0.08346871525763763,
+      "normalized_root_entropy_nats": 0.6736540493001609,
+      "redundant_group_informative_probability": 0.5969819304892077,
+      "route_digit_joint_tv": 0.036026154709469446,
+      "route_digit_mutual_information_nats": 0.00641293422872257,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.0679457451247094,
+        "beta": 0.07738028452349355,
+        "delta": 0.025098172270757592,
+        "gamma": 0.7341615716307262
+      },
+      "step": 10,
+      "valid_route_sequence_mass_t2": 0.9045857735496867
+    },
+    {
+      "expected_target_informative_groups": 4.7952263099678705,
+      "mean_digit_5_mass_t2": 0.08822889695183186,
+      "normalized_root_entropy_nats": 0.8689008404680905,
+      "redundant_group_informative_probability": 0.6375628486408429,
+      "route_digit_joint_tv": 0.04338069734611891,
+      "route_digit_mutual_information_nats": 0.0070472494430698016,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.11242002757300869,
+        "beta": 0.09987291817293593,
+        "delta": 0.036698126198265,
+        "gamma": 0.6504130989820043
+      },
+      "step": 12,
+      "valid_route_sequence_mass_t2": 0.8994041709262139
+    },
+    {
+      "expected_target_informative_groups": 4.6631154400836445,
+      "mean_digit_5_mass_t2": 0.08919009806370726,
+      "normalized_root_entropy_nats": 1.0993401400136564,
+      "redundant_group_informative_probability": 0.6583107241797923,
+      "route_digit_joint_tv": 0.05494042367591753,
+      "route_digit_mutual_information_nats": 0.008541784856974932,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.1857713136196851,
+        "beta": 0.1451135232210917,
+        "delta": 0.0471963015573512,
+        "gamma": 0.5074366625623593
+      },
+      "step": 14,
+      "valid_route_sequence_mass_t2": 0.8855178009604873
+    },
+    {
+      "expected_target_informative_groups": 4.8785827536914415,
+      "mean_digit_5_mass_t2": 0.096785375714286,
+      "normalized_root_entropy_nats": 1.2499957126304606,
+      "redundant_group_informative_probability": 0.7359595862755592,
+      "route_digit_joint_tv": 0.05644571961059504,
+      "route_digit_mutual_information_nats": 0.00844045168367094,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.2878754691160503,
+        "beta": 0.17308892527354117,
+        "delta": 0.07227591887602672,
+        "gamma": 0.366773156625454
+      },
+      "step": 16,
+      "valid_route_sequence_mass_t2": 0.9000134698910722
+    },
+    {
+      "expected_target_informative_groups": 4.978852434195709,
+      "mean_digit_5_mass_t2": 0.1034812036608386,
+      "normalized_root_entropy_nats": 1.2995351376930906,
+      "redundant_group_informative_probability": 0.7861085870938147,
+      "route_digit_joint_tv": 0.049670466114549686,
+      "route_digit_mutual_information_nats": 0.007115277420000953,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.27857772931100366,
+        "beta": 0.19422920254988674,
+        "delta": 0.09180276050019476,
+        "gamma": 0.3204843597210406
+      },
+      "step": 18,
+      "valid_route_sequence_mass_t2": 0.8850940520821258
+    },
+    {
+      "expected_target_informative_groups": 4.983664055252736,
+      "mean_digit_5_mass_t2": 0.10582690201396588,
+      "normalized_root_entropy_nats": 1.3532423007635086,
+      "redundant_group_informative_probability": 0.852170020808478,
+      "route_digit_joint_tv": 0.042772132411259794,
+      "route_digit_mutual_information_nats": 0.005117096852891348,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.24117926855003013,
+        "beta": 0.22179787647739255,
+        "delta": 0.1343683809797441,
+        "gamma": 0.2850583592556852
+      },
+      "step": 20,
+      "valid_route_sequence_mass_t2": 0.882403885262852
+    },
+    {
+      "expected_target_informative_groups": 4.989763614612317,
+      "mean_digit_5_mass_t2": 0.10819583119802689,
+      "normalized_root_entropy_nats": 1.378479502345563,
+      "redundant_group_informative_probability": 0.913868397889845,
+      "route_digit_joint_tv": 0.04097011441031072,
+      "route_digit_mutual_information_nats": 0.004885097344324392,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.19102370585467127,
+        "beta": 0.24595675751587148,
+        "delta": 0.19144192155439002,
+        "gamma": 0.24563765100444596
+      },
+      "step": 22,
+      "valid_route_sequence_mass_t2": 0.8740600359293788
+    },
+    {
+      "expected_target_informative_groups": 4.967721864229866,
+      "mean_digit_5_mass_t2": 0.10759441880947533,
+      "normalized_root_entropy_nats": 1.3619329925974644,
+      "redundant_group_informative_probability": 0.9301212990896394,
+      "route_digit_joint_tv": 0.038805236250633465,
+      "route_digit_mutual_information_nats": 0.0043788562306981095,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.144877784797672,
+        "beta": 0.2395079794198363,
+        "delta": 0.2121074359107258,
+        "gamma": 0.2716841698312326
+      },
+      "step": 24,
+      "valid_route_sequence_mass_t2": 0.8681773699594667
+    },
+    {
+      "expected_target_informative_groups": 5.131074830120965,
+      "mean_digit_5_mass_t2": 0.1119967540234288,
+      "normalized_root_entropy_nats": 1.3617303870708195,
+      "redundant_group_informative_probability": 0.9507333302396914,
+      "route_digit_joint_tv": 0.03619648806676229,
+      "route_digit_mutual_information_nats": 0.0036826090577006683,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.14615658864104847,
+        "beta": 0.21374516730495835,
+        "delta": 0.24242837961333455,
+        "gamma": 0.27460933743372457
+      },
+      "step": 26,
+      "valid_route_sequence_mass_t2": 0.876939472993066
+    },
+    {
+      "expected_target_informative_groups": 4.994281882895768,
+      "mean_digit_5_mass_t2": 0.10780825407265862,
+      "normalized_root_entropy_nats": 1.36487034580845,
+      "redundant_group_informative_probability": 0.9381728255205137,
+      "route_digit_joint_tv": 0.035380358193014175,
+      "route_digit_mutual_information_nats": 0.00347313342817093,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.1626610122703541,
+        "beta": 0.19714328622421928,
+        "delta": 0.22325365103070421,
+        "gamma": 0.28668499186615665
+      },
+      "step": 28,
+      "valid_route_sequence_mass_t2": 0.8697429413914343
+    },
+    {
+      "expected_target_informative_groups": 4.878573737810927,
+      "mean_digit_5_mass_t2": 0.10527899025501358,
+      "normalized_root_entropy_nats": 1.3503108225862752,
+      "redundant_group_informative_probability": 0.8894063353806474,
+      "route_digit_joint_tv": 0.03731772432471577,
+      "route_digit_mutual_information_nats": 0.003758827125247675,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.1666388101156694,
+        "beta": 0.21494252360884822,
+        "delta": 0.1672823607079122,
+        "gamma": 0.3124824504524079
+      },
+      "step": 30,
+      "valid_route_sequence_mass_t2": 0.8613461448848377
+    },
+    {
+      "expected_target_informative_groups": 5.155347955746966,
+      "mean_digit_5_mass_t2": 0.10991064964333266,
+      "normalized_root_entropy_nats": 1.3503357288934048,
+      "redundant_group_informative_probability": 0.8779560017381274,
+      "route_digit_joint_tv": 0.03522495490363255,
+      "route_digit_mutual_information_nats": 0.003479851716055043,
+      "route_sequence_probabilities_t2": {
+        "alpha": 0.20597021146220562,
+        "beta": 0.21810563052918622,
+        "delta": 0.14988227885399022,
+        "gamma": 0.3177930892475553
+      },
+      "step": 32,
+      "valid_route_sequence_mass_t2": 0.8917512100929373
+    }
+  ],
+  "preregistration_audit_signature": "63f91c8de22d554540d9a9f0306f7edb5c692f51be254e000acfa678e2e3e0a7",
+  "renderer_alignment_signature": "f4fa5fa4b45bb307455bef31e4c721f43d53d4319579b0089e0a7efcb363b9af",
+  "schema_version": 1,
+  "selection_manifest_files_verified": 135,
+  "selection_signed_payload_sha256": "737e38735d15278f5422dda092d3e4f1630a5616d4148ea9a44b6f0fed77fc96",
+  "sft": {
+    "final_loss": 0.6297805309295654,
+    "initial_loss": 1.0896788835525513,
+    "nan_steps": 0,
+    "steps": 32
+  },
+  "signed_payload_sha256": "965e83fc0183b63e56972ff148464f0facb2bda4fa7c8d7c06691102350db1da",
+  "status": "verified-terminal-no-selection"
+}
