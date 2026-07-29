@@ -1,0 +1,57 @@
+max_steps = 16
+output_dir = "runs/stage-c4/warmstart-sft-v3"
+clean_output_dir = true
+
+[deployment]
+type = "single_node"
+num_gpus = 1
+gpus_per_node = 2
+
+[model]
+name = "runs/stage-c4/base-merged-step23-v3"
+seq_len = 256
+attn = "flash_attention_2"
+optimization_dtype = "bfloat16"
+reduce_dtype = "bfloat16"
+optim_cpu_offload = false
+
+[model.ac]
+freq = 1
+
+[model.lora]
+rank = 32
+alpha = 64
+
+[renderer]
+name = "prime-qwen3"
+
+[data]
+type = "sft"
+name = "json"
+data_files = "datasets/stage-c4/factorized-warmstart.jsonl"
+seq_len = 256
+batch_size = 40
+micro_batch_size = 4
+shuffle = false
+seed = 7203003
+
+[optim]
+type = "adamw"
+lr = 5e-6
+weight_decay = 0
+max_norm = 1
+
+[scheduler]
+type = "constant"
+
+[ckpt]
+interval = 1
+weights_only = true
+keep_last = 16
+
+[ckpt.weights]
+adapter_only = true
+save_format = "safetensors"
+
+[file_monitor]
+filename = "metrics.jsonl"
