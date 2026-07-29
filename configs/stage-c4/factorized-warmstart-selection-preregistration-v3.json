@@ -256,7 +256,7 @@
       "src/redco/analysis/stage_c4_warmstart.py": "8fc42103840d64a93f7e27a90103da9fb70d068c9cfc1a08931dbcd95509c067",
       "src/redco/analysis/stage_c3_power.py": "99fa94e1e1420d1b283c98119f92be0577d2f9bb6f5a5410ed3af4b1fed65adf",
       "src/redco/integrations/stage_c_prompts.py": "d8700222f4840153121699a69f26b29d93826e23f33c2f5acf543610c8c79a92",
-      "environments/redco_credit_v1/redco_credit_v1/taskset.py": "38606fe3dbab3fe6830c49ad9d02484f046d7c9c7dd8052",
+      "environments/redco_credit_v1/redco_credit_v1/taskset.py": "38606fe3dbab3fe6830c49ad9d02484aef6e31558ddb8f84f046d7c9c7dd8052",
       "patches/prime-rl-redco-stage-c3-v3.patch": "790e0590ba58e5b3c0e572b0f7a210d2ad3cf4b3278cd5b448c9e7e3937ced9a",
       "reports/stage-c4-renderer-alignment-v3-2026-07-29.json": "404f2cd3d258b84614730969761ea324050c8c8b831293b1456b02e29f5c5891",
       "reports/stage-c4-renderer-mismatch-v2-2026-07-29.json": "3ee9facf0ddf9d3e14a409bf2847803c10f3faa4426e254020cdf90be0f038d2"
