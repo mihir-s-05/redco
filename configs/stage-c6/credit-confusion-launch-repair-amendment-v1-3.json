@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c6-credit-confusion-live-v1",
+  "amendment": "in-deployment-launch-environment-repair-v1-3",
+  "status": "frozen_after_zero-model-call-launch-failure_and_before_same-pod-relaunch",
+  "frozen_at_local_date": "2026-07-29",
+  "protocol_commit": "613a269",
+  "deployment_repair_commit": "e60b61e",
+  "pod_id": "4323c3e6cfc74e42bc4c58a5d309edd0",
+  "failure": {
+    "launcher_error": "scripts/run_stage_c6_campaign_v1.sh: line 69: uv: command not found",
+    "cause": "The non-login SSH process did not inherit /home/ubuntu/.local/bin in PATH.",
+    "run_files_created": [
+      "CAMPAIGN_TERMINAL_FAILURE"
+    ],
+    "model_loads": 0,
+    "model_calls": 0,
+    "optimizer_steps": 0,
+    "support_payloads": 0,
+    "scientific_arm_outcomes": 0,
+    "gpu_memory_used_mib": 2,
+    "scientific_information_observed": false
+  },
+  "repair": {
+    "source_changes": 0,
+    "config_changes": 0,
+    "scientific_changes": 0,
+    "pod_changes": 0,
+    "action": "Preserve the failed attempt directory, explicitly prepend /home/ubuntu/.local/bin to PATH, and relaunch the byte-identical driver on the same pod.",
+    "uv_environment_reused": "/home/ubuntu/.venv-prime-stage-c6-v1",
+    "uv_cache_reused": "/home/ubuntu/.uv-cache-prime-stage-c6-v1",
+    "redeployment_consumed": false
+  },
+  "immutable_fields": "All initialization bytes, constrained semantics, tasks, arms, seeds, order, policy-call budgets, optimizer settings, support thresholds, scientific metrics, decision rules, artifact policy, and cost ceiling remain unchanged."
+}
