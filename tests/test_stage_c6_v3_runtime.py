@@ -37,3 +37,14 @@ def test_prime_patch_contains_exact_normalizer_and_gradient_regression() -> None
     assert "def apply_exact_categorical_normalization" in patch
     assert "test_exact_categorical_cpu.py" in patch
     assert "group normalizer" in patch
+
+
+def test_stage_c6_v3_driver_reads_token_exports_from_trainer_output_root() -> None:
+    driver = Path("scripts/run_stage_c6_campaign_v3.sh").read_text(
+        encoding="utf-8"
+    )
+    assert '--token-exports "$structural_output/token_exports"' in driver
+    assert (
+        '--token-exports "$structural_output/run_default/token_exports"'
+        not in driver
+    )
