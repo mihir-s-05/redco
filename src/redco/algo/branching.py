@@ -6,6 +6,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from math import fsum
+from random import Random
 
 from redco.contracts import PolicyNodeKind, PrefixFeatures
 
@@ -22,6 +23,9 @@ class TargetCommitment:
     node_id: str | None
     status: CommitmentStatus
     features: PrefixFeatures | None
+    selection_probability: float | None = None
+    selection_mode: str | None = None
+    priority_score: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +92,110 @@ class OnlineTargetSelector:
         if self._commitment is not None:
             return self._commitment
         self._commitment = TargetCommitment(None, CommitmentStatus.SKIPPED, None)
+        return self._commitment
+
+
+class RandomizedSelectiveTargetSelector:
+    """Target high-priority nodes while preserving randomized replay support.
+
+    Every reached eligible node is selected with probability at least
+    ``randomized_replay_fraction``. Priority nodes are selected with probability
+    one. The decision consumes only ``PrefixFeatures`` and is therefore made
+    before the action being targeted exists.
+    """
+
+    def __init__(
+        self,
+        *,
+        seed: int,
+        randomized_replay_fraction: float,
+        priority_threshold: float,
+        eligible_kinds: frozenset[PolicyNodeKind] = frozenset(
+            {PolicyNodeKind.SUBCALL_OUTPUT}
+        ),
+    ) -> None:
+        if not 0.0 < randomized_replay_fraction <= 1.0:
+            raise ValueError("randomized_replay_fraction must be in (0, 1]")
+        if not 0.0 <= priority_threshold <= 1.0:
+            raise ValueError("priority_threshold must be in [0, 1]")
+        self._random = Random(seed)
+        self._randomized_replay_fraction = randomized_replay_fraction
+        self._priority_threshold = priority_threshold
+        self._eligible_kinds = eligible_kinds
+        self._commitment: TargetCommitment | None = None
+        self._last_decision: TargetCommitment | None = None
+
+    @property
+    def commitment(self) -> TargetCommitment | None:
+        return self._commitment
+
+    def consider(
+        self,
+        node_id: str,
+        features: PrefixFeatures,
+        *,
+        priority_score: float,
+    ) -> TargetCommitment:
+        """Make a logged priority-or-randomized decision before action sampling."""
+        if not node_id:
+            raise ValueError("node_id must be non-empty")
+        if not 0.0 <= priority_score <= 1.0:
+            raise ValueError("priority_score must be in [0, 1]")
+        if self._commitment is not None:
+            return TargetCommitment(
+                None,
+                CommitmentStatus.ALREADY_COMMITTED,
+                features,
+                priority_score=priority_score,
+            )
+        if features.node_kind not in self._eligible_kinds:
+            self._last_decision = TargetCommitment(
+                None,
+                CommitmentStatus.INELIGIBLE,
+                features,
+                selection_probability=0.0,
+                priority_score=priority_score,
+            )
+            return self._last_decision
+
+        priority = priority_score >= self._priority_threshold
+        selection_probability = (
+            1.0 if priority else self._randomized_replay_fraction
+        )
+        randomized = self._random.random() < self._randomized_replay_fraction
+        if priority or randomized:
+            self._commitment = TargetCommitment(
+                node_id,
+                CommitmentStatus.COMMITTED,
+                features,
+                selection_probability=selection_probability,
+                selection_mode="priority" if priority else "randomized_replay",
+                priority_score=priority_score,
+            )
+            self._last_decision = self._commitment
+            return self._commitment
+        self._last_decision = TargetCommitment(
+            None,
+            CommitmentStatus.SKIPPED,
+            features,
+            selection_probability=selection_probability,
+            selection_mode="not_selected",
+            priority_score=priority_score,
+        )
+        return self._last_decision
+
+    def finalize(self) -> TargetCommitment:
+        if self._commitment is not None:
+            return self._commitment
+        if self._last_decision is not None:
+            return self._last_decision
+        self._commitment = TargetCommitment(
+            None,
+            CommitmentStatus.SKIPPED,
+            None,
+            selection_probability=0.0,
+            selection_mode="no_eligible_target",
+        )
         return self._commitment
 
 

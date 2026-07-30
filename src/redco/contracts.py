@@ -203,3 +203,37 @@ class SnapshotLifecycle:
         self.optimizer_steps = 1
         self.phase = SnapshotPhase.UPDATED
 
+
+@dataclass(slots=True)
+class PracticalSnapshotLifecycle:
+    """Allow a frozen collected batch to support a fixed number of mini-epochs."""
+
+    checkpoint_id: str
+    max_optimizer_steps: int
+    phase: SnapshotPhase = SnapshotPhase.READY
+    optimizer_steps: int = 0
+
+    def __post_init__(self) -> None:
+        if self.max_optimizer_steps not in {2, 3}:
+            raise ValueError("practical mini-epochs must be exactly two or three")
+
+    def begin_collection(self, *, rollout_checkpoint: str, branch_checkpoint: str) -> None:
+        if self.phase is not SnapshotPhase.READY:
+            raise RuntimeError(f"cannot begin collection from {self.phase}")
+        if rollout_checkpoint != self.checkpoint_id or branch_checkpoint != self.checkpoint_id:
+            raise ValueError("rollout and branch roles must serve the exact snapshot")
+        self.phase = SnapshotPhase.COLLECTING
+
+    def finish_collection(self) -> None:
+        if self.phase is not SnapshotPhase.COLLECTING:
+            raise RuntimeError(f"cannot finish collection from {self.phase}")
+        self.phase = SnapshotPhase.COLLECTED
+
+    def record_optimizer_step(self) -> None:
+        if self.phase is not SnapshotPhase.COLLECTED:
+            raise RuntimeError(f"cannot update from {self.phase}")
+        if self.optimizer_steps >= self.max_optimizer_steps:
+            raise RuntimeError("fixed mini-epoch budget is exhausted")
+        self.optimizer_steps += 1
+        if self.optimizer_steps == self.max_optimizer_steps:
+            self.phase = SnapshotPhase.UPDATED

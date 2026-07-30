@@ -5,13 +5,19 @@ import pytest
 from redco.algo.branching import (
     CommitmentStatus,
     OnlineTargetSelector,
+    RandomizedSelectiveTargetSelector,
     TokenSpan,
     assemble_stage_c_credit,
     inclusive_group_mean_advantages,
     leave_one_out_advantages,
     trajectory_rloo,
 )
-from redco.contracts import PolicyNodeKind, PrefixFeatures
+from redco.contracts import (
+    PolicyNodeKind,
+    PracticalSnapshotLifecycle,
+    PrefixFeatures,
+    SnapshotPhase,
+)
 
 
 def features(kind: PolicyNodeKind) -> PrefixFeatures:
@@ -35,6 +41,74 @@ def test_selector_logs_skip_without_root_fallback() -> None:
     selector.consider("root-1", features(PolicyNodeKind.ROOT_TURN))
 
     assert selector.finalize().status is CommitmentStatus.SKIPPED
+
+
+def test_selective_selector_preserves_a_seeded_randomized_replay_floor() -> None:
+    priority = RandomizedSelectiveTargetSelector(
+        seed=7,
+        randomized_replay_fraction=0.1,
+        priority_threshold=0.75,
+    )
+    priority_result = priority.consider(
+        "child-priority",
+        features(PolicyNodeKind.SUBCALL_OUTPUT),
+        priority_score=0.9,
+    )
+    assert priority_result.status is CommitmentStatus.COMMITTED
+    assert priority_result.selection_probability == 1.0
+    assert priority_result.selection_mode == "priority"
+
+    randomized = RandomizedSelectiveTargetSelector(
+        seed=31,
+        randomized_replay_fraction=0.1,
+        priority_threshold=0.75,
+    )
+    randomized_result = randomized.consider(
+        "child-randomized",
+        features(PolicyNodeKind.SUBCALL_OUTPUT),
+        priority_score=0.2,
+    )
+    assert randomized_result.status is CommitmentStatus.COMMITTED
+    assert randomized_result.selection_probability == 0.1
+    assert randomized_result.selection_mode == "randomized_replay"
+
+    skipped = RandomizedSelectiveTargetSelector(
+        seed=7,
+        randomized_replay_fraction=0.1,
+        priority_threshold=0.75,
+    )
+    skipped_result = skipped.consider(
+        "child-skipped",
+        features(PolicyNodeKind.SUBCALL_OUTPUT),
+        priority_score=0.2,
+    )
+    assert skipped_result.status is CommitmentStatus.SKIPPED
+    assert skipped_result.selection_probability == 0.1
+    assert skipped_result.selection_mode == "not_selected"
+
+
+@pytest.mark.parametrize("mini_epochs", [2, 3])
+def test_practical_snapshot_allows_a_frozen_fixed_mini_epoch_budget(
+    mini_epochs: int,
+) -> None:
+    lifecycle = PracticalSnapshotLifecycle("theta-0", mini_epochs)
+    lifecycle.begin_collection(
+        rollout_checkpoint="theta-0",
+        branch_checkpoint="theta-0",
+    )
+    lifecycle.finish_collection()
+
+    for step in range(mini_epochs):
+        lifecycle.record_optimizer_step()
+        expected = (
+            SnapshotPhase.UPDATED
+            if step + 1 == mini_epochs
+            else SnapshotPhase.COLLECTED
+        )
+        assert lifecycle.phase is expected
+
+    with pytest.raises(RuntimeError, match="cannot update"):
+        lifecycle.record_optimizer_step()
 
 
 def test_loo_and_stock_scaling_are_explicitly_distinct() -> None:

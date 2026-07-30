@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c7-frozen-batch-practical-loss-reuse-v1",
+  "status": "frozen_before_gpu_observation",
+  "question": "Does the exact-sequence clipped node loss execute one, two, and three optimizer updates on byte-identical copies of one frozen Stage C6 branch batch, and how do clipping and action-5 mass change with reuse?",
+  "scope": {
+    "classification": "engineering and descriptive practical-loss microcampaign",
+    "not_claimed": [
+      "fresh-rollout generalization",
+      "a new estimator comparison",
+      "a powered learning-outcome gate",
+      "an unbiased estimate of a production mini-epoch effect"
+    ],
+    "reason": "The batch and its rewards were observed in Stage C6. Reuse behavior is new, but the campaign cannot be treated as a fresh scientific arm."
+  },
+  "source": {
+    "batch": "runs/stage-c6/credit-confusion-live-v3/confusion_redundant/sliced-s9923/run_default/rollouts/step_1/train_rollouts.bin",
+    "batch_sha256": "6ceb8d2d7f476bf4ec4e370262cbe6b3351a9e80b6d28758797df9162cc75ed2",
+    "selected_initialization": {
+      "base_model": "Qwen/Qwen3-4B-Instruct-2507",
+      "stage_c2_adapter_sha256": "28fba5d421ea611db2e0d9cd411e40a0fc2035a9a45eb0bb3be24c84947e0ab6",
+      "stage_c5_adapter_sha256": "e1d56f45485eef065bae42980427ee3c88176a5c864cbb350fa8494d0370e623"
+    }
+  },
+  "arms": [
+    {
+      "name": "reuse-1",
+      "optimizer_updates": 1
+    },
+    {
+      "name": "reuse-2",
+      "optimizer_updates": 2
+    },
+    {
+      "name": "reuse-3",
+      "optimizer_updates": 3
+    }
+  ],
+  "frozen_training": {
+    "same_batch_bytes_at_every_update": true,
+    "model_seed": 7307101,
+    "lora_rank": 32,
+    "lora_alpha": 64,
+    "learning_rate": 1e-05,
+    "optimizer": "adamw",
+    "weight_decay": 0.01,
+    "max_grad_norm": 1.0,
+    "loss": "exact-sequence clipped node loss",
+    "clip_epsilon": 0.2,
+    "kl_tau": 0.001,
+    "exact_categorical_root_token_ids": [
+      7141,
+      19127,
+      32214,
+      20255
+    ],
+    "arm_order": [
+      "reuse-1",
+      "reuse-2",
+      "reuse-3"
+    ]
+  },
+  "decision": {
+    "integration_pass": [
+      "each arm completes exactly its declared optimizer-update count",
+      "each optimizer step has finite grad norm, node ratio, node clipping, and node KL metrics",
+      "each arm emits its declared final adapter",
+      "canonical action scoring completes for warmstart and all three final adapters"
+    ],
+    "descriptive_outcomes": [
+      "mean action-5 mass at temperature 2",
+      "node clipping fraction by update",
+      "node ratio by update",
+      "gradient norm by update",
+      "wall time"
+    ],
+    "no_monotonic_learning_requirement": true
+  },
+  "repair_policy": {
+    "before_any_optimizer_step": "One outcome-independent environment repair and redeployment is allowed if documented and committed.",
+    "after_any_optimizer_step": "Never retry or rerun an observed arm. Recover artifacts and report the terminal result."
+  },
+  "hardware": {
+    "gpu_count": 1,
+    "allowed_non_spot_types": [
+      "A6000",
+      "RTX 6000 Ada",
+      "L40",
+      "L40S",
+      "A40",
+      "RTX 8000"
+    ],
+    "maximum_hourly_rate_usd": 1.0,
+    "forbidden": [
+      "A100",
+      "H100",
+      "spot or preemptible compute",
+      "persistent storage"
+    ]
+  },
+  "resource_policy": {
+    "maximum_total_compute_usd": 2.0,
+    "one_pod_only": true,
+    "terminate_after_artifact_recovery": true,
+    "persistent_disks": 0,
+    "retain_locally": [
+      "preregistration and audit",
+      "rendered trainer configs",
+      "metrics and logs",
+      "canonical action scores",
+      "signed verifier result",
+      "adapter hashes"
+    ],
+    "do_not_retain_locally": [
+      "merged 4B models",
+      "optimizer state",
+      "CUDA or uv caches",
+      "final adapters"
+    ]
+  },
+  "source_sha256": {
+    "configs/stage-c7/frozen-reuse-trainer.template.toml": "cc2514e057c46c63fbc7ca4a2fa33f3feded7e01ff56873dde2b47eb9d0dc3ba",
+    "patches/prime-rl-redco-stage-c7-practical-loss.patch": "5376d026532edf06995e0248027d4d2c50c34c19c99fe30343a5503117f942f0",
+    "scripts/render_stage_c7_reuse_config.py": "ea32b9d44927377d7d7057d3222e6e7a6cd61e0b9335b1ca1910aa5f28930db5",
+    "scripts/run_stage_c7_frozen_reuse_live.sh": "a3cda200dc821e75fbb2a92a06ea36859bbb1393854145cf80f77e138c545876",
+    "src/redco/analysis/stage_c7_live_reuse.py": "651c98645428c251683ab291ca71dfb99613a916873369182475fcbc7ae7cf8c"
+  }
+}

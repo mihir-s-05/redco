@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "analysis": "stage-c7-frozen-reuse-preregistration-audit-v1",
+  "status": "passed",
+  "checks": {
+    "batch_exists_and_sha256_matches": true,
+    "selected_adapter_sha256_values_match": true,
+    "template_renders_and_parses_as_toml": true,
+    "bash_driver_syntax_valid": true,
+    "incremental_prime_patch_applies_after_stage_c6_patch": true,
+    "practical_loss_cpu_tests_pass": true,
+    "local_targeted_tests_pass": true,
+    "no_scientific_outcome_observed": true,
+    "resource_ceiling_at_most_2_usd": true,
+    "no_persistent_storage": true
+  },
+  "validation": {
+    "local_targeted_tests_passed": 16,
+    "external_prime_cpu_tests_passed": 6
+  },
+  "preregistration": "configs/stage-c7/frozen-reuse-live-preregistration-v1.json"
+}
