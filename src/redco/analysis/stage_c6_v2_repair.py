@@ -43,6 +43,10 @@ def audit(
         }
         for path, values in changed.items()
     }
+    added_source_checks = {
+        path: _sha256(root / path) == expected
+        for path, expected in amendment["added_repair_audit_source_sha256"].items()
+    }
     evidence_checks = {
         path: _sha256(attempt_root / path) == expected
         for path, expected in amendment["attempt_1"][
@@ -89,6 +93,9 @@ def audit(
                 all(values.values())
                 for values in changed_source_checks.values()
             )
+        ),
+        "added_repair_audit_sources_match": all(
+            added_source_checks.values()
         ),
         "all_attempt_evidence_hashes_match": all(evidence_checks.values()),
         "model_identity_passed": identity["status"] == "passed",
@@ -137,5 +144,6 @@ def audit(
         "checks": checks,
         "unchanged_source_checks": unchanged_source_checks,
         "changed_source_checks": changed_source_checks,
+        "added_source_checks": added_source_checks,
         "evidence_checks": evidence_checks,
     }
