@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "status": "frozen_before_live_judge_model_call",
+  "objective": "Accept or reject one separately frozen local evidence judge before it can supply any Stage D learning reward.",
+  "scope": {
+    "allowed": "judge calibration only",
+    "forbidden": [
+      "optimizer steps",
+      "policy rollouts",
+      "GA-D-lite",
+      "Stage D1 scientific arms"
+    ]
+  },
+  "reference_lock": {
+    "path": "configs/stage-d/stage-d0-reference-lock-v1.json",
+    "sha256": "62c535dc67eb62be1571e967b72ffbf834282017f51fcbf98f2f2b4ebc08c9d2"
+  },
+  "judge": {
+    "model": "Qwen/Qwen3-8B",
+    "revision": "b968826d9c46dd6066d109eabc6255188de91218",
+    "served_model_name": "Qwen/Qwen3-8B",
+    "deployment": {
+      "gpu_index": 1,
+      "dtype": "bfloat16",
+      "max_model_len": 8192,
+      "gpu_memory_utilization": 0.9,
+      "prefix_caching": true
+    },
+    "decoding": {
+      "temperature": 0,
+      "top_p": 1,
+      "max_tokens": 384,
+      "enable_thinking": false,
+      "structured_output": false
+    },
+    "transport": {
+      "openai_sdk_version": "2.38.0",
+      "maximum_transport_retries": 2,
+      "whole_call_retries": 0,
+      "parse_failure_retries": 0
+    }
+  },
+  "calibration": {
+    "path": "datasets/stage-d/evidence-judge-calibration-v1.jsonl",
+    "cases": 12,
+    "repeats_per_case": 3,
+    "total_model_calls": 36,
+    "strong_verdict_threshold": 7,
+    "acceptance": {
+      "parse_failures": 0,
+      "repeat_disagreements": 0,
+      "minimum_balanced_accuracy": 0.8
+    }
+  },
+  "repair_policy": {
+    "maximum_redeployments": 1,
+    "allowed_only_if": "A demonstrated outcome-independent infrastructure failure occurs before the first calibration response is saved.",
+    "forbidden_after": "Any calibration response from the frozen judge has been observed or saved.",
+    "never_change": [
+      "model or revision",
+      "prompt or rubric",
+      "calibration cases",
+      "decoding",
+      "repeats",
+      "thresholds"
+    ]
+  },
+  "resource_policy": {
+    "maximum_live_minutes": 50,
+    "maximum_judge_gate_cost_usd": 1.25,
+    "persistent_storage": false,
+    "qualifying_hardware": "exactly one non-spot 2x48GB RTX 6000 Ada, L40, or L40S node at no more than $2.00/hour",
+    "keep_pod_if_passes": "Only while locally verifying and freezing GA-D-lite; the aggregate Stage D0 compute cap remains $4.00."
+  },
+  "launcher": "scripts/run_stage_d0_judge_audit.sh",
+  "run_root": "runs/stage-d0/judge-audit-v1",
+  "frozen_source_hashes": {
+    "scripts/run_stage_d0_judge_audit.sh": "aa14e247c2b33624c2609db2079bf0c7b82599dd6d160afa89da5ebfb65439db",
+    "scripts/run_stage_d_judge_calibration.py": "b179dd22e5d069af6e423c5dc37e3d14ad5fe437b4dd02a3190847ebb8095acd",
+    "scripts/audit_stage_d_judge_calibration.py": "79d9034742f150188df66e1dba8dd1693656c76bfd70ff17004c1ac95b215f0b",
+    "configs/stage-d/evidence-judge-prompt-v1.txt": "04c1f7bc169b2c9ca7bb431174d2a972b67e66baf6d385d12e7172b14c937dba",
+    "configs/stage-d/evidence-judge-rubric-v1.json": "7d8f06024d702564e0ed029cd860f4bef92dd79c6ff2c25142318bcef096fabd",
+    "datasets/stage-d/evidence-judge-calibration-v1.jsonl": "4389e96844d8000dad2cc3a70f46b5fcc6f8bd611508d2512f9c4bdbb8022498"
+  },
+  "decision": {
+    "pass": "All acceptance conditions pass exactly. This accepts only the judge; GA-D-lite still requires a separately frozen protocol.",
+    "fail": "Reject this judge and do not run GA-D-lite or Stage D1 with it."
+  }
+}

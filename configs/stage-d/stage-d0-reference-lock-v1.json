@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "status": "cpu_d0_reference_lock",
+  "scope": {
+    "stage_d0": "single-paper port, trace contract, judge audit, ledgers, and GA-D-lite stock reproduction",
+    "stage_d1": "forbidden until every Stage D0 blocking gate passes",
+    "ga_d_lite_claim": "budget-bounded 4B LoRA learning-path reproduction, not GA-full"
+  },
+  "pinned_stack": {
+    "prime_rl_commit": "3b22dd951cad1036d1fe8dd0a0bfc40807a9b360",
+    "verifiers_commit": "b13ba60da63cea91389e7575766b7270d0d11fc5",
+    "research_environments_commit": "f5d423c3210cd438b3923da4d4e2494745c06e00",
+    "rlm_commit": "56218f33796ecbe465445bc43948886354fde196",
+    "skyrl_reference_commit": "b5fdfd0801014b04aa021a746a5c1c30101a1407"
+  },
+  "skyrl_reference_files": {
+    "examples/train/rlm/multi_paper_env/evidence_rlm_env.py": "03d13e7e38b6c245d82b0e540e7dae2c6222f3780ef7cc7aaf0771aa13589bda",
+    "examples/train/rlm/multi_paper_env/evidence_rewards.py": "0890a16efaf6ec13a912d3f705111326c2dd8c4444c62213ba7813f4d137854f",
+    "examples/train/rlm/multi_paper_env/paper_tools.py": "4b0399df1793b34ae04c593205f2655d266a259c40e13a467e216d216467e9db",
+    "examples/train/rlm/rlm_dataset_synthetic_multi.py": "0c015f71e8267cd90510b03fdb977c2c33620703aa80239761985e62f7617d24",
+    "examples/train/rlm/run_multi_paper_rlm.sh": "a402a4301193fe9b16e6c83c16ab9cacde0dcaa4d4341f7ef9519ec15ba58895"
+  },
+  "local_stack_files": {
+    "external/prime-rl/deps/verifiers/verifiers/v1/harnesses/rlm/harness.py": "7a8b90a790e61fa362d7f8cfa020f4738590cfbd60c9fb4e85b737c9d40a4fde",
+    "external/prime-rl/deps/verifiers/verifiers/v1/judges/rubric.py": "1c45852e14ca60f3ba735bae638158da2283c909da9fee8388b07935e42988f2",
+    "external/prime-rl/deps/verifiers/verifiers/v1/judges/rubric.txt": "dca03665e61875c0f07898541a8a71bbd105800461bb66967ede52e5c8fc05cf",
+    "external/prime-rl/deps/verifiers/verifiers/v1/judge.py": "bb5e5eed85cf50a8be0d686a4ebc2c472d0ced44e3eced34eba4709be4405e65"
+  },
+  "structural_patches": {
+    "patches/rlm-structural-trace-headers.patch": "589d412de4aff70ecfd52e35e474ef42c9033e5a221c7db9929ee838b24bcfb9",
+    "patches/rlm-root-initial-required-tool-choice.patch": "9730e59d2fc161e2b0dc69bccafca5fc07fe1b94ded06b8c9647e8d3d5a41c75",
+    "patches/verifiers-rlm-structural-trace.patch": "95db874f84fdd1487399d6ee77b11f1726e7ff27c14d0626a1a7e6f2c664b577"
+  },
+  "stage_d0_assets": {
+    "configs/stage-d/evidence-judge-prompt-v1.txt": "04c1f7bc169b2c9ca7bb431174d2a972b67e66baf6d385d12e7172b14c937dba",
+    "configs/stage-d/evidence-judge-rubric-v1.json": "7d8f06024d702564e0ed029cd860f4bef92dd79c6ff2c25142318bcef096fabd",
+    "datasets/stage-d/evidence-judge-calibration-v1.jsonl": "4389e96844d8000dad2cc3a70f46b5fcc6f8bd611508d2512f9c4bdbb8022498",
+    "environments/redco_evidence_selection_v1/redco_evidence_selection_v1/taskset.py": "dc24795a15ba244e8a105c2e27c5b0eb7f7af57cad8a81e609c8f7e960b2ccd6",
+    "environments/redco_evidence_selection_v1/redco_evidence_selection_v1/scoring.py": "b0024acf38f1b1365c40a33784d180acb58f335804541b6083d3d908d9dfde05",
+    "src/redco/analysis/stage_d_ledger.py": "1f6519f83846d49dd2ae331ffe5cac63d2c190ba5b8ce56540806e53f144bae5",
+    "src/redco/analysis/stage_d_trace_contract.py": "faa48a0c04a8c8f62cc4946d3f23ebc748904f9b287d578c8dde428aac879f58",
+    "scripts/run_stage_d_judge_calibration.py": "b179dd22e5d069af6e423c5dc37e3d14ad5fe437b4dd02a3190847ebb8095acd",
+    "scripts/audit_stage_d_judge_calibration.py": "79d9034742f150188df66e1dba8dd1693656c76bfd70ff17004c1ac95b215f0b"
+  },
+  "datasets": {
+    "upstream_alphaxiv_dataset": {
+      "id": "alphaXiv/multi-paper-synthetic",
+      "status": "not_publicly_resolvable_without_credentials",
+      "disposition": "Do not claim exact upstream data reproduction."
+    },
+    "ga_d_lite_snapshot": {
+      "id": "allenai/qasper",
+      "source_revision": "fdc9d8214fbab5dd782958601db4d678e6934a54",
+      "converted_parquet_revision": "06806e4608976fc2fac0a090ac425d5b2b29caf4",
+      "license": "cc-by-4.0",
+      "path": "datasets/stage-d/qasper-ga-d-lite-v1.jsonl",
+      "sha256": "769758feac85016d1e70f81ee18e8434f56ac28d57570a2957a062bb77a172cd",
+      "train_examples": 32,
+      "validation_examples": 16
+    }
+  },
+  "judge_candidate": {
+    "status": "candidate_not_yet_accepted",
+    "model": "Qwen/Qwen3-8B",
+    "revision": "b968826d9c46dd6066d109eabc6255188de91218",
+    "role_separation": "separate frozen judge; never the moving policy",
+    "decoding": {
+      "temperature": 0,
+      "top_p": 1,
+      "max_tokens": 384,
+      "enable_thinking": false,
+      "structured_output": false
+    },
+    "prompt_path": "configs/stage-d/evidence-judge-prompt-v1.txt",
+    "rubric_path": "configs/stage-d/evidence-judge-rubric-v1.json",
+    "transport_retry_policy": {
+      "openai_sdk_version": "2.38.0",
+      "maximum_transport_retries": 2,
+      "whole_judge_call_retries": 0,
+      "parse_failure_retries": 0
+    },
+    "acceptance_gate": {
+      "repeats_per_case": 3,
+      "parse_failures": 0,
+      "repeat_disagreements": 0,
+      "minimum_balanced_accuracy": 0.8
+    }
+  },
+  "resource_policy": {
+    "wallet_observed_usd": 17.7968,
+    "stage_d0_compute_cap_usd": 4.0,
+    "reserve_after_d0_usd": 4.0,
+    "persistent_storage": false,
+    "live_hardware": "one non-spot 2x48GB node at no more than $2.00/hour",
+    "keep_one_authorized_pod_alive_across_judge_audit_and_ga_d_lite": true
+  }
+}

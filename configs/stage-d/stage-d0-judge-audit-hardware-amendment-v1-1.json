@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "amends": "configs/stage-d/stage-d0-judge-audit-preregistration-v1.json",
+  "change_class": "hardware_only",
+  "resource": {
+    "resource_id": "e0cf54",
+    "cloud_id": "gpu_2x_6000_ada",
+    "gpu_type": "RTX6000Ada 48GB",
+    "gpu_count": 2,
+    "provider": "massedcompute",
+    "location": "US",
+    "is_spot": false,
+    "price_per_hour_usd": 1.5,
+    "availability_observed": "Available"
+  },
+  "scientific_fields_changed": false
+}

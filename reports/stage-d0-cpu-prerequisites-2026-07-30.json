@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "reference_lock": {
+    "path": "configs/stage-d/stage-d0-reference-lock-v1.json",
+    "sha256": "62c535dc67eb62be1571e967b72ffbf834282017f51fcbf98f2f2b4ebc08c9d2"
+  },
+  "commit_checks": {
+    "prime_rl": {
+      "expected": "3b22dd951cad1036d1fe8dd0a0bfc40807a9b360",
+      "observed": "3b22dd951cad1036d1fe8dd0a0bfc40807a9b360",
+      "passes": true
+    },
+    "verifiers": {
+      "expected": "b13ba60da63cea91389e7575766b7270d0d11fc5",
+      "observed": "b13ba60da63cea91389e7575766b7270d0d11fc5",
+      "passes": true
+    }
+  },
+  "hash_checks": {
+    "local_stack_files": {
+      "files": 4,
+      "passes": true,
+      "mismatches": {}
+    },
+    "structural_patches": {
+      "files": 3,
+      "passes": true,
+      "mismatches": {}
+    },
+    "stage_d0_assets": {
+      "files": 9,
+      "passes": true,
+      "mismatches": {}
+    }
+  },
+  "dataset_check": {
+    "path": "datasets/stage-d/qasper-ga-d-lite-v1.jsonl",
+    "expected_sha256": "769758feac85016d1e70f81ee18e8434f56ac28d57570a2957a062bb77a172cd",
+    "observed_sha256": "769758feac85016d1e70f81ee18e8434f56ac28d57570a2957a062bb77a172cd",
+    "expected_split_counts": {
+      "train": 32,
+      "validation": 16
+    },
+    "observed_split_counts": {
+      "train": 32,
+      "validation": 16
+    },
+    "invalid_evidence_examples": [],
+    "passes": true
+  },
+  "calibration_check": {
+    "cases": 12,
+    "criterion_labels": {
+      "negative": 12,
+      "positive": 12
+    },
+    "unique_case_ids": 12,
+    "passes": true
+  },
+  "taskset_check": {
+    "task_counts": {
+      "train": 32,
+      "validation": 16
+    },
+    "passes": true
+  },
+  "trace_check": {
+    "path": "reports/stage-d0-rlm-trainable-contract-2026-07-30.json",
+    "cpu_trainable_trace_contract": "pass",
+    "all_sampled_tokens_routed_once": true,
+    "stage_d_science_ready": false,
+    "passes": true
+  },
+  "decision": {
+    "cpu_prerequisites": "pass",
+    "ready_for_live_judge_audit": true,
+    "ready_for_ga_d_lite": false,
+    "ready_for_stage_d1": false,
+    "remaining_gates": [
+      "live frozen-judge calibration",
+      "checkpoint-stamped Prime training trace",
+      "GA-D-lite stock learning reproduction"
+    ]
+  }
+}

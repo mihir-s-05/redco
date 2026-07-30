@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "source": {
+    "path": "runs/stage-b/rlm-multi-child-return-strict-trace/live/traces.jsonl",
+    "sha256": "e3e9a4ca37ed0e44d0647cc3f5b45dcad83350f29d479f5fb391505a33fceea1"
+  },
+  "structural_contract": {
+    "model_calls": 6,
+    "root_calls": 2,
+    "child_calls": 4,
+    "linked_child_calls": 4,
+    "sampled_call_nodes": 6,
+    "exact_token_call_nodes": 6,
+    "behavior_seeded_calls": 6,
+    "checkpoint_stamped": false,
+    "trace_contract_passes": true,
+    "stage_d_science_ready": false
+  },
+  "prime_trace_to_samples": {
+    "branches": 5,
+    "samples": 5,
+    "sample_token_lengths": [
+      1014,
+      1044,
+      1044,
+      1085,
+      1970
+    ],
+    "trainable_tokens_per_sample": [
+      70,
+      99,
+      99,
+      139,
+      138
+    ],
+    "advantaged_tokens_per_sample": [
+      70,
+      99,
+      99,
+      139,
+      138
+    ],
+    "trace_output_tokens": 545,
+    "all_sampled_tokens_routed_once": true,
+    "passes": true
+  },
+  "decision": {
+    "cpu_trainable_trace_contract": "pass",
+    "stage_d_science_ready": false,
+    "remaining_blocker": "policy checkpoint/version must be demonstrated on a Prime training trace"
+  }
+}
