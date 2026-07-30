@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal, cast
 
-Mode = Literal["smoke", "arm"]
+Mode = Literal["smoke", "arm", "constraint"]
 
 
 def first_training_row(metrics_path: Path) -> dict[str, Any] | None:
@@ -35,7 +35,7 @@ def check_first_training_row(
             == 1.0
         ),
     }
-    if mode == "smoke":
+    if mode in {"smoke", "constraint"}:
         checks.update(
             {
                 "every_root_route_parseable": (
@@ -43,7 +43,12 @@ def check_first_training_row(
                         "train/agg/all/metrics/redco_valid_route/mean"
                     )
                     == 1.0
-                ),
+                )
+            }
+        )
+    if mode == "smoke":
+        checks.update(
+            {
                 "nonzero_trainable_fraction": (
                     float(
                         row.get(

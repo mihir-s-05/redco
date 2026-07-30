@@ -74,3 +74,34 @@ def test_arm_gate_rejects_context_budget_regression() -> None:
 
     assert result["passed"] is False
     assert result["checks"]["root_completion_budget_contract"] is False
+
+
+def test_constraint_gate_accepts_constant_untrainable_valid_routes() -> None:
+    row = _row()
+    row.update(
+        {
+            "train/agg/all/reward/mean": 0.0,
+            "train/agg/all/reward/min": 0.0,
+            "train/agg/all/reward/max": 0.0,
+            "train/agg/all/is_trainable/mean": 0.0,
+        }
+    )
+
+    result = check_first_training_row(row, mode="constraint")
+
+    assert result["passed"] is True
+    assert result["checks"] == {
+        "no_rollout_errors": True,
+        "root_completion_budget_contract": True,
+        "every_root_route_parseable": True,
+    }
+
+
+def test_constraint_gate_rejects_unparseable_routes() -> None:
+    row = _row()
+    row["train/agg/all/metrics/redco_valid_route/mean"] = 0.0
+
+    result = check_first_training_row(row, mode="constraint")
+
+    assert result["passed"] is False
+    assert result["checks"]["every_root_route_parseable"] is False

@@ -89,7 +89,11 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--result", type=Path, required=True)
-    parser.add_argument("--mode", choices=("smoke", "arm"), required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("smoke", "arm", "constraint"),
+        required=True,
+    )
     parser.add_argument("--invariant-timeout-seconds", type=int, default=900)
     args = parser.parse_args()
     raise SystemExit(

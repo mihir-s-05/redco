@@ -8,6 +8,7 @@ prime_env="${REDCO_UV_ENVIRONMENT:-/workspace/.venv-prime-stage-c5}"
 prime_cache="${REDCO_UV_CACHE_DIR:-/workspace/.uv-cache-prime-stage-c5}"
 campaign_version="${REDCO_STAGE_C5_CAMPAIGN_VERSION:-v1}"
 run_seed="${REDCO_STAGE_C5_RUN_SEED:-7203005}"
+runtime_regression="${REDCO_STAGE_C5_RUNTIME_REGRESSION:-0}"
 config="configs/stage-c5/factorized-warmstart-sft-${campaign_version}.toml"
 smoke_config="configs/stage-c5/constrained-interface-smoke-${campaign_version}.toml"
 dataset="datasets/stage-c4/factorized-warmstart.jsonl"
@@ -21,6 +22,74 @@ sft_run="runs/stage-c5/warmstart-sft-${campaign_version}"
 selection_root="runs/stage-c5/warmstart-selection-${campaign_version}"
 selected_root="runs/stage-c5/warmstart-selected-${campaign_version}"
 candidate_merged="$selection_root/work/merged-candidate"
+
+uv_prime=(
+  uv run --frozen --project external/prime-rl
+  --extra flash-attn
+  --with-editable "$repo_root"
+)
+
+build_candidate_scorer_commands() {
+  local step="$1"
+  action_score_command=(
+    "${uv_prime[@]}" python scripts/run_signed_vllm_scorer.py
+    --output "$candidate_dir/action-scores.json"
+    --verified "$candidate_dir/action-scores.verified.json"
+    --expected-cases-sha256 "$action_cases_signed"
+    --expected-model "$candidate_merged"
+    --
+    python scripts/score_stage_c_policies_vllm.py
+    --cases "$action_cases"
+    --model "$candidate_merged"
+    --model-name "candidate_step_${step}"
+    --tensor-parallel-size 1
+    --gpu-memory-utilization 0.7
+    --output "$candidate_dir/action-scores.json"
+  )
+  root_score_command=(
+    "${uv_prime[@]}" python scripts/run_signed_vllm_scorer.py
+    --output "$candidate_dir/root-scores.json"
+    --verified "$candidate_dir/root-scores.verified.json"
+    --expected-cases-sha256 "$root_cases_signed"
+    --expected-model "$candidate_merged"
+    --expected-analysis stage-c3-root-route-sequence-scores
+    --
+    python scripts/score_stage_c3_root_routes_vllm.py
+    --cases "$root_cases"
+    --model "$candidate_merged"
+    --tensor-parallel-size 1
+    --gpu-memory-utilization 0.7
+    --output "$candidate_dir/root-scores.json"
+  )
+}
+
+command_contains_argument() {
+  local expected="$1"
+  shift
+  local argument
+  for argument in "$@"; do
+    if test "$argument" = "$expected"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+if test "$runtime_regression" = "1"; then
+  action_cases_signed="runtime-regression-action-signature"
+  root_cases_signed="runtime-regression-root-signature"
+  candidate_dir="$selection_root/candidates/step_2"
+  build_candidate_scorer_commands 2
+  command_contains_argument "$action_cases_signed" \
+    "${action_score_command[@]}"
+  command_contains_argument "$root_cases_signed" \
+    "${root_score_command[@]}"
+  printf '%s\n' \
+    "stage-c5-runtime-regression=passed" \
+    "action-signature=${action_cases_signed}" \
+    "root-signature=${root_cases_signed}"
+  exit 0
+fi
 
 cd "$repo_root"
 test -f "$config"
@@ -47,12 +116,6 @@ export VLLM_USE_FLASHINFER_SAMPLER=0
 export XDG_CONFIG_HOME="$repo_root/.runtime-config"
 export PYTHONPATH="$repo_root/src:$repo_root/scripts"
 mkdir -p "$XDG_CONFIG_HOME" "$selection_root/candidates" "$selection_root/work"
-
-uv_prime=(
-  uv run --frozen --project external/prime-rl
-  --extra flash-attn
-  --with-editable "$repo_root"
-)
 
 selection_status=1
 finish() {
@@ -127,7 +190,7 @@ export REDCO_REQUIRED_MODEL_DIR="$base_merged"
   --config "$smoke_config" \
   --output-dir "$smoke_run" \
   --result "$selection_root/constrained-smoke-supervisor.json" \
-  --mode smoke \
+  --mode constraint \
   --invariant-timeout-seconds 900
 
 "${uv_prime[@]}" python scripts/verify_stage_c5_constraint_smoke.py \
@@ -172,35 +235,12 @@ for step in $(seq 2 2 32); do
     --output "$candidate_merged" \
     --manifest "$candidate_dir/merge-manifest.json"
 
-  CUDA_VISIBLE_DEVICES=0 "${uv_prime[@]}" python scripts/run_signed_vllm_scorer.py \
-    --output "$candidate_dir/action-scores.json" \
-    --verified "$candidate_dir/action-scores.verified.json" \
-    --expected-cases-sha256 "$action_cases_signed" \
-    --expected-model "$candidate_merged" \
-    -- \
-    python scripts/score_stage_c_policies_vllm.py \
-      --cases "$action_cases" \
-      --model "$candidate_merged" \
-      --model-name "candidate_step_${step}" \
-      --tensor-parallel-size 1 \
-      --gpu-memory-utilization 0.7 \
-      --output "$candidate_dir/action-scores.json" \
+  build_candidate_scorer_commands "$step"
+  CUDA_VISIBLE_DEVICES=0 "${action_score_command[@]}" \
     >"$candidate_dir/action-score.log" 2>&1 &
   action_pid=$!
 
-  CUDA_VISIBLE_DEVICES=1 "${uv_prime[@]}" python scripts/run_signed_vllm_scorer.py \
-    --output "$candidate_dir/root-scores.json" \
-    --verified "$candidate_dir/root-scores.verified.json" \
-    --expected-cases-sha256 "$root_cases_signed" \
-    --expected-model "$candidate_merged" \
-    --expected-analysis stage-c3-root-route-sequence-scores \
-    -- \
-    python scripts/score_stage_c3_root_routes_vllm.py \
-      --cases "$root_cases" \
-      --model "$candidate_merged" \
-      --tensor-parallel-size 1 \
-      --gpu-memory-utilization 0.7 \
-      --output "$candidate_dir/root-scores.json" \
+  CUDA_VISIBLE_DEVICES=1 "${root_score_command[@]}" \
     >"$candidate_dir/root-score.log" 2>&1 &
   root_pid=$!
 
