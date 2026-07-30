@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c7-frozen-batch-practical-loss-reuse-v1",
+  "amendment": "hardware-only-v1-1",
+  "status": "frozen_before_provisioning",
+  "resource": {
+    "id": "03c728",
+    "cloud_id": "gpu_1x_6000_ada",
+    "gpu_type": "RTX6000Ada 48GB",
+    "gpu_count": 1,
+    "provider": "massedcompute",
+    "location": "US",
+    "socket": "PCIe",
+    "security": "datacenter",
+    "stock_status_at_selection": "Available",
+    "price_per_hour_usd": 0.75,
+    "vcpus": 12,
+    "memory_gb": 72,
+    "ephemeral_disk_gb": 350,
+    "persistent_disk": false,
+    "pricing": "on-demand, non-preemptible"
+  },
+  "unchanged": [
+    "frozen batch bytes and SHA-256",
+    "selected initialization",
+    "three arm update counts and order",
+    "seed",
+    "optimizer and loss settings",
+    "decision and descriptive metrics",
+    "repair policy",
+    "artifact policy",
+    "2 USD compute ceiling"
+  ]
+}
