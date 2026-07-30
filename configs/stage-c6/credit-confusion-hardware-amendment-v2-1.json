@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c6-credit-confusion-live-v2",
+  "amendment": "hardware-only-v2-1",
+  "frozen_at_local_date": "2026-07-29",
+  "parent_protocol": "configs/stage-c6/credit-confusion-live-preregistration-v2.json",
+  "parent_protocol_sha256": "079cb44208427111b1944161fe2697eb4f2e44703397305b0627b2c68e9a844b",
+  "passing_audit": "reports/stage-c6-credit-confusion-live-preregistration-audit-v2.json",
+  "passing_audit_sha256": "cc582974a05dc70698b898c67cea2b3dbe1c9595836ca5f6e6a2f35cd081c4b4",
+  "resource": {
+    "resource_id": "cc7cf9",
+    "cloud_id": "gpu_2x_6000_ada",
+    "gpu_type": "RTX6000Ada 48GB",
+    "gpu_count": 2,
+    "gpu_memory_total_gb": 96,
+    "provider": "massedcompute",
+    "location": "US",
+    "security": "datacenter",
+    "spot": false,
+    "price_per_hour_usd": 1.5,
+    "vcpus": 26,
+    "memory_gb": 144,
+    "ephemeral_disk_gb": 700,
+    "persistent_storage": false
+  },
+  "availability_observed": "Available",
+  "wallet_before_provisioning_usd": 25.4474,
+  "scientific_changes": false,
+  "unchanged": [
+    "initialization bytes and model-identity rule",
+    "canonical scorer settings and three-replicate rule",
+    "factorization and runtime-power thresholds",
+    "tasks, arms, fresh seeds, run order, and call budgets",
+    "optimizer and constrained-policy settings",
+    "scientific metrics and decision rules",
+    "repair and redeployment policy",
+    "cost ceiling and artifact-retention policy"
+  ]
+}
