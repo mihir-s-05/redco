@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c8-safe-single-adapter-two-update-reuse-v1",
+  "amendment": "hardware-only-v1-1",
+  "status": "frozen_before_provisioning",
+  "resource": {
+    "id": "7574d6",
+    "cloud_id": "gpu_1x_a6000",
+    "gpu_type": "A6000 48GB",
+    "gpu_count": 1,
+    "provider": "massedcompute",
+    "location": "US",
+    "socket": "PCIe",
+    "security": "datacenter",
+    "stock_status_at_selection": "Available",
+    "price_per_hour_usd": 0.54,
+    "vcpus": 6,
+    "memory_gb": 48,
+    "ephemeral_disk_gb": 256,
+    "persistent_disk": false,
+    "pricing": "on-demand, non-preemptible"
+  },
+  "selection": "Cheapest genuinely available eligible non-spot 48 GB GPU.",
+  "unchanged": [
+    "raw grouped-MM cases, order, shapes, tolerance, and interpretations",
+    "safe fallback source and tests",
+    "frozen example stream and normalized batch bytes",
+    "two-update single-process trainer",
+    "seed, optimizer, and loss settings",
+    "decision and repair policy",
+    "one-dollar compute ceiling",
+    "artifact policy"
+  ]
+}
