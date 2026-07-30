@@ -1,0 +1,187 @@
+{
+  "analysis": "stage-c5-constrained-candidate-rescore",
+  "candidate": {
+    "analysis": "stage-c4-factorized-warmstart-candidate",
+    "campaign_power": {
+      "analysis": "stage-c3-v3-exact-informativeness-power",
+      "checks": {
+        "delta_route_mass_at_least_0_02": true,
+        "expected_target_informative_groups_per_sliced_step_at_least_5": true,
+        "irrelevant_root_group_informative_probability_at_least_0_50": true,
+        "mean_digit_5_mass_between_0_03_and_0_35": true,
+        "mean_normalized_digit_entropy_at_least_1_25": true,
+        "mean_valid_digit_mass_at_least_0_90": true,
+        "non_delta_route_mass_at_least_0_10": true,
+        "redundant_broadcast_group_informative_probability_at_least_0_50": true,
+        "scientific_sampling_false_abort_probability_is_zero": true,
+        "valid_route_sequence_mass_at_least_0_90": true
+      },
+      "measurements": {
+        "digit_5_mass_by_route_t2": {
+          "alpha": 0.09600810666454125,
+          "beta": 0.09001838625382164,
+          "delta": 0.10573045387072624,
+          "gamma": 0.11094748277000271
+        },
+        "expected_irrelevant_root_groups_broadcast_run": 35.98729519945923,
+        "expected_irrelevant_root_groups_sliced_run": 5.997882533243205,
+        "expected_target_informative_groups_per_sliced_step": 5.512463733128073,
+        "invalid_route_mass_upper_bound_t2": 0.0,
+        "mean_digit_5_mass_t2": 0.10067610738977296,
+        "mean_normalized_digit_entropy_t2": 2.062652354198803,
+        "mean_valid_digit_mass_t2": 0.9615632987841569,
+        "redundant_broadcast_group_informative_probability_lower": 0.8393569163296926,
+        "redundant_success_mass_bounds": [
+          0.20433230218931295,
+          0.20433230218931295
+        ],
+        "root_group_informative_probability": 0.9996470888738676,
+        "route_sequence_probabilities_t2": {
+          "alpha": 0.3136450816309136,
+          "beta": 0.21556490195044622,
+          "delta": 0.11538357735655194,
+          "gamma": 0.35540643906208824
+        },
+        "sampling_dependent_early_abort_rules": 0,
+        "sampling_false_abort_probability": 0.0,
+        "target_branch_group_informative_probability": 0.6890579666410092,
+        "valid_route_sequence_mass_t2": 1.0
+      },
+      "schema_version": 1,
+      "signed_payload_sha256": "58945c654f005c19bc9f746cbe2406dd4a2eae93eb4de677f3cba87516e0d339",
+      "sources": {
+        "action_score_case_sha256": "c6fa2551661173579b7a15588d6434fd9241fc7df9e05258ec3a027c476fa955",
+        "route_score_case_sha256": "0274d78b630201b5363fcc1a6348eef3aa1a52c33153e0a25627d4cfb2dfcff9"
+      },
+      "status": "passed"
+    },
+    "checks": {
+      "all_unchanged_v3_power_checks_pass": true,
+      "delta_route_mass_in_0_10_to_0_35": true,
+      "every_route_mass_at_least_0_05": true,
+      "expected_target_groups_at_least_5_5": true,
+      "factorized_dataset_audit_passed": true,
+      "maximum_route_mass_at_most_0_55": true,
+      "mean_digit_5_mass_in_0_05_to_0_25": true,
+      "mean_digit_entropy_at_least_1_40": true,
+      "mean_valid_digit_mass_at_least_0_92": true,
+      "normalized_root_entropy_at_least_1_10": true,
+      "redundant_group_informativeness_at_least_0_65": true,
+      "root_group_informativeness_at_least_0_65": true,
+      "route_digit_joint_tv_at_most_0_05": false,
+      "route_digit_mutual_information_at_most_0_01_nats": true,
+      "valid_route_mass_has_selection_buffer": true
+    },
+    "dataset_manifest_sha256": "8e9127885182678545a8997d1f682b7cd3ee105a4d50f0fe40f262d3ad04ceaf",
+    "model_factorization": {
+      "normalized_digit_distribution_by_route": {
+        "alpha": {
+          "0": 0.15454873615826265,
+          "1": 0.14518510158838527,
+          "2": 0.11307027080733592,
+          "3": 0.14518510158838527,
+          "4": 0.12036267674275089,
+          "5": 0.09978416376187535,
+          "6": 0.09373854689982476,
+          "7": 0.12812540245317983
+        },
+        "beta": {
+          "0": 0.12041265790139587,
+          "1": 0.1281786071196077,
+          "2": 0.14524538171654433,
+          "3": 0.1546129040206708,
+          "4": 0.10626379762996037,
+          "5": 0.0937774722653163,
+          "6": 0.10626379762996037,
+          "7": 0.14524538171654433
+        },
+        "delta": {
+          "0": 0.12430932102040314,
+          "1": 0.10305604678714912,
+          "2": 0.1167777999960405,
+          "3": 0.16991069641224035,
+          "4": 0.14086091481605734,
+          "5": 0.10970259076289991,
+          "6": 0.10305604678714912,
+          "7": 0.13232658341806053
+        },
+        "gamma": {
+          "0": 0.10194913261380237,
+          "1": 0.0957723469199093,
+          "2": 0.10852428675887464,
+          "3": 0.19046605486945786,
+          "4": 0.14833511268085495,
+          "5": 0.11552350191283489,
+          "6": 0.10852428675887464,
+          "7": 0.13090527748539138
+        }
+      },
+      "normalized_digit_marginal": {
+        "0": 0.12500682610825808,
+        "1": 0.11909648604111396,
+        "2": 0.11881821141397406,
+        "3": 0.1661634748413169,
+        "4": 0.12963019713624932,
+        "5": 0.10522761761292765,
+        "6": 0.10276858496659326,
+        "7": 0.13328860187956676
+      },
+      "normalized_root_entropy_nats": 1.3112878563422639,
+      "normalized_valid_route_distribution": {
+        "alpha": 0.3136450816309136,
+        "beta": 0.21556490195044622,
+        "delta": 0.11538357735655194,
+        "gamma": 0.35540643906208824
+      },
+      "route_digit_joint_total_variation": 0.051701397810110614,
+      "route_digit_mutual_information_nats": 0.0075067453270417405
+    },
+    "schema_version": 1,
+    "selection_thresholds": {
+      "delta_route_mass_maximum": 0.35,
+      "delta_route_mass_minimum": 0.1,
+      "expected_target_informative_groups_minimum": 5.5,
+      "maximum_route_mass": 0.55,
+      "mean_digit_5_mass_maximum": 0.25,
+      "mean_digit_5_mass_minimum": 0.05,
+      "mean_digit_entropy_minimum": 1.4,
+      "mean_valid_digit_mass_minimum": 0.92,
+      "minimum_route_mass": 0.05,
+      "normalized_root_entropy_minimum": 1.1,
+      "redundant_group_informative_probability_minimum": 0.65,
+      "root_group_informative_probability_minimum": 0.65,
+      "route_digit_joint_tv_maximum": 0.05,
+      "route_digit_mutual_information_nats_maximum": 0.01,
+      "valid_route_sequence_mass_minimum": 0.92
+    },
+    "signed_payload_sha256": "c1431a6be59a09ddd301828c99ef5fac3794b352f01317c8c75ed467850231c2",
+    "sources": {
+      "action_scores_sha256": "518ea66635d266bc20dc6d5381caa7fc4e5c15eebe63652ab1b23edaf5590dae",
+      "root_scores_sha256": null
+    },
+    "status": "failed",
+    "step": 18
+  },
+  "constrained_route_probabilities_t2": {
+    "alpha": 0.3136450816309136,
+    "beta": 0.21556490195044622,
+    "delta": 0.11538357735655194,
+    "gamma": 0.35540643906208824
+  },
+  "constraint_semantics": "vllm-choice-trie-single-divergence-v1",
+  "route_choices": [
+    "<route>alpha</route>",
+    "<route>beta</route>",
+    "<route>gamma</route>",
+    "<route>delta</route>"
+  ],
+  "schema_version": 1,
+  "signed_payload_sha256": "02b68dacefadacca5cd3e94d6992a1e298b492193e9c867306152fe807c0e00c",
+  "sources": {
+    "action_scores_signed_payload_sha256": "518ea66635d266bc20dc6d5381caa7fc4e5c15eebe63652ab1b23edaf5590dae",
+    "dataset_manifest_signed_payload_sha256": "8e9127885182678545a8997d1f682b7cd3ee105a4d50f0fe40f262d3ad04ceaf",
+    "root_scores_signed_payload_sha256": "63ce7a44863a16610477d55602207545e925e3b7dd2d25ff03eb5d809460a0c1"
+  },
+  "status": "failed",
+  "step": 18
+}
