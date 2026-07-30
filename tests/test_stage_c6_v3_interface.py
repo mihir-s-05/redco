@@ -44,8 +44,8 @@ def test_exact_interface_uses_live_behavior_not_static_reference() -> None:
         "nodes": [
             {
                 "sampled": True,
-                "token_ids": [44],
-                "is_content": [True],
+                "token_ids": [999, 44],
+                "is_content": [False, True],
                 "logprobs": [behavior],
             }
         ],

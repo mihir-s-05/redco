@@ -72,15 +72,23 @@ def verify_interface(
         if len(sampled) != 1:
             raise ValueError("each context trace must have one sampled node")
         node = sampled[0]
-        content = [
-            (int(token_id), float(logprob))
-            for token_id, is_content, logprob in zip(
+        content_token_ids = [
+            int(token_id)
+            for token_id, is_content in zip(
                 node.get("token_ids", []),
                 node.get("is_content", []),
+                strict=True,
+            )
+            if is_content
+        ]
+        content = [
+            (token_id, float(logprob))
+            for token_id, logprob in zip(
+                content_token_ids,
                 node.get("logprobs", []),
                 strict=True,
             )
-            if is_content and int(token_id) in token_to_route
+            if token_id in token_to_route
         ]
         if len(content) != 1:
             raise ValueError("each context trace must have one route-choice token")
