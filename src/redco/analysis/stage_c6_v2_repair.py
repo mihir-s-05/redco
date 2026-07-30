@@ -12,6 +12,11 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _canonical_text_sha256(path: Path) -> str:
+    text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
 def _load(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -24,8 +29,17 @@ def audit(
 ) -> dict[str, Any]:
     protocol = _load(protocol_path)
     amendment = _load(amendment_path)
+    portability_path = (
+        root
+        / "configs/stage-c6/"
+        "credit-confusion-repair-audit-portability-amendment-v2-2.json"
+    )
+    portability = _load(portability_path) if portability_path.exists() else None
     attempt_root = root / amendment["attempt_1"]["evidence_root"]
     changed = amendment["repair_source_changes"]
+    portability_changes = (
+        {} if portability is None else portability["repair_source_changes"]
+    )
     unchanged_source_checks = {
         path: _sha256(root / path) == expected
         for path, expected in protocol["source"]["sha256"].items()
@@ -46,6 +60,19 @@ def audit(
     added_source_checks = {
         path: _sha256(root / path) == expected
         for path, expected in amendment["added_repair_audit_source_sha256"].items()
+        if path not in portability_changes
+    }
+    portability_source_checks = {
+        path: {
+            "old_matches_v2_1": (
+                values["old_sha256"]
+                == amendment["added_repair_audit_source_sha256"].get(path)
+            ),
+            "new_matches_workspace": (
+                values["new_sha256"] == _sha256(root / path)
+            ),
+        }
+        for path, values in portability_changes.items()
     }
     evidence_checks = {
         path: _sha256(attempt_root / path) == expected
@@ -79,10 +106,31 @@ def audit(
     checks = {
         "parent_protocol_exact": (
             amendment["parent_protocol_sha256"] == _sha256(protocol_path)
+            if portability is None
+            else portability["canonical_lf_sha256"]["parent_protocol"]
+            == _canonical_text_sha256(protocol_path)
         ),
         "parent_audit_exact": (
             amendment["parent_audit_sha256"]
             == _sha256(root / amendment["parent_audit"])
+            if portability is None
+            else portability["canonical_lf_sha256"]["parent_audit"]
+            == _canonical_text_sha256(
+                root / amendment["parent_audit"]
+            )
+        ),
+        "portability_amendment_exact": (
+            True
+            if portability is None
+            else (
+                portability["parent_amendment_canonical_lf_sha256"]
+                == _canonical_text_sha256(amendment_path)
+                and all(
+                    all(values.values())
+                    for values in portability_source_checks.values()
+                )
+                and portability["scientific_changes"] is False
+            )
         ),
         "repair_commit_exact": (
             amendment["repair_commit"] == "991395b"
@@ -145,5 +193,6 @@ def audit(
         "unchanged_source_checks": unchanged_source_checks,
         "changed_source_checks": changed_source_checks,
         "added_source_checks": added_source_checks,
+        "portability_source_checks": portability_source_checks,
         "evidence_checks": evidence_checks,
     }
