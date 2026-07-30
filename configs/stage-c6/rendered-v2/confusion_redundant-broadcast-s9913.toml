@@ -1,0 +1,93 @@
+max_steps = 36
+seq_len = 512
+output_dir = "runs/stage-c6/credit-confusion-live-v2/confusion_redundant/broadcast-s9913"
+
+[deployment]
+num_train_gpus = 1
+num_infer_gpus = 1
+
+[model]
+name = "runs/stage-c6/selected-initialization-merged"
+
+[file_monitor]
+filename = "metrics.jsonl"
+
+[trainer.model.ac]
+freq = 1
+
+[trainer.model.lora]
+rank = 32
+alpha = 64
+
+[trainer.optim]
+lr = 1e-5
+
+[orchestrator]
+batch_size = 16
+group_size = 8
+max_inflight_rollouts = 8
+max_off_policy_steps = 0
+strict_snapshot_batches = true
+train_groups_per_policy = 1
+post_batch_filters = [
+  { type = "gibberish", enforce = false },
+  { type = "repetition", enforce = false },
+  { type = "zero_advantage", enforce = false },
+]
+
+[orchestrator.algo]
+type = "grpo"
+
+[orchestrator.renderer]
+name = "prime-qwen3"
+
+[orchestrator.train.sampling]
+temperature = 0.7
+max_completion_tokens = 64
+
+[[orchestrator.train.env]]
+name = "redco-credit"
+env.id = "redco-credit-v1"
+env.taskset = { id = "redco-credit-v1", repeats_per_probe = 256, exogenous_seed_offset = 9913000, probe_names = ["confusion_redundant"] }
+env.branching_enabled = false
+env.branch_temperature = 2.0
+env.context_temperature = 2.0
+env.constrained_root_routes = true
+env.context.harness = { id = "null", runtime = { type = "subprocess" } }
+env.original.harness = { id = "null", runtime = { type = "subprocess" } }
+
+[orchestrator.eval]
+interval = 6
+num_examples = 64
+
+[orchestrator.eval.sampling]
+temperature = 0.0
+max_completion_tokens = 64
+
+[[orchestrator.eval.env]]
+name = "redco-credit-eval"
+env.id = "redco-credit-v1"
+env.taskset = { id = "redco-credit-v1", repeats_per_probe = 64, exogenous_seed_offset = 9913500, probe_names = ["confusion_redundant"] }
+env.branching_enabled = false
+env.branch_temperature = 2.0
+env.context_temperature = 2.0
+env.constrained_root_routes = true
+env.context.harness = { id = "null", runtime = { type = "subprocess" } }
+env.original.harness = { id = "null", runtime = { type = "subprocess" } }
+
+[ckpt]
+keep_last = 1
+
+[trainer.ckpt]
+weights_only = true
+skip_gather_master_weights = true
+
+[inference]
+gpu_memory_utilization = 0.7
+seed = 9913
+
+[inference.model]
+max_model_len = 512
+
+[weight_broadcast]
+type = "filesystem"

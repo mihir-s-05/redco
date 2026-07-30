@@ -1,0 +1,144 @@
+{
+  "analysis": "stage-c6-byte-identical-scorer-stability",
+  "disposition": "Keep Stage C6 v1 terminal. Replace single-shot vLLM support measurement with a separately frozen deterministic scorer; do not relax the 0.05 threshold based on this result.",
+  "model_identity": {
+    "all_file_hashes_identical": true,
+    "file_checks": {
+      "chat_template.jinja": true,
+      "config.json": true,
+      "generation_config.json": true,
+      "model-00001-of-00003.safetensors": true,
+      "model-00002-of-00003.safetensors": true,
+      "model-00003-of-00003.safetensors": true,
+      "model.safetensors.index.json": true,
+      "tokenizer.json": true,
+      "tokenizer_config.json": true
+    },
+    "stage_c5_adapter_sha256": "e1d56f45485eef065bae42980427ee3c88176a5c864cbb350fa8494d0370e623",
+    "stage_c6_adapter_sha256": "e1d56f45485eef065bae42980427ee3c88176a5c864cbb350fa8494d0370e623"
+  },
+  "schema_version": 1,
+  "scientific_sensitivity": {
+    "confusion_irrelevant_exact_target_gradient": {
+      "stage_c5": {
+        "by_route": {
+          "alpha": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "beta": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "delta": [
+            -1.734723475976807e-17,
+            -1.734723475976807e-18,
+            -1.734723475976807e-18,
+            0.0,
+            -1.734723475976807e-17,
+            -1.734723475976807e-18,
+            -1.734723475976807e-18,
+            6.938893903907228e-18
+          ],
+          "gamma": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "maximum_absolute_exact_gradient": 1.734723475976807e-17
+      },
+      "stage_c6": {
+        "by_route": {
+          "alpha": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "beta": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "delta": [
+            -5.204170427930421e-18,
+            -1.734723475976807e-18,
+            -8.673617379884035e-18,
+            1.0408340855860843e-17,
+            0.0,
+            -5.204170427930421e-18,
+            -1.734723475976807e-18,
+            5.204170427930421e-18
+          ],
+          "gamma": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "maximum_absolute_exact_gradient": 1.0408340855860843e-17
+      }
+    },
+    "interpretation": "For confusion_irrelevant, reward is constant across target digits after conditioning on the route. Its exact target-logit gradient is therefore zero under both measured policies. The scorer drift flips the auxiliary factorization gate but does not create a causal target gradient."
+  },
+  "score_drift": {
+    "action": {
+      "maximum_absolute_selected_logprob_drift": 0.22703769319015832,
+      "maximum_absolute_selected_probability_drift": 0.0394114470667202
+    },
+    "joint_tv": {
+      "absolute_change": 0.003370332923884445,
+      "frozen_limit": 0.05,
+      "gate_decision_flipped": true,
+      "stage_c5": 0.04833106488622617,
+      "stage_c6": 0.051701397810110614
+    },
+    "root": {
+      "maximum_absolute_constrained_route_probability_drift": 0.017844042750160632,
+      "maximum_absolute_token_logprob_drift": 0.09652895843433007
+    }
+  },
+  "signed_payload_sha256": "01bc09f17e8df513f5f4a9c8d946c73da64ad2da6f2e0f69dbde7a0e51b39abd",
+  "sources": {
+    "dataset_manifest_sha256": "c214314f2dafca0ecbf4542ac23d3a7e31ed9431b6b19430e461e672a6a5827a",
+    "stage_c5_action_sha256": "3fb37208c17fd2b63b892153899046410c88c3a4cd969a0ec0f8e055bbd68bca",
+    "stage_c5_merge_manifest_sha256": "8ab7b96cf20c4d479dce2903876c36c9e190f9c1c9a8279f6c019fad6b6f1fc8",
+    "stage_c5_root_sha256": "77c8eacd8c2797e481b75e2364bdb4dbb0ce8052a33e78dbf929a57356cfe229",
+    "stage_c6_action_sha256": "5defa7385372f52e35d9ad76b7f9ac32e73c66255b14441a56331bdd44d60c85",
+    "stage_c6_merge_manifest_sha256": "1601127096adc1a15539bbd584a6a8e0b842f77133aa7db1f9a8de3e88d16cf5",
+    "stage_c6_root_sha256": "86f60bcd30dffc64f44063506822494cd84b62372608572758d201e01e818985"
+  },
+  "status": "passed"
+}
