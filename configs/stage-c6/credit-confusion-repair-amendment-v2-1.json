@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c6-credit-confusion-live-v2",
+  "amendment": "bounded-infrastructure-repair-v2-1",
+  "frozen_at_local_date": "2026-07-29",
+  "parent_protocol": "configs/stage-c6/credit-confusion-live-preregistration-v2.json",
+  "parent_protocol_sha256": "079cb44208427111b1944161fe2697eb4f2e44703397305b0627b2c68e9a844b",
+  "parent_audit": "reports/stage-c6-credit-confusion-live-preregistration-audit-v2.json",
+  "parent_audit_sha256": "cc582974a05dc70698b898c67cea2b3dbe1c9595836ca5f6e6a2f35cd081c4b4",
+  "repair_commit": "991395b",
+  "repair_audit_implementation_commit": "ca46ebb",
+  "failure_classification": {
+    "class": "outcome-independent nested-launcher PATH defect",
+    "root_cause": "The frozen top-level driver invoked uv through an absolute path, but run_stage_c2_campaign_arm.sh is a nested subprocess that invokes the literal command uv. The non-login SSH launch PATH omitted /home/ubuntu/.local/bin.",
+    "observed_error": "timeout: failed to run command ‘uv’: No such file or directory",
+    "launcher_exit_code": 127,
+    "first_training_row_observed": false,
+    "structural_smoke_model_calls": 0,
+    "scientific_arms_started": 0,
+    "scientific_policy_calls": 0,
+    "scientific_optimizer_steps": 0,
+    "eligible_under_parent_repair_rule": true
+  },
+  "repair": {
+    "path_change": "Export the directory containing REDCO_UV_BINARY at the front of PATH before any nested launcher.",
+    "resume_change": "On the one permitted redeployment, copy and verify the completed canonical and runtime score payloads instead of rerunning either scorer.",
+    "regression_test": "tests/test_stage_c6_v2_runtime.py asserts the PATH export and measurement-reuse branch precede the structural smoke.",
+    "package_manager": "uv only; pip remains forbidden"
+  },
+  "attempt_1": {
+    "pod_id": "8c65ca9a1899440eb6ac6e901b158c2d",
+    "resource_id": "cc7cf9",
+    "gpu": "2x RTX 6000 Ada 48GB",
+    "hourly_rate_usd": 1.5,
+    "billed_cost_usd": 0.4911,
+    "wallet_before_usd": 25.4474,
+    "wallet_after_usd": 24.9563,
+    "active_pods_after_teardown": 0,
+    "persistent_disks_after_teardown": 0,
+    "evidence_root": "runs/stage-c6/credit-confusion-live-v2-attempt1",
+    "evidence_archive": "runs/stage-c6/credit-confusion-live-v2-attempt1-evidence.tar.gz",
+    "evidence_archive_sha256": "b36bfa1954954a275e7fdd580c71bdd40d49d2bccdbff3636653f19bec1ee1f8",
+    "evidence_archive_bytes": 20276,
+    "evidence_sha256": {
+      "initialization/model-identity.json": "e41b6be93a0cb9cff3b78417ea5a783cb26f8e4fe5eb15135c2a0f416f2ced2e",
+      "initialization/canonical/reproducibility.json": "e442fd5fa6bb16e8f7c997a27b77e1031a0f701706c22faa36f5321d298ec7fd",
+      "initialization/canonical/replicate_1/action-scores.json": "62cab9b58baf5d431277fd239ef6530a010881be17808434de15c5a0f3304344",
+      "initialization/canonical/replicate_1/root-scores.json": "4fe2e4d9e3b73b757fb5dd8e2457090161ed05d87af7f08f6958159262b894a4",
+      "initialization/canonical/replicate_1/support-verification.json": "911864904ad3f3883f5e993c44845546c54ca1a1790d0e6814a03a69e8986264",
+      "initialization/runtime/action-scores.json": "066f3ead38189d4ba85f895457ceeb67fd7834894edc1c0da79c1b7abc9dbef8",
+      "initialization/runtime/root-scores.json": "3bf6fb28a28fe429449a9aebff5c9ce7d5904744cff910712835d84a3c275b71",
+      "initialization/runtime/runtime-support.json": "5098cb1aa02c1a39d3789ecebb93bcd65f17f344c58de9d5352f42d15783c6d1",
+      "smoke/structural-invariant.json": "25305e88e93849ce555cfed15b05a84a0822604bf3732a779e84f690edaf5934",
+      "smoke/structural-broadcast-s9910.control.log": "282b68e29ae5e53d986481a8c8cc473772a447881029883ee9eab85e99e91ee6",
+      "launcher.log": "b45e97236e644606cf359cd4ac014ccfdc0dd5b306aea14a1d951c720f136203",
+      "preflight-audit.json": "a869adf0f5ea2e1659ad93536bd46b03691be4c80f89cf1e992429e7f8c89f1a"
+    },
+    "passed_measurements_reused": {
+      "model_identity_signed_payload_sha256": "cc04b50b62b188c50dca8dc3c4989556f42586e099a6db7a2f2ffa5f21a54fc0",
+      "canonical_reproducibility_signed_payload_sha256": "7e764e4c287ed76b0e59083fbe4dc9d93587c7c5a83ff544adeb121ff135dade",
+      "canonical_action_signed_payload_sha256": "03c4232155e9efa6510ccc782a7d42ac5096dc44fd411db6ed671b5eb01971ab",
+      "canonical_root_signed_payload_sha256": "632e517e2a76397e24f2d757cf1188ca053e431bcf0cb3ebec8ad7d7e8deddcb",
+      "canonical_support_signed_payload_sha256": "2eb7eaa0a23ddf7970f4023b6548d6e039c23f3fbfbc41f0387ad1ec0f10a114",
+      "canonical_route_digit_joint_total_variation": 0.04859694567409277,
+      "canonical_route_digit_mutual_information_nats": 0.006518018214434481,
+      "runtime_support_signed_payload_sha256": "7595eafb8dde4332563e84add91b1bfbc06009f1de40b8b1872ca05d307e1454"
+    }
+  },
+  "repair_source_changes": {
+    "scripts/run_stage_c6_campaign_v2.sh": {
+      "old_sha256": "9627d1e3c273564c62cf4c1536f356661bda0832ec623c9dff6010b933e396b9",
+      "new_sha256": "954ffa0c76ab20b4d38ef666457b107f10617f2d18311b4ef7c7d75b402a92ab"
+    },
+    "tests/test_stage_c6_v2_runtime.py": {
+      "old_sha256": "ed0f7e50bfdb255b70ac0820cdf74de92d4470bd241b2797a4860f57dbf4c1f8",
+      "new_sha256": "c7165f63e2a21234f65d4fe06ea4218006f7f4679493892cbd801382934f1b52"
+    },
+    "tests/test_stage_c6_v2_preregistration.py": {
+      "old_sha256": "320ec53cfd992b2029267e3b03771212609b364594b4aa779a8f8c8df53e380b",
+      "new_sha256": "3c73b17336fb63d0b8ae957a8345fff59f10f7ba936d7aacd3a0ed0d959c388d"
+    }
+  },
+  "added_repair_audit_source_sha256": {
+    "scripts/audit_stage_c6_repair_v2_1.py": "59fe91556252a95131b3373521e97bbfffe087bca9f6fab142382003e03b53b6",
+    "src/redco/analysis/stage_c6_v2_repair.py": "205d0cf22cfdb7fc7d9c12c81024e01d5026848047415d422b0636a1ea909b76",
+    "tests/test_stage_c6_v2_repair.py": "627a9319e9f45375d18ecdbc5ba122afcfa421de13fe4404122925bea4c72377"
+  },
+  "redeployment": {
+    "attempt_number": 2,
+    "remaining_after_this": 0,
+    "resume_evidence_root": "runs/stage-c6/credit-confusion-live-v2-attempt1",
+    "rerun_completed_canonical_replicates": false,
+    "rerun_completed_runtime_scores": false,
+    "first_new_model-bearing_step": "structural smoke after byte-identical model reconstruction and reused-measurement verification",
+    "hardware": "Use the same pinned eligible non-spot resource cc7cf9 if available; otherwise a new hardware-only amendment is required."
+  },
+  "scientific_changes": false,
+  "unchanged": [
+    "initialization bytes and byte-identity gate",
+    "canonical payload bytes and all support decisions",
+    "runtime score payload bytes and power decision",
+    "factorization and power thresholds",
+    "tasks, arms, seeds, order, and matched policy-call budgets",
+    "optimizer and constrained-policy settings",
+    "scientific metrics and decision rules",
+    "artifact and cost ceilings"
+  ]
+}
