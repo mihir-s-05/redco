@@ -10,6 +10,7 @@ from redco.analysis.stage_c9_efficiency import (
     _auc,
     _policy_point,
     _reuse_contract,
+    _usage,
 )
 
 
@@ -98,3 +99,35 @@ def test_reuse_contract_checks_pair_identity_and_snapshot_progression(
 
     assert contract["all_pairs_passed"]
     assert contract["fresh_example_stream_between_collections"]
+
+
+def test_usage_counts_only_canonical_train_all_trace_view(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run"
+    call = {
+        "usage": {"prompt_tokens": 7, "completion_tokens": 3},
+        "time": {"start": 10.0, "end": 10.25},
+    }
+    for view in ("train/all", "train/effective", "eval/all"):
+        trace = (
+            run_dir
+            / "run_default"
+            / "rollouts"
+            / "step_1"
+            / view
+            / "traces.jsonl"
+        )
+        trace.parent.mkdir(parents=True)
+        trace.write_text(
+            json.dumps({"calls": [call]}) + "\n",
+            encoding="utf-8",
+        )
+
+    assert _usage(run_dir) == {
+        "policy_calls": 1,
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10,
+        "service_seconds": 0.25,
+    }

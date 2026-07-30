@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c9-practical-efficiency-bridge-v1",
+  "amendment": "analysis-ledger-canonical-trace-view-v1-3",
+  "frozen_at_utc": "2026-07-30T20:07:06.4090671Z",
+  "base_protocol": {
+    "path": "configs/stage-c9/practical-efficiency-preregistration-v1.json",
+    "sha256": "156c36a582eedc5994e1846c06f0543a46da1bb29a67b67206c9cb8b6fd7bfe5"
+  },
+  "timing_and_observation": {
+    "integration_smoke_status": "passed",
+    "scientific_campaign_status": "first arm running",
+    "scientific_outcomes_inspected": false,
+    "discovery": "Static inspection found that Prime-RL writes accepted calls to both train/all and train/effective trace views. The frozen analyzer recursively read both views and would therefore double-count the same policy calls."
+  },
+  "scope": {
+    "changed": [
+      "The resource ledger reads only run_default/rollouts/step_*/train/all/traces.jsonl.",
+      "A regression test proves that train/effective and eval/all mirrors are ignored."
+    ],
+    "unchanged": [
+      "all model calls and training",
+      "arms, seeds, ordering, branch group size, optimizer, losses, and update counts",
+      "exact checkpoint scoring",
+      "all thresholds and scientific decision rules",
+      "the expected 576-call ledger total per run"
+    ],
+    "classification": "outcome-independent analysis-contract repair; no arm may be restarted or resampled"
+  },
+  "source_replacements": {
+    "src/redco/analysis/stage_c9_efficiency.py": {
+      "old_sha256": "1ff27fe9e114b723e6d91036dd6374a9159815456d8ea054dd9c69392919d1f5",
+      "new_sha256": "5823661db3eb52cbe8a94d14a0385da7fb3cfa45f3d3b40eea018c30f4262618"
+    },
+    "tests/test_stage_c9_efficiency.py": {
+      "old_sha256": "c394fc3ad4595143e1c1948645ddb3ab541512a2a2e9a588876753fa90e383eb",
+      "new_sha256": "2157047ed7af9fff14c88b9b2a33a69f85ff7bb865fee7dd85ea39d6df753212"
+    }
+  }
+}

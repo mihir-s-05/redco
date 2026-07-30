@@ -244,9 +244,14 @@ def _practical_diagnostics(run_dir: Path, updates: int) -> dict[str, Any]:
 
 def _usage(run_dir: Path) -> dict[str, float | int]:
     calls = []
-    for path in run_dir.rglob("traces.jsonl"):
-        if "/eval/" in path.as_posix():
-            continue
+    # Prime-RL writes the same accepted rollout calls under both ``all`` and
+    # ``effective``.  The latter is a filtered reporting view, not a second
+    # set of policy calls, so the canonical ledger must read exactly one view.
+    for path in sorted(
+        (run_dir / "run_default" / "rollouts").glob(
+            "step_*/train/all/traces.jsonl"
+        )
+    ):
         for line in path.read_text(encoding="utf-8").splitlines():
             row = json.loads(line)
             calls.extend(row.get("calls", ()))
