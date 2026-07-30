@@ -1,0 +1,357 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c5-bounded-infrastructure-repair-v3",
+  "status": "frozen_before_any_stage_c5_v3_live_model_call_or_optimizer_step",
+  "frozen_at_local_date": "2026-07-29",
+  "purpose": "Run the unchanged constrained initialization selection after v2 observed no candidate or arm outcome and terminated because of an outcome-independent launcher expansion defect. Replace the overbroad any-failure terminal rule with one bounded, auditable repair-and-redeploy rule.",
+  "v2_terminal_record": {
+    "terminal_report_commit": "e28d8a9",
+    "terminal_report": "reports/stage-c5-constrained-successor-v2-2026-07-29.md",
+    "bundle_path": "runs/stage-c5/constrained-successor-v2-terminal/stage-c5-v2-terminal-evidence.tar.gz",
+    "bundle_sha256": "e1fe3bc633a5774c43836ac0ce09a6109349ed8b3779cd728aa1dbfe31189731",
+    "constrained_interface_passed": true,
+    "constrained_interface_signature": "e767efee087bbf89041a85dc524360f19662ad496963f0115ab2015eef63a83d",
+    "sft_optimizer_steps": 32,
+    "candidate_model_calls": 0,
+    "candidate_evaluations": 0,
+    "selected_adapters": 0,
+    "scientific_arms_started": 0,
+    "root_cause": "post-smoke continuation omitted signed case variables",
+    "action_scorer_started": false,
+    "root_scorer_started": false,
+    "known_nondiagnostic_observations": [
+      "constrained-interface verifier pass",
+      "32-step SFT loss and gradient metrics"
+    ],
+    "selection_ineligible_observations": "SFT loss and gradient metrics are not candidate support metrics and may not change any v3 field."
+  },
+  "changes_from_v2": [
+    "constraint-specific supervisor ignores reward variance and trainable fraction",
+    "real candidate command builder binds and expands both signed case variables",
+    "fresh SFT seed 7203007",
+    "fresh smoke seed 9801 and exogenous offsets",
+    "versioned v3 paths",
+    "bounded repair-and-redeploy policy"
+  ],
+  "repair_and_redeploy_policy": {
+    "principle": "No silent retries and no outcome-informed repairs.",
+    "initial_deployments": 1,
+    "maximum_redeployments_after_initial": 1,
+    "eligibility_boundary": "before any candidate score payload or scientific-arm outcome",
+    "candidate_score_payload_is_decision_bearing": true,
+    "scientific_arm_data_is_decision_bearing": true,
+    "sft_loss_is_selection_ineligible": true,
+    "no_silent_retries": true,
+    "no_outcome_informed_repairs": true,
+    "eligible_failures": [
+      "provider interruption",
+      "SSH or network transport failure",
+      "dependency or environment setup failure",
+      "outcome-independent launcher or orchestration defect demonstrated to occur before a candidate score payload"
+    ],
+    "not_automatically_infrastructure": [
+      "method-specific out-of-memory failure",
+      "method-specific timeout",
+      "malformed algorithm batch",
+      "candidate scorer output that fails a frozen support threshold"
+    ],
+    "immutable_fields": [
+      "factorized corpus and renderer",
+      "optimizer and 32-step horizon",
+      "checkpoint cadence and candidate order",
+      "support thresholds and selection rule",
+      "constrained policy semantics",
+      "scientific outcomes and decision rules"
+    ],
+    "repair_requirements": [
+      "terminate the failed compute deployment",
+      "recover and commit all available evidence",
+      "identify a causal outcome-independent failure",
+      "make the minimal repair and add a regression test",
+      "commit and audit a repair amendment before redeployment",
+      "reuse exact surviving stochastic artifacts when available",
+      "record the attempt and final billing"
+    ],
+    "fallback_sft_seed_if_retraining_is_unavoidable": 7203008,
+    "fallback_seed_rule": "May be activated only by a committed repair amendment after zero candidate score payloads; it cannot be selected using SFT loss metrics.",
+    "after_decision_boundary": "No rerun of an observed candidate or arm. Exact continuation from byte-identical retained artifacts may consume only previously unobserved candidates under the frozen ascending rule; otherwise the campaign is terminal."
+  },
+  "constrained_policy": {
+    "semantics": "vllm-choice-trie-single-divergence-v1",
+    "choices": [
+      "<route>alpha</route>",
+      "<route>beta</route>",
+      "<route>gamma</route>",
+      "<route>delta</route>"
+    ],
+    "behavior_logprob": "exact renormalized four-choice categorical at the unique divergent token",
+    "trainer_logprob_policy": "The live smoke must show both trace and packed-batch behavior logprobs agree with the exact constrained categorical within 0.02 nats; otherwise C5 terminates before SFT.",
+    "rollout": true,
+    "branch_sampling": true,
+    "evaluation": true,
+    "broadcast_arm": true,
+    "sliced_arm": true,
+    "root_only": true,
+    "target_policy": "The target digit policy remains unconstrained and byte-identical to v4.",
+    "symmetry_rule": "Every scientific arm, training rollout, branch replay, exact support scorer, and held-out evaluator uses the same four-route policy definition.",
+    "surrogate_mismatch_disposition": "No shared-surrogate approximation is accepted. A trace or packed-batch logprob mismatch is a terminal feasibility failure."
+  },
+  "constrained_rescore": {
+    "path": "reports/stage-c5-v4-constrained-rescore-2026-07-29.json",
+    "file_sha256": "b12557a4f40b2343d806b7f9fb7098e1a436fd92600e8eb686be03629b468cee",
+    "signed_payload_sha256": "d424cc6037c66754816a431ee706cfd8987a3f33d2848d21f27ee0842d1e4281",
+    "earliest_passing_step": 18,
+    "passing_steps": [
+      18,
+      20,
+      22,
+      24,
+      26,
+      28,
+      30,
+      32
+    ],
+    "interpretation": "design calibration only; not a scientific result"
+  },
+  "constrained_interface_smoke": {
+    "config": "configs/stage-c5/constrained-interface-smoke-v3.toml",
+    "position": "before the C5 SFT optimizer",
+    "scientific_arm": false,
+    "maximum_model_call_groups": 1,
+    "maximum_context_calls": 8,
+    "maximum_rl_optimizer_steps": 1,
+    "temperature": 2.0,
+    "inference_seed": 9801,
+    "train_exogenous_seed_offset": 9810000,
+    "eval_exogenous_seed_offset": 9810500,
+    "supervisor_mode": "constraint",
+    "supervisor_decision_inputs": [
+      "rollout error fraction",
+      "root completion budget contract",
+      "route parseability"
+    ],
+    "supervisor_ignored_outcomes": [
+      "reward variance",
+      "trainable fraction"
+    ],
+    "checks": [
+      "Every context request carries exactly the four frozen route choices.",
+      "Every root completion is exactly one canonical route.",
+      "The generated route-label token matches the exact scorer token ID.",
+      "Every trace behavior logprob agrees with the exact renormalized categorical within 0.02 nats.",
+      "Every packed trainer-batch root choice logprob agrees with the same categorical within 0.02 nats."
+    ],
+    "failure_handling": "A failed authoritative constrained verifier is terminal. A demonstrated eligible infrastructure failure follows the bounded repair policy."
+  },
+  "initialization": {
+    "base_model": "Qwen/Qwen3-4B-Instruct-2507",
+    "inherited_stage_c2_selected_step": 23,
+    "inherited_adapter_path": "runs/stage-c2/warmstart-selected-v2/step_23/lora_adapters",
+    "inherited_adapter_sha256": "28fba5d421ea611db2e0d9cd411e40a0fc2035a9a45eb0bb3be24c84947e0ab6",
+    "selection_training_model": "Merge the inherited Stage C2 adapter into the named base in BF16, then train one new LoRA from that deployed initialization.",
+    "v2_artifact_reuse": "Do not reuse v2 SFT checkpoints because they were destroyed under its frozen artifact policy. Reconstruct from the byte-identical inherited adapter with the fresh frozen v3 seed."
+  },
+  "factorized_dataset": {
+    "path": "datasets/stage-c4/factorized-warmstart.jsonl",
+    "manifest_path": "datasets/stage-c4/factorized-warmstart-manifest.json",
+    "examples": 40,
+    "root_format_examples": 8,
+    "target_format_examples": 32,
+    "route_digit_joint_total_variation": 0.0,
+    "route_digit_mutual_information_nats": 0.0,
+    "root_and_target_labels_in_same_example": 0,
+    "reward_or_causality_supervision_fields": 0,
+    "policy": "Reuse the byte-identical reward-blind factorized corpus. It shapes independent marginals and never joint reward structure."
+  },
+  "sft": {
+    "config": "configs/stage-c5/factorized-warmstart-sft-v3.toml",
+    "renderer": "prime-qwen3",
+    "runs": 1,
+    "maximum_steps": 32,
+    "checkpoint_interval": 2,
+    "candidate_steps": [
+      2,
+      4,
+      6,
+      8,
+      10,
+      12,
+      14,
+      16,
+      18,
+      20,
+      22,
+      24,
+      26,
+      28,
+      30,
+      32
+    ],
+    "batch_size": 40,
+    "micro_batch_size": 4,
+    "shuffle": false,
+    "seed": 7203007,
+    "learning_rate": 0.000005,
+    "lora_rank": 32,
+    "lora_alpha": 64,
+    "optimizer": "adamw",
+    "scheduler": "constant",
+    "checkpoint_contents": "adapter-only safetensors",
+    "one_run_rule": "One SFT draw is allowed in the initial deployment. Only the bounded repair policy may authorize an exact resume or the single predeclared fallback seed before any candidate score payload."
+  },
+  "candidate_selection": {
+    "candidate_steps": [
+      2,
+      4,
+      6,
+      8,
+      10,
+      12,
+      14,
+      16,
+      18,
+      20,
+      22,
+      24,
+      26,
+      28,
+      30,
+      32
+    ],
+    "rule": "Select the earliest ascending optimizer checkpoint satisfying every unchanged v4 threshold under constrained root semantics; later checkpoints are not consulted.",
+    "buffered_thresholds": {
+      "valid_route_sequence_mass_minimum": 0.92,
+      "minimum_route_mass": 0.05,
+      "delta_route_mass_minimum": 0.1,
+      "delta_route_mass_maximum": 0.35,
+      "maximum_route_mass": 0.55,
+      "normalized_root_entropy_minimum": 1.1,
+      "mean_digit_5_mass_minimum": 0.05,
+      "mean_digit_5_mass_maximum": 0.25,
+      "mean_digit_entropy_minimum": 1.4,
+      "mean_valid_digit_mass_minimum": 0.92,
+      "expected_target_informative_groups_minimum": 5.5,
+      "root_group_informative_probability_minimum": 0.65,
+      "redundant_group_informative_probability_minimum": 0.65,
+      "route_digit_joint_tv_maximum": 0.05,
+      "route_digit_mutual_information_nats_maximum": 0.01
+    },
+    "authoritative_scoring": {
+      "model_form": "BF16 merged model, never runtime-LoRA scores",
+      "engine": "Pinned vLLM installation and campaign model-loading mode",
+      "action_cases": "configs/stage-c4/selection-action-cases.json",
+      "root_cases": "configs/stage-c4/selection-root-cases.json",
+      "temperature": 2.0,
+      "route_policy": "Exact constrained categorical recovered at the unique divergent choice token."
+    },
+    "no_passing_candidate": "Invoke the terminal stopping rule, recover compact evidence, and launch no scientific campaign."
+  },
+  "terminal_stopping_rule": {
+    "trigger": "All frozen C5 candidates are authoritatively evaluated and none satisfies every unchanged threshold.",
+    "initialization_engineering_ends": true,
+    "infrastructure_failures_are_not_support_failures": true,
+    "forbidden_next_step": "No C6 or other replacement initialization design may be launched after a genuine completed support failure.",
+    "allowed_dispositions": [
+      "Run one separately preregistered, explicitly underpowered exploratory campaign at the measured support.",
+      "Stop live experiments and write the systems and CPU results."
+    ],
+    "decision_timing": "Frozen before the first C5 v3 live model call."
+  },
+  "scientific_campaign_if_selected": {
+    "launch_before_selected_adapter": false,
+    "freeze_condition": "The selected adapter bytes, hash, exact constrained support report, smoke report, terminal selection report, and a new scientific campaign preregistration must be committed locally first.",
+    "factorial_rule": "The constrained route policy and shared warm start are identical in broadcast and sliced arms; exploration is not bundled into ReDCO.",
+    "primary_outcomes": [
+      "known-noncausal-action Jensen-Shannon drift",
+      "policy calls to the frozen causal-action threshold"
+    ],
+    "composite_score": false,
+    "final_reward_role": "sanity check only",
+    "branch_cost_ledger": true,
+    "reporting_rule": "Report both primary outcomes separately, including any Pareto tradeoff. Do not create a post-hoc weighted verdict."
+  },
+  "execution": {
+    "campaign_version": "v3",
+    "package_manager": "uv only; pip is forbidden",
+    "driver": "scripts/run_stage_c5_constrained_selection_v3.sh",
+    "shared_driver": "scripts/run_stage_c5_constrained_selection_v1.sh",
+    "runtime_regressions": [
+      "Bash syntax validation for shared and v3 drivers.",
+      "Execute the real candidate command builder under bash -u and require both signed case arguments.",
+      "Run a constant-reward, zero-trainable, parseable-route row through constraint supervisor mode and require pass."
+    ],
+    "whole_selection_timeout_hours": 2.5,
+    "sft_timeout_seconds": 3600,
+    "smoke_timeout_seconds": 1800,
+    "failure_handling": "Genuine support, constrained-interface, or method-specific failures are terminal. Eligible outcome-independent failures use the bounded repair-and-redeploy policy.",
+    "retain_intermediate_adapters": false,
+    "retain_merged_4b_models_locally": false,
+    "retain_optimizer_state": false,
+    "retain_cuda_or_uv_caches": false,
+    "local_artifact_policy": "Retain exact scores, signed verifications, manifests, logs, reports, and only a selected adapter. Store terminal evidence in a compressed archive.",
+    "teardown": "Always terminate compute after artifact recovery and confirm zero persistent disks."
+  },
+  "hardware": {
+    "resource_id": null,
+    "gpu_count": 2,
+    "minimum_memory_per_gpu_gb": 48,
+    "eligible_gpu_types": [
+      "A40 48GB",
+      "L40 48GB",
+      "L40S 48GB",
+      "RTX 6000 Ada 48GB"
+    ],
+    "spot": false,
+    "maximum_hourly_rate_usd": 2.0,
+    "maximum_compute_charge_usd": 5.0,
+    "persistent_storage": false,
+    "resource_pin_rule": "Before provisioning, commit a hardware-only amendment naming the exact eligible resource ID, provider, location, and rate.",
+    "forbidden": [
+      "spot/preemptible resources",
+      "A100",
+      "H100",
+      "persistent disk"
+    ],
+    "wallet_before_provisioning_usd": 27.3868,
+    "ssh_key": "C:/Users/mihir/.ssh/id_rsa",
+    "ssh_rule": "Verify SSH noninteractively immediately after provisioning; terminate without model calls if it fails."
+  },
+  "validation": {
+    "root_tests": "174 passed",
+    "shared_driver_bash_syntax": "passed",
+    "v3_driver_bash_syntax": "passed",
+    "candidate_command_runtime_regression": "passed",
+    "constraint_supervisor_constant_outcome_regression": "passed",
+    "preregistration_audit_required": true
+  },
+  "source": {
+    "implementation_commit": "c304801",
+    "audit_implementation_commit": "49851f1",
+    "sha256": {
+      "configs/stage-c4/selection-action-cases.json": "26fe59cfd4d007571242a5d96a488a8f48438ca1e9ac830f725258886cdf9e64",
+      "configs/stage-c4/selection-root-cases.json": "38d222f58c9130908e486a187bd453706a0c62fb02aa72eaae7ef82709f7feec",
+      "configs/stage-c5/constrained-interface-smoke-v3.toml": "6c26171dea3b9105b0c213850aea5dadbae147b63f1d63465177337e69b8a58d",
+      "configs/stage-c5/factorized-warmstart-sft-v3.toml": "3a710d5ecc2af982f7a3293f9f3dd79dc815d5d51d0350eecbb03d011786bc5a",
+      "datasets/stage-c4/factorized-warmstart-manifest.json": "c214314f2dafca0ecbf4542ac23d3a7e31ed9431b6b19430e461e672a6a5827a",
+      "datasets/stage-c4/factorized-warmstart.jsonl": "215cd5048b6d7e5311f6032a439571fba872c52d0923cc6c140a0834122baaa2",
+      "environments/redco_credit_v1/redco_credit_v1/taskset.py": "528c11891687ab1262b26fe2e0c56e26ee5b0b7bf16cc8b3e4c026b285440981",
+      "patches/prime-rl-redco-stage-c3-v3.patch": "790e0590ba58e5b3c0e572b0f7a210d2ad3cf4b3278cd5b448c9e7e3937ced9a",
+      "reports/stage-c5-constrained-successor-v2-2026-07-29.md": "1e02015a095b3ed1500ed9a917e3063c2441babf3c641bfdeb1c252cb8929bd4",
+      "reports/stage-c5-v4-constrained-rescore-2026-07-29.json": "b12557a4f40b2343d806b7f9fb7098e1a436fd92600e8eb686be03629b468cee",
+      "runs/stage-c2/warmstart-selected-v2/step_23/lora_adapters/adapter_model.safetensors": "28fba5d421ea611db2e0d9cd411e40a0fc2035a9a45eb0bb3be24c84947e0ab6",
+      "scripts/audit_stage_c5_constrained_successor_v3.py": "b2055e83224a8d96fa5daa0a0a8a0228954c2d9c163fa9182b776045cf64acc4",
+      "scripts/evaluate_stage_c5_candidate.py": "a6a70352c67b9c3e6e5644a4b4fa5a115abb4cd9f7301dcbf2279e9986107428",
+      "scripts/run_stage_c2_campaign_arm.sh": "64c3bc16c2196fe40d5cc275922fc461de615ff352d750f7303327d0ec385cfc",
+      "scripts/run_stage_c3_supervised_arm.py": "c364d6088e08ec4679c4622de08ad424ce9dd6698ee0f2255fa0a551028eb5ed",
+      "scripts/run_stage_c5_constrained_selection_v1.sh": "030cf9104bc1c226b7aab478c6af557d0f21693bbc7ca258e4fa5853e90cbd0d",
+      "scripts/run_stage_c5_constrained_selection_v3.sh": "c7f32c330599073db06e721c39b60591176fba195f5e5a443fc90abff35a58ed",
+      "scripts/verify_stage_c5_constraint_smoke.py": "93b77bc8fb2c6e72eb09d6905ca06e54f68c6c1f90d3b1eb90e92f2a909bf981",
+      "src/redco/analysis/stage_c3_invariants.py": "d62466387971eba78c85beb537d5e1c8e0ff9706a44d2ba58c95475423e4ff29",
+      "src/redco/analysis/stage_c5_constrained.py": "5d0a1b6989f97e19b0d72d04d8cbdc9453bdd1c0ff043a46c37ff2f9748f2a15",
+      "src/redco/analysis/stage_c5_smoke.py": "d4523b97f20b7c19793f825b0489d060d565b3dc908e89bc42d627ce754f3553",
+      "src/redco/analysis/stage_c5_v3_preregistration.py": "8d134ec45c9a4c2381d72a4577a204f8a73bcb0a58522921d96d594e7bc2b58c",
+      "tests/test_stage_c3_invariants.py": "dc170eef788ef20aedda367b32bc37274d0239a59f328a8bb39543231f767b5c",
+      "tests/test_stage_c5_runtime_regression.py": "afc863cf8b3e853e65e6e612a56377661cc6bae511e778f493061f9efb10d87d"
+    }
+  }
+}
