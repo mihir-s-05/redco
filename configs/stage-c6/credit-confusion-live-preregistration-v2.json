@@ -1,0 +1,357 @@
+{
+  "constrained_policy": {
+    "behavior_logprob": "Exact renormalized four-choice categorical at the unique divergent token.",
+    "branch_sampling": true,
+    "broadcast_arm": true,
+    "choices": [
+      "<route>alpha</route>",
+      "<route>beta</route>",
+      "<route>gamma</route>",
+      "<route>delta</route>"
+    ],
+    "evaluation": true,
+    "live_check": "Before scientific arms, a one-step structural run must reproduce exact trace and packed-batch constrained logprobabilities within 0.02 nats.",
+    "semantics": "vllm-choice-trie-single-divergence-v1",
+    "sliced_arm": true,
+    "symmetry_rule": "The identical constrained route policy is deployed in every rollout, replay branch, evaluator, exact scorer, broadcast arm, and sliced arm.",
+    "target_policy": "The target digit policy remains unconstrained.",
+    "training": true
+  },
+  "design": {
+    "aligned_curve_interval_policy_calls": 96,
+    "arms": {
+      "broadcast": "Stock GRPO trajectory advantage assigned to root and target decisions.",
+      "sliced": "ReDCO trajectory LOO at the root and 11-branch LOO at the target with sliced replay."
+    },
+    "branch_group_size": 11,
+    "excluded_arm": "Full-suffix replay is not repeated because prior live sliced-vs-full learning-outcome equivalence passed; this gate isolates credit.",
+    "logical_campaigns": 1,
+    "matched_policy_calls_per_run": 576,
+    "optimizer": {
+      "broadcast_steps": 36,
+      "learning_rate": 1e-05,
+      "lora_alpha": 64,
+      "lora_rank": 32,
+      "sliced_steps": 6
+    },
+    "runs": [
+      {
+        "order": [
+          "broadcast",
+          "sliced"
+        ],
+        "probe": "confusion_irrelevant",
+        "seed": 9911
+      },
+      {
+        "order": [
+          "sliced",
+          "broadcast"
+        ],
+        "probe": "confusion_irrelevant",
+        "seed": 9912
+      },
+      {
+        "order": [
+          "broadcast",
+          "sliced"
+        ],
+        "probe": "confusion_redundant",
+        "seed": 9913
+      },
+      {
+        "order": [
+          "sliced",
+          "broadcast"
+        ],
+        "probe": "confusion_lucky",
+        "seed": 9914
+      }
+    ],
+    "total_policy_calls": 4608,
+    "total_runs": 8,
+    "trajectory_group_size": 8
+  },
+  "execution": {
+    "artifacts": "Recover every log, metric, trace, exact score payload, signed verifier output, merge manifest, final adapter, and decision. Compress final adapters independently and omit redundant intermediate broadcasts after hash recording.",
+    "driver": "scripts/run_stage_c6_campaign_v2.sh",
+    "environment": "Use persistent paths on the ephemeral pod for the uv environment and cache, and keep one pod alive through the authorized sequence.",
+    "local_retention": "Retain compact evidence and final arm adapters. Do not retain merged 4B models, optimizer state, CUDA caches, or remote uv caches.",
+    "package_manager": "uv only; pip is forbidden",
+    "pre_science_order": [
+      "Verify every frozen source, adapter, rendered-config, and applied-patch hash.",
+      "Reconstruct the initialization and require byte identity to the Stage C5 reference.",
+      "Produce three byte-identical canonical score replicates and require unchanged factorization support.",
+      "Measure same-deployment vLLM exploration power without using it to decide factorization.",
+      "Run one structural live smoke and verify trace and packed-batch behavior logprobs.",
+      "Launch the eight frozen scientific arms in the preregistered alternation order."
+    ],
+    "scientific_early_abort": {
+      "checks": {
+        "context_token_budget_contract_fraction": 1.0,
+        "rollout_error_fraction": 0.0
+      },
+      "excluded_checks": [
+        "sampled route distribution",
+        "sampled reward variation",
+        "sampled trainable fraction",
+        "sampled truncation fraction"
+      ],
+      "observation": "First training aggregate row only.",
+      "sampling_dependent_rules": 0
+    },
+    "teardown": "Always terminate compute after artifact recovery and confirm zero persistent disks.",
+    "timeouts": {
+      "per_run_seconds": 10800,
+      "whole_pod_hours": 3.5
+    }
+  },
+  "experiment": "stage-c6-credit-confusion-live-v2",
+  "frozen_at_local_date": "2026-07-29",
+  "frozen_metrics_and_decision": {
+    "causal_sanity": {
+      "calls_to_threshold": "First aligned policy-call point whose sampled evaluation target-success rate is at least 0.5.",
+      "comparison": "Calls-to-threshold is reported for both arms as a compute tradeoff; ReDCO is not required to beat broadcast because it receives fewer optimizer steps at matched calls.",
+      "rule": "On each causal probe, at least one arm must increase exact digit-5 mass by at least 0.05 from initialization."
+    },
+    "claim_limit": "A pass supports reduced nuisance drift on this small mechanistic battery, not a broad population claim.",
+    "fail": "The gate is adequately exposed but one or more other mandatory checks fail.",
+    "pass": "Every support, primary, causal-sanity, completeness, and aligned-evaluation check in the frozen verifier passes.",
+    "policy_distribution": "For each recorded prefix, normalize exact vLLM temperature-2 probabilities over digit tokens 0-7 and compute Jensen-Shannon divergence from the shared warm start.",
+    "primary_irrelevant_target": {
+      "directional_effect": "Mean sliced JS divergence must be at most 75% of mean broadcast JS divergence.",
+      "exposure_floor": "Mean broadcast JS divergence across seeds must be at least 0.002; otherwise status is underpowered.",
+      "pairwise_guard": "For each seed, sliced JS may not exceed paired broadcast JS by more than 0.002."
+    },
+    "saturation_guard": "If any exact final digit-5 mass is at least 0.98, endpoint margins are forbidden and only the frozen calls-to-threshold curve is used for sample-efficiency interpretation.",
+    "underpowered": "Either initialization support fails or the broadcast exposure floor is not met."
+  },
+  "hardware": {
+    "eligible_gpu_types": [
+      "L40 48GB",
+      "L40S 48GB",
+      "RTX 6000 Ada 48GB"
+    ],
+    "forbidden": [
+      "spot/preemptible resources",
+      "A100",
+      "H100",
+      "persistent disk"
+    ],
+    "gpu_count": 2,
+    "maximum_compute_charge_usd": 6.0,
+    "maximum_hourly_rate_usd": 2.0,
+    "minimum_memory_per_gpu_gb": 48,
+    "persistent_storage": false,
+    "resource_id": null,
+    "resource_pin_rule": "Before provisioning, commit a hardware-only amendment naming the exact eligible resource ID, provider, location, and rate.",
+    "spot": false,
+    "ssh_key": "C:/Users/mihir/.ssh/id_rsa",
+    "ssh_rule": "Verify SSH noninteractively immediately after provisioning; terminate without scientific model calls if it fails.",
+    "wallet_before_provisioning_usd": 25.4505
+  },
+  "initialization": {
+    "base_model": "Qwen/Qwen3-4B-Instruct-2507",
+    "byte_identity_gate": {
+      "reference_manifest": "runs/stage-c5/constrained-successor-v3-selection/evidence/runs/stage-c5/warmstart-selection-v3/candidates/step_18/merge-manifest.json",
+      "required": true,
+      "rule": "The current and reference manifests must contain identical file sets, per-file SHA-256 values, and adapter SHA-256."
+    },
+    "deployment": "Merge the Stage C2 adapter into the named BF16 base, then merge the Stage C5 adapter into that result. Both arms start from the byte-identical final merged model.",
+    "deployment_reverification": "Before any scientific arm, reconstruct the initialization, require every merged-model file hash to match the Stage C5 step-18 reference, then apply the split measurement protocol.",
+    "frozen_support": {
+      "expected_informative_target_groups_per_sliced_step": 5.545862823,
+      "mean_digit_5_mass": 0.1012198095,
+      "mean_digit_entropy_nats": 2.0620023635,
+      "mean_valid_digit_mass": 0.9614452737,
+      "redundant_group_informative_probability": 0.8346853487,
+      "root_entropy_nats": 1.3136189252,
+      "root_group_informative_probability": 0.9997129563,
+      "route_digit_joint_total_variation": 0.0483310649,
+      "route_digit_mutual_information_nats": 0.0061955916,
+      "route_probabilities_temperature_2": {
+        "alpha": 0.3167284595,
+        "beta": 0.2334089447,
+        "delta": 0.1102545852,
+        "gamma": 0.3396080106
+      }
+    },
+    "runtime_path": "runs/stage-c6/selected-initialization-merged",
+    "stage_c2_adapter_path": "runs/stage-c2/warmstart-selected-v2/step_23/lora_adapters",
+    "stage_c2_adapter_sha256": "28fba5d421ea611db2e0d9cd411e40a0fc2035a9a45eb0bb3be24c84947e0ab6",
+    "stage_c5_adapter_path": "runs/stage-c5/constrained-successor-v3-selection/evidence/runs/stage-c5/warmstart-selected-v3/lora-adapters",
+    "stage_c5_adapter_sha256": "e1d56f45485eef065bae42980427ee3c88176a5c864cbb350fa8494d0370e623"
+  },
+  "measurement_protocol": {
+    "canonical_scorer": {
+      "attention": "eager",
+      "backend": "transformers-eager-cuda",
+      "batch_size": 1,
+      "cuda_graphs": false,
+      "deterministic_algorithms": true,
+      "implementation": "scripts/score_stage_c6_canonical_transformers.py",
+      "logit_export_dtype": "float32",
+      "model_dtype": "float32",
+      "normalizer": "python-math-fsum-float64",
+      "replicate_rule": "All three signed action payloads and all three signed root payloads must be byte-identical.",
+      "replicates": 3,
+      "runtime_lora_for_initialization": false,
+      "sampling": false,
+      "tf32": false
+    },
+    "factorization": {
+      "authority": "canonical_transformers_scorer",
+      "failure_rule": "Stop before scientific arms. Initialization engineering ends; do not alter the threshold or warm start.",
+      "joint_tv_maximum": 0.05,
+      "mutual_information_nats_maximum": 0.01,
+      "threshold_change_from_v1": false
+    },
+    "final_policy_endpoints": {
+      "all_eight_final_adapters_scored_in_one_process": true,
+      "authority": "canonical_transformers_scorer",
+      "same_settings_as_initialization": true
+    },
+    "runtime_power": {
+      "all_nonfactorization_stage_c5_checks_required": true,
+      "authority": "same-deployment-vllm",
+      "campaign_power_required": true,
+      "may_decide_factorization": false,
+      "purpose": "Measure actual constrained-rollout exploration support and verify the structural smoke behavior logprob contract."
+    },
+    "symmetry": "The measurement split and constrained policy apply identically to broadcast and sliced arms."
+  },
+  "rendered_configs": {
+    "count": 9,
+    "parse_validation": "All nine TOML files parse through the pinned Prime-RL RLConfig before any v2 model call.",
+    "sha256": {
+      "configs/stage-c6/rendered-v2/confusion_irrelevant-broadcast-s9911.toml": "08f9bf08aec29adf09edaf38fa98c9197793ed8bdc85fdf51f737c0d42741d3c",
+      "configs/stage-c6/rendered-v2/confusion_irrelevant-broadcast-s9912.toml": "9db52b178cc2258078799a613b8eded168d1100cc2ab3bb6889ca1e538378893",
+      "configs/stage-c6/rendered-v2/confusion_irrelevant-sliced-s9911.toml": "1af87827970d00e64c9fcd24d9d833a26cbec253e09a7f34bc398dd08d28b7cc",
+      "configs/stage-c6/rendered-v2/confusion_irrelevant-sliced-s9912.toml": "837fe572d5876ab47a9fcf0f6dcc2c1a8cc4ce075b91bb1f60f125876f71ec88",
+      "configs/stage-c6/rendered-v2/confusion_lucky-broadcast-s9914.toml": "26dfe8158f37caddf34e55a5c0cba279f913e88407f666baceadd978aafdc097",
+      "configs/stage-c6/rendered-v2/confusion_lucky-sliced-s9914.toml": "36deb258bb21a14ca76478c9195e22b5a1e53b2f56f1b84a22afbc124da785ee",
+      "configs/stage-c6/rendered-v2/confusion_redundant-broadcast-s9913.toml": "8156583b8b94b6022ad79e1645baa93e28bab65471fa8f2157335a22f2be0cc4",
+      "configs/stage-c6/rendered-v2/confusion_redundant-sliced-s9913.toml": "3d4a12408974a5a71874cb1b7e525e8db2788f67e270375f890f40c715398217",
+      "configs/stage-c6/rendered-v2/structural-broadcast-s9910.toml": "c361d199635ba86c7fa42715ebb26e57f02f8e0999ac93b60dde272169a44284"
+    }
+  },
+  "repair_and_redeploy_policy": {
+    "after_first_scientific_arm_outcome": "Never rerun an observed arm. Only exact continuation of previously unobserved frozen arms from retained byte-identical initialization is allowed.",
+    "canonical_support_failure": "Terminate v2 before scientific arms; do not change initialization, measurement, or thresholds.",
+    "decision_bearing_observations": [
+      "canonical support result",
+      "same-deployment runtime-power result",
+      "constrained-interface smoke result",
+      "any scientific arm metric",
+      "any final policy score"
+    ],
+    "eligible_failures": [
+      "provider interruption or pod disappearance",
+      "SSH or network transport failure",
+      "dependency or environment setup failure",
+      "outcome-independent launcher, path, serialization, or orchestration defect",
+      "shared hardware failure unrelated to either algorithm"
+    ],
+    "if_exact_continuation_is_impossible": "Terminate the campaign and report the partial result without replacement runs.",
+    "immutable_fields": [
+      "selected initialization bytes",
+      "tasks, arms, seeds, order, and matched call budgets",
+      "optimizer and sampling settings",
+      "constrained policy semantics",
+      "support thresholds",
+      "canonical scorer settings and replicate rule",
+      "scientific metrics and decision rules"
+    ],
+    "initial_deployments": 1,
+    "logical_campaigns": 1,
+    "maximum_redeployments_after_initial": 1,
+    "no_outcome_informed_repairs": true,
+    "no_silent_retries": true,
+    "principle": "Outcome-independent environment and deployment failures may be fixed transparently; measurements and scientific outcomes may not be retried or used to redesign the experiment.",
+    "repair_requirements": [
+      "terminate the failed deployment",
+      "recover and commit all available evidence",
+      "identify the outcome-independent root cause",
+      "make the minimal repair and add a regression test",
+      "commit and audit a repair amendment before redeployment",
+      "preserve existing canonical payloads and never rerun a completed replicate",
+      "record exact billing for every attempt"
+    ]
+  },
+  "reporting": {
+    "branch_cost_ledger": true,
+    "composite_score": false,
+    "final_reward_role": "Sanity check only.",
+    "pareto_rule": "Report both outcomes separately even if nuisance drift improves while calls-to-threshold worsens.",
+    "primary_outcomes": [
+      "Known-noncausal target Jensen-Shannon drift from initialization.",
+      "Policy calls to the frozen causal target-success threshold."
+    ]
+  },
+  "schema_version": 1,
+  "scientific_question": "On genuine two-decision workflows, does node-level all-branch LOO reduce policy drift at a known non-causal target compared with trajectory-broadcast GRPO, while preserving the ability to learn causal target actions?",
+  "score_stability_diagnosis": {
+    "disposition": "Do not relax a support threshold. Replace the unstable measurement with a deterministic canonical scorer.",
+    "maximum_selected_logprob_drift": 0.22703769319015832,
+    "merged_model_files_byte_identical": true,
+    "report": "reports/stage-c6-score-stability-2026-07-29.json",
+    "signed_payload_sha256": "01bc09f17e8df513f5f4a9c8d946c73da64ad2da6f2e0f69dbde7a0e51b39abd",
+    "vllm_joint_tv_stage_c5": 0.04833106488622617,
+    "vllm_joint_tv_stage_c6": 0.051701397810110614
+  },
+  "source": {
+    "audit_implementation_commit": "109e5b6",
+    "implementation_commit": "2d741b4",
+    "sha256": {
+      "configs/stage-c4/selection-action-cases.json": "26fe59cfd4d007571242a5d96a488a8f48438ca1e9ac830f725258886cdf9e64",
+      "configs/stage-c4/selection-root-cases.json": "38d222f58c9130908e486a187bd453706a0c62fb02aa72eaae7ef82709f7feec",
+      "datasets/stage-c4/factorized-warmstart-manifest.json": "c214314f2dafca0ecbf4542ac23d3a7e31ed9431b6b19430e461e672a6a5827a",
+      "environments/redco_credit_v1/redco_credit_v1/taskset.py": "528c11891687ab1262b26fe2e0c56e26ee5b0b7bf16cc8b3e4c026b285440981",
+      "patches/prime-rl-redco-stage-c3-v3.patch": "790e0590ba58e5b3c0e572b0f7a210d2ad3cf4b3278cd5b448c9e7e3937ced9a",
+      "reports/stage-c6-credit-confusion-live-v1-2026-07-29.md": "70dd352293ebdbad934d07f0fa412854398a3b1ca9aad81ffc3d456c0e5c12a1",
+      "reports/stage-c6-score-stability-2026-07-29.json": "7d7228cda3bbeb3d5c3fcbbedb77395c7cc2f2b3fcae7507e36a904d85fa92e8",
+      "scripts/audit_stage_c6_preregistration_v2.py": "eea60a440d7aa4e47197402bd1c7e014b7600e7d3ddf7919d1a20ba5cb44d7f4",
+      "scripts/evaluate_stage_c5_candidate.py": "a6a70352c67b9c3e6e5644a4b4fa5a115abb4cd9f7301dcbf2279e9986107428",
+      "scripts/evaluate_stage_c6_canonical_scores.py": "4ebd7728a0e48f433542dd5c768d682690235961e0706986415bda7bc6a904f3",
+      "scripts/merge_stage_c_warmstart.py": "06046f345d0ac29e0919d43fce50c2a6ae20a29d03be215785323413e28d0416",
+      "scripts/run_signed_vllm_scorer.py": "5ba73b96b2a2e9ec691abe67f932b4be03b0389d79a16e7b2a4eca37e8855484",
+      "scripts/run_stage_c2_campaign_arm.sh": "64c3bc16c2196fe40d5cc275922fc461de615ff352d750f7303327d0ec385cfc",
+      "scripts/run_stage_c3_supervised_arm.py": "c364d6088e08ec4679c4622de08ad424ce9dd6698ee0f2255fa0a551028eb5ed",
+      "scripts/run_stage_c6_campaign_v2.sh": "9627d1e3c273564c62cf4c1536f356661bda0832ec623c9dff6010b933e396b9",
+      "scripts/score_stage_c3_root_routes_vllm.py": "26bbfc54359f19c490f879ba08add7b91b51d44aa003a3f57f436acf1476aadc",
+      "scripts/score_stage_c6_canonical_transformers.py": "1e51000616fc010c1cc5c2d3f0ea9cb8bd774eb11e39c23cd40d49c68bb6c7ba",
+      "scripts/score_stage_c_policies_vllm.py": "f997e502151fd69b2c4333520008ce5fc57dc540d6d4e896a904e4f185f0b772",
+      "scripts/verify_stage_c5_constraint_smoke.py": "93b77bc8fb2c6e72eb09d6905ca06e54f68c6c1f90d3b1eb90e92f2a909bf981",
+      "src/redco/analysis/canonical_logits.py": "a53fa3a9ab988705202f3be6095a69ef38309d2e82be853f518347d4937c6f31",
+      "src/redco/analysis/stage_c3_invariants.py": "d62466387971eba78c85beb537d5e1c8e0ff9706a44d2ba58c95475423e4ff29",
+      "src/redco/analysis/stage_c3_live.py": "590a24ae503ecb92a004c76cdbc37c4d99a8f3da8e75c1f38932df32a5c06df7",
+      "src/redco/analysis/stage_c5_constrained.py": "5d0a1b6989f97e19b0d72d04d8cbdc9453bdd1c0ff043a46c37ff2f9748f2a15",
+      "src/redco/analysis/stage_c6_canonical.py": "f2efe1906107d3120f03f233f0638ceaf01e5d6e63aa79974a134018d6c7b614",
+      "src/redco/analysis/stage_c6_v2_live.py": "367e8bc9db2f5cc5f2bc8196f15382b12c9c4298f74f06ef1251d3ce717dea1f",
+      "src/redco/analysis/stage_c6_v2_preregistration.py": "97e89efab98214c9ec80d80c255ae020ce560756659e4676dc0bc75bd3edd650",
+      "tests/test_canonical_logits.py": "17165a9bbe0885aa0fae80246718b1a975963880e9a10e19ae6f28dc7d4b2229",
+      "tests/test_stage_c6_canonical.py": "0cf8831849f1ff9ccd51b1ceb9638117ccc51a8963e1292897a5d72a0a8b49ad",
+      "tests/test_stage_c6_canonical_scorer_contract.py": "4f9c8b26fd233b9f38291a59a1185a46a03471a332c2a6ecdede2ebdae393048",
+      "tests/test_stage_c6_v2_live.py": "4852099952d124d3ccc28ed56a2a5886261af100f9e9b45bf4ad20e440fe5496",
+      "tests/test_stage_c6_v2_preregistration.py": "320ec53cfd992b2029267e3b03771212609b364594b4aa779a8f8c8df53e380b",
+      "tests/test_stage_c6_v2_runtime.py": "ed0f7e50bfdb255b70ac0820cdf74de92d4470bd241b2797a4860f57dbf4c1f8"
+    }
+  },
+  "stage_c6_v1_terminal": {
+    "interpretation": "V1 remains terminal. Its single-shot vLLM factorization result does not test either scientific arm.",
+    "scientific_optimizer_steps": 0,
+    "scientific_policy_calls": 0,
+    "status": "terminal_support_failure",
+    "terminal_evidence_archive_sha256": "4a2669db18e2b98a03075dbbc7fbb0a3b94736b253640a8940756fb5b0a29ebd",
+    "terminal_report_commit": "377a907",
+    "terminal_support_signed_payload_sha256": "02b68dacefadacca5cd3e94d6992a1e298b492193e9c867306152fe807c0e00c"
+  },
+  "status": "frozen_before_any_stage_c6_v2_model_call",
+  "tasks": {
+    "common_random_numbers": "For one ReDCO episode, root route and episode luck are sampled once and held fixed across all 11 target branches.",
+    "confusion_irrelevant": "The root route changes reward; the targeted digit has no effect. This is the primary credit-confusion endpoint.",
+    "confusion_lucky": "Target digit 5 and root route are causal while an episode-level +/-1 luck term is shared by every branch.",
+    "confusion_redundant": "Reward succeeds when either root route delta or target digit 5 succeeds.",
+    "episode_diversity": "Different episodes of the same task receive distinct deterministic root seeds via stable rollout addresses."
+  }
+}
