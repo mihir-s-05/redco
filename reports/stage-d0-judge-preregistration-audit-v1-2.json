@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "preregistration": {
+    "path": "configs/stage-d/stage-d0-judge-audit-preregistration-v1.json",
+    "sha256": "9310c80db97699d25c64a27345caec18495304d50e5dae4824417836532038cc"
+  },
+  "hardware_amendment": {
+    "path": "configs/stage-d/stage-d0-judge-audit-hardware-successor-v1-2.json",
+    "sha256": "327553f9aee6713c093483ce8b7775c139e40e1058d64f72a3e0b36045cc4d1f"
+  },
+  "checks": {
+    "reference_lock": {
+      "expected": "62c535dc67eb62be1571e967b72ffbf834282017f51fcbf98f2f2b4ebc08c9d2",
+      "observed": "62c535dc67eb62be1571e967b72ffbf834282017f51fcbf98f2f2b4ebc08c9d2",
+      "passes": true
+    },
+    "frozen_sources": {
+      "files": 6,
+      "mismatches": {},
+      "passes": true
+    },
+    "hardware": {
+      "amends_correct_protocol": true,
+      "scientific_fields_unchanged": true,
+      "non_spot": true,
+      "two_48gb_gpus": true,
+      "within_hourly_cap": true,
+      "passes": true
+    },
+    "budget": {
+      "judge_gate_within_d0_cap": true,
+      "passes": true
+    }
+  },
+  "decision": "pass"
+}

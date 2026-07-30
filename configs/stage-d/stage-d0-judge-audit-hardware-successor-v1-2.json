@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "amends": "configs/stage-d/stage-d0-judge-audit-preregistration-v1.json",
+  "supersedes_hardware_amendment": "configs/stage-d/stage-d0-judge-audit-hardware-amendment-v1-1.json",
+  "trigger": "Two HTTP 500 provisioning failures on resource e0cf54 before any pod or model call.",
+  "change_class": "hardware_only_outcome_independent_successor",
+  "resource": {
+    "resource_id": "6705b0",
+    "cloud_id": "gpu_2x_l40s",
+    "gpu_type": "L40S 48GB",
+    "gpu_count": 2,
+    "provider": "massedcompute",
+    "location": "US",
+    "is_spot": false,
+    "price_per_hour_usd": 1.64,
+    "availability_observed": "Available"
+  },
+  "successor_attempt_policy": {
+    "maximum_create_calls": 1,
+    "on_failure": "Stop provisioning and record another outcome-independent infrastructure failure."
+  },
+  "scientific_fields_changed": false
+}
