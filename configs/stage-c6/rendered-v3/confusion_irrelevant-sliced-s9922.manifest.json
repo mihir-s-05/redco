@@ -1,0 +1,20 @@
+{
+  "arm": "sliced",
+  "constrained_root_routes": true,
+  "exact_categorical_token_groups": [
+    [
+      7141,
+      19127,
+      32214,
+      20255
+    ]
+  ],
+  "model_path": "runs/stage-c6/selected-initialization-merged",
+  "output": "configs/stage-c6/rendered-v3/confusion_irrelevant-sliced-s9922.toml",
+  "probe": "confusion_irrelevant",
+  "schema_version": 1,
+  "seed": 9922,
+  "sha256": "72c2d10d97a0f3cb7505eb5bb4f81052f79577a4dfdb912a4eb283c76fa14dc7",
+  "smoke": false,
+  "template": "configs/stage-c3/credit-confusion-sliced-template.toml"
+}

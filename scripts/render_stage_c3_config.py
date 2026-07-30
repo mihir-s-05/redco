@@ -20,11 +20,22 @@ def main() -> None:
     parser.add_argument("--model-path")
     parser.add_argument("--constrained-root-routes", action="store_true")
     parser.add_argument(
+        "--exact-categorical-token-group",
+        action="append",
+        default=[],
+        help="Comma-separated token ids; repeat for disjoint action groups.",
+    )
+    parser.add_argument("--enable-token-export", action="store_true")
+    parser.add_argument(
         "--run-root",
         default="runs/stage-c3/credit-confusion-live",
     )
     parser.add_argument("--manifest", type=Path)
     args = parser.parse_args()
+    exact_groups = tuple(
+        tuple(int(token_id) for token_id in raw.split(","))
+        for raw in args.exact_categorical_token_group
+    )
     result = render(
         args.template,
         args.output,
@@ -35,6 +46,8 @@ def main() -> None:
         smoke=args.smoke,
         model_path=args.model_path,
         constrained_root_routes=args.constrained_root_routes,
+        exact_categorical_token_groups=exact_groups,
+        enable_token_export=args.enable_token_export,
     )
     if args.manifest is not None:
         args.manifest.parent.mkdir(parents=True, exist_ok=True)

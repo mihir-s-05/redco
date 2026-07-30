@@ -89,3 +89,31 @@ def test_stage_c6_render_uses_one_constrained_policy_everywhere(
     text = output.read_text(encoding="utf-8")
     assert text.count("env.constrained_root_routes = true") == 2
     assert 'name = "runs/stage-c6/selected-initialization-merged"' in text
+
+
+def test_stage_c6_exact_categorical_render_configures_trainer(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "stage-c6-exact.toml"
+    manifest = render(
+        Path("configs/stage-c3/credit-confusion-broadcast-template.toml"),
+        output,
+        arm="broadcast",
+        probe="confusion_irrelevant",
+        seed=9920,
+        run_root="runs/stage-c6/credit-confusion-live-v3",
+        model_path="runs/stage-c6/selected-initialization-merged",
+        constrained_root_routes=True,
+        exact_categorical_token_groups=((7141, 19127, 32214, 20255),),
+        enable_token_export=True,
+    )
+    text = output.read_text(encoding="utf-8")
+
+    assert 'fused_lm_head_token_chunk_size = "disabled"' in text
+    assert "[trainer.exact_categorical]" in text
+    assert "token_groups = [[7141,19127,32214,20255]]" in text
+    assert manifest["exact_categorical_token_groups"] == [
+        [7141, 19127, 32214, 20255]
+    ]
+    assert "[trainer]\nenable_token_export = true" in text
+    assert manifest["enable_token_export"] is True

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 PROBES = {
@@ -24,6 +25,8 @@ def render(
     smoke: bool = False,
     model_path: str | None = None,
     constrained_root_routes: bool = False,
+    exact_categorical_token_groups: tuple[tuple[int, ...], ...] = (),
+    enable_token_export: bool = False,
 ) -> dict[str, object]:
     if arm not in ARMS:
         raise ValueError(f"unsupported arm: {arm}")
@@ -56,6 +59,45 @@ def render(
             anchor,
             anchor + "env.constrained_root_routes = true\n",
         )
+    if exact_categorical_token_groups:
+        flattened = [
+            token_id
+            for group in exact_categorical_token_groups
+            for token_id in group
+        ]
+        if (
+            any(len(set(group)) < 2 for group in exact_categorical_token_groups)
+            or any(token_id < 0 for token_id in flattened)
+            or len(set(flattened)) != len(flattened)
+        ):
+            raise ValueError(
+                "exact categorical groups must be disjoint and contain at "
+                "least two distinct nonnegative token ids"
+            )
+        anchor = "[trainer.model.ac]\n"
+        if text.count(anchor) != 1:
+            raise ValueError("template has an unexpected trainer-model layout")
+        groups = json.dumps(
+            [list(group) for group in exact_categorical_token_groups],
+            separators=(",", ":"),
+        )
+        exact_config = (
+            '[trainer.model]\n'
+            'fused_lm_head_token_chunk_size = "disabled"\n\n'
+            '[trainer.exact_categorical]\n'
+            f"token_groups = {groups}\n\n"
+        )
+        text = text.replace(anchor, exact_config + anchor)
+    if enable_token_export:
+        anchor = "[trainer.model]\n"
+        if text.count(anchor) != 1:
+            raise ValueError(
+                "token export requires the explicit trainer-model table"
+            )
+        text = text.replace(
+            anchor,
+            "[trainer]\nenable_token_export = true\n\n" + anchor,
+        )
     if "__" in text:
         raise ValueError("rendered config retains an unresolved placeholder")
     if smoke:
@@ -81,6 +123,10 @@ def render(
         "smoke": smoke,
         "model_path": model_path,
         "constrained_root_routes": constrained_root_routes,
+        "exact_categorical_token_groups": [
+            list(group) for group in exact_categorical_token_groups
+        ],
+        "enable_token_export": enable_token_export,
         "template": template.as_posix(),
         "output": output.as_posix(),
         "sha256": digest,

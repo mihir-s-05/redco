@@ -1,0 +1,20 @@
+{
+  "arm": "broadcast",
+  "constrained_root_routes": true,
+  "exact_categorical_token_groups": [
+    [
+      7141,
+      19127,
+      32214,
+      20255
+    ]
+  ],
+  "model_path": "runs/stage-c6/selected-initialization-merged",
+  "output": "configs/stage-c6/rendered-v3/confusion_irrelevant-broadcast-s9921.toml",
+  "probe": "confusion_irrelevant",
+  "schema_version": 1,
+  "seed": 9921,
+  "sha256": "294c954d4728329eb39adb6fb4a13969dbf26b836ab1f97d7b8e4d02f7f49865",
+  "smoke": false,
+  "template": "configs/stage-c3/credit-confusion-broadcast-template.toml"
+}

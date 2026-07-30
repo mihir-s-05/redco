@@ -1,0 +1,120 @@
+max_steps = 6
+seq_len = 512
+output_dir = "runs/stage-c6/credit-confusion-live-v3/confusion_irrelevant/sliced-s9922"
+
+[deployment]
+num_train_gpus = 1
+num_infer_gpus = 1
+
+[model]
+name = "runs/stage-c6/selected-initialization-merged"
+
+[file_monitor]
+filename = "metrics.jsonl"
+
+[trainer.model]
+fused_lm_head_token_chunk_size = "disabled"
+
+[trainer.exact_categorical]
+token_groups = [[7141,19127,32214,20255]]
+
+[trainer.model.ac]
+freq = 1
+
+[trainer.model.lora]
+rank = 32
+alpha = 64
+
+[trainer.optim]
+lr = 1e-5
+
+[trainer.loss]
+type = "custom"
+import_path = "prime_rl.trainer.rl.redco_loss.clean_decision_loss"
+kwargs = { kl_tau = 0.001 }
+
+[orchestrator]
+batch_size = 96
+group_size = 8
+max_inflight_rollouts = 8
+max_off_policy_steps = 0
+strict_snapshot_batches = true
+train_groups_per_policy = 1
+post_batch_filters = [
+  { type = "gibberish", enforce = false },
+  { type = "repetition", enforce = false },
+  { type = "zero_advantage", enforce = false },
+]
+
+[orchestrator.algo]
+type = "redco"
+branch_group_size = 11
+continuations = 1
+eta = 1
+cost_penalty = 0
+replay_mode = "sliced"
+
+[orchestrator.renderer]
+name = "prime-qwen3"
+
+[orchestrator.train.sampling]
+temperature = 0.7
+max_completion_tokens = 64
+
+[[orchestrator.train.env]]
+name = "redco-credit"
+env.id = "redco-credit-v1"
+env.taskset = { id = "redco-credit-v1", repeats_per_probe = 256, exogenous_seed_offset = 9922000, probe_names = ["confusion_irrelevant"] }
+env.replay_mode = "sliced"
+env.branch_group_size = 11
+env.branch_temperature = 2.0
+env.context_temperature = 2.0
+env.constrained_root_routes = true
+env.context.harness = { id = "null", runtime = { type = "subprocess" } }
+env.original.harness = { id = "null", runtime = { type = "subprocess" } }
+env.alternative_1.harness = { id = "null", runtime = { type = "subprocess" } }
+env.alternative_2.harness = { id = "null", runtime = { type = "subprocess" } }
+env.alternative_3.harness = { id = "null", runtime = { type = "subprocess" } }
+env.alternative_4.harness = { id = "null", runtime = { type = "subprocess" } }
+env.alternative_5.harness = { id = "null", runtime = { type = "subprocess" } }
+env.alternative_6.harness = { id = "null", runtime = { type = "subprocess" } }
+env.alternative_7.harness = { id = "null", runtime = { type = "subprocess" } }
+env.alternative_8.harness = { id = "null", runtime = { type = "subprocess" } }
+env.alternative_9.harness = { id = "null", runtime = { type = "subprocess" } }
+env.alternative_10.harness = { id = "null", runtime = { type = "subprocess" } }
+
+[orchestrator.eval]
+interval = 1
+num_examples = 64
+
+[orchestrator.eval.sampling]
+temperature = 0.0
+max_completion_tokens = 64
+
+[[orchestrator.eval.env]]
+name = "redco-credit-eval"
+env.id = "redco-credit-v1"
+env.taskset = { id = "redco-credit-v1", repeats_per_probe = 64, exogenous_seed_offset = 9922500, probe_names = ["confusion_irrelevant"] }
+env.branching_enabled = false
+env.branch_temperature = 2.0
+env.context_temperature = 2.0
+env.constrained_root_routes = true
+env.context.harness = { id = "null", runtime = { type = "subprocess" } }
+env.original.harness = { id = "null", runtime = { type = "subprocess" } }
+
+[ckpt]
+keep_last = 1
+
+[trainer.ckpt]
+weights_only = true
+skip_gather_master_weights = true
+
+[inference]
+gpu_memory_utilization = 0.7
+seed = 9922
+
+[inference.model]
+max_model_len = 512
+
+[weight_broadcast]
+type = "filesystem"
