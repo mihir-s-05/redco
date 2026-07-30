@@ -145,6 +145,7 @@ def compile_stage_c_records(
     trajectory_advantage: float,
     target_node_id: str | None,
     branches: tuple[BranchActionExample, ...] = (),
+    branch_advantages: tuple[float, ...] | None = None,
 ) -> tuple[StageCTrainerRecord, ...]:
     """Apply the clean Stage-C replacement and decision-unit weighting rules."""
     _validate_decisions(incumbent, decisions)
@@ -153,6 +154,8 @@ def compile_stage_c_records(
     if target_node_id is None:
         if branches:
             raise ValueError("branch records require a committed target")
+        if branch_advantages is not None:
+            raise ValueError("branch advantages require branch records")
         advantages = [0.0] * len(incumbent.token_ids)
         weights = [0.0] * len(incumbent.token_ids)
         for decision in decisions:
@@ -225,13 +228,18 @@ def compile_stage_c_records(
             )
         )
 
-    branch_advantages = leave_one_out_advantages(
-        tuple(branch.reward for branch in branches)
-    )
+    if branch_advantages is None:
+        resolved_branch_advantages = leave_one_out_advantages(
+            tuple(branch.reward for branch in branches)
+        )
+    else:
+        if len(branch_advantages) != len(branches):
+            raise ValueError("branch advantages must align with branch records")
+        resolved_branch_advantages = tuple(float(value) for value in branch_advantages)
     branch_weight = target.outer_weight / len(branches)
     branch_normalizer = 1.0 / len(branches)
     for index, (branch, advantage) in enumerate(
-        zip(branches, branch_advantages, strict=True)
+        zip(branches, resolved_branch_advantages, strict=True)
     ):
         advantages = [0.0] * len(branch.sequence.token_ids)
         weights = [0.0] * len(branch.sequence.token_ids)

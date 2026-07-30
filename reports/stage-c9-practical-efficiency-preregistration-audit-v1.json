@@ -1,0 +1,25 @@
+{
+  "analysis": "stage-c9-preregistration-audit",
+  "checks": {
+    "all_config_semantics_match": true,
+    "all_source_hashes_match": true,
+    "bounded_budget": true,
+    "explicit_stop_after_bridge": true,
+    "fresh_seeds": true,
+    "frozen_status": true,
+    "k_unchanged_at_11": true,
+    "manifest_config_hashes_match": true,
+    "matched_calls": true,
+    "no_a100_h100_spot_or_disk": true,
+    "no_composite": true,
+    "prime_patch_matches_worktree": true,
+    "thirteen_configs_frozen": true
+  },
+  "config_count": 13,
+  "passed": true,
+  "patch_check_stderr": "",
+  "protocol": "configs/stage-c9/practical-efficiency-preregistration-v1.json",
+  "schema_version": 1,
+  "signed_payload_sha256": "9b6ea5b2bc37c728a6e6c72a77a314985d6cfe0f00be25864f44f43c0ba51834",
+  "source_hash_count": 12
+}

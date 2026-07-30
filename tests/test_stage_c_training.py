@@ -137,6 +137,45 @@ def test_compile_supports_eleven_branch_power_analysis_group() -> None:
     assert all(record.rl_weights[-1] == pytest.approx(1.0 / 11.0) for record in records)
 
 
+def test_compile_accepts_explicit_matched_data_branch_advantages() -> None:
+    incumbent = sequence((10, 15), (False, True))
+    decisions = (PolicyDecision("child", TokenSpan(1, 2)),)
+    branches = (
+        BranchActionExample(
+            sequence((20, 15), (False, True)),
+            TokenSpan(1, 2),
+            1.0,
+            "original",
+        ),
+        BranchActionExample(
+            sequence((20, 16), (False, True)),
+            TokenSpan(1, 2),
+            0.0,
+            "sampled",
+        ),
+    )
+
+    records = compile_stage_c_records(
+        incumbent=incumbent,
+        decisions=decisions,
+        trajectory_advantage=0.0,
+        target_node_id="child",
+        branches=branches,
+        branch_advantages=(0.25, -0.75),
+    )
+
+    assert tuple(record.advantages[-1] for record in records) == (0.25, -0.75)
+    with pytest.raises(ValueError, match="align"):
+        compile_stage_c_records(
+            incumbent=incumbent,
+            decisions=decisions,
+            trajectory_advantage=0.0,
+            target_node_id="child",
+            branches=branches,
+            branch_advantages=(0.25,),
+        )
+
+
 def test_compile_rejects_post_commitment_and_alignment_violations() -> None:
     incumbent = sequence((10, 11), (False, True))
     decisions = (PolicyDecision("child", TokenSpan(1, 2)),)

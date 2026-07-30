@@ -1,0 +1,95 @@
+{
+  "arms": [
+    "local-e1",
+    "local-e2",
+    "branch-global-e2",
+    "stock"
+  ],
+  "configs": [
+    {
+      "arm": "local-e1",
+      "path": "configs/stage-c9/rendered-v1/local-e1-s10031.toml",
+      "seed": 10031,
+      "sha256": "0426dcebb6f93fb84a742bb201ac1671d6989469c23e7468359df910b5159301"
+    },
+    {
+      "arm": "local-e2",
+      "path": "configs/stage-c9/rendered-v1/local-e2-s10031.toml",
+      "seed": 10031,
+      "sha256": "4e0c21cbc8ced5aa6e94cfe16c45979db8adcb0abb6b61098176ec174ff8825a"
+    },
+    {
+      "arm": "branch-global-e2",
+      "path": "configs/stage-c9/rendered-v1/branch-global-e2-s10031.toml",
+      "seed": 10031,
+      "sha256": "3f7389a7337753ad8576cfcfcd7a7740bff4661bab8f2128d00a3a0d19131076"
+    },
+    {
+      "arm": "stock",
+      "path": "configs/stage-c9/rendered-v1/stock-s10031.toml",
+      "seed": 10031,
+      "sha256": "7c5addaee2a9e0a108a7b0d5d6b0e2452ea6add3f81f8421672b1744c4aa50b3"
+    },
+    {
+      "arm": "local-e1",
+      "path": "configs/stage-c9/rendered-v1/local-e1-s10032.toml",
+      "seed": 10032,
+      "sha256": "47f91ec7e55528e88d94bc0e03e301eed311c39a6556a739a8aeb8868d5f54d0"
+    },
+    {
+      "arm": "local-e2",
+      "path": "configs/stage-c9/rendered-v1/local-e2-s10032.toml",
+      "seed": 10032,
+      "sha256": "30932d515d7f9726df5ef5e15a700473f48a081128988f082ea0d8d4c1d1f001"
+    },
+    {
+      "arm": "branch-global-e2",
+      "path": "configs/stage-c9/rendered-v1/branch-global-e2-s10032.toml",
+      "seed": 10032,
+      "sha256": "48eba7b5749cb9dd4d1e19946ca324a31bebc28a90d758ade0d1b43d190a3664"
+    },
+    {
+      "arm": "stock",
+      "path": "configs/stage-c9/rendered-v1/stock-s10032.toml",
+      "seed": 10032,
+      "sha256": "e31c5b62dddf44a4347f3864879b0aa6036f1c76f3f6f92ead9231841ddab7b9"
+    },
+    {
+      "arm": "local-e1",
+      "path": "configs/stage-c9/rendered-v1/local-e1-s10033.toml",
+      "seed": 10033,
+      "sha256": "7cbdca3616b49b3a3d1d977bf9d09b60339e6e6343cc1c3b563ffb24d397840c"
+    },
+    {
+      "arm": "local-e2",
+      "path": "configs/stage-c9/rendered-v1/local-e2-s10033.toml",
+      "seed": 10033,
+      "sha256": "086cd6d01be54504c2ef1b1c7f9f0dd8485c0c93b062bec47d7cdc91fbff10e1"
+    },
+    {
+      "arm": "branch-global-e2",
+      "path": "configs/stage-c9/rendered-v1/branch-global-e2-s10033.toml",
+      "seed": 10033,
+      "sha256": "1306830a4eeb8d90f7d0049d8807e27e5a276e866f5e2181cdef1a4000f1de47"
+    },
+    {
+      "arm": "stock",
+      "path": "configs/stage-c9/rendered-v1/stock-s10033.toml",
+      "seed": 10033,
+      "sha256": "ad251d7597948ad487e9f45f436b533fc8c108ca1191b5e740c7cb2db0ba740e"
+    },
+    {
+      "arm": "integration-smoke-local-e2",
+      "path": "configs/stage-c9/rendered-v1/smoke-local-e2-s10030.toml",
+      "seed": 10030,
+      "sha256": "2786bdbd85792a62724037f022f179b096bfe494ed06dd6d5249dae782c98c20"
+    }
+  ],
+  "experiment": "stage-c9-practical-efficiency",
+  "schema_version": 1,
+  "seeds": [
+    10031,
+    10032,
+    10033
+  ]
+}
