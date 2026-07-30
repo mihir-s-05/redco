@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="${REDCO_REPO_ROOT:-/workspace/redco}"
 run_root="${REDCO_RUN_ROOT:-runs/stage-c7/frozen-reuse-live}"
 source_batch="runs/stage-c6/credit-confusion-live-v3/confusion_redundant/sliced-s9923/run_default/rollouts/step_1/train_rollouts.bin"
+source_control="runs/stage-c6/credit-confusion-live-v3/confusion_redundant/sliced-s9923/run_default/control/orch.toml"
 template="configs/stage-c7/frozen-reuse-trainer.template.toml"
 stage_c2_adapter="runs/stage-c2/warmstart-selected-v2/step_23/lora_adapters"
 stage_c5_adapter="runs/stage-c5/constrained-successor-v3-selection/evidence/runs/stage-c5/warmstart-selected-v3/lora-adapters"
@@ -14,6 +15,7 @@ uv_binary="${REDCO_UV_BINARY:-uv}"
 cd "$repo_root"
 test ! -e "$run_root"
 test -s "$source_batch"
+test -s "$source_control"
 test -s "$template"
 test -s "$stage_c2_adapter/adapter_model.safetensors"
 test -s "$stage_c5_adapter/adapter_model.safetensors"
@@ -64,7 +66,9 @@ for updates in 1 2 3; do
     --template "$template" \
     --output "$config" \
     --output-dir "$arm" \
-    --max-steps "$updates"
+    --max-steps "$updates" \
+    --control-template "$source_control" \
+    --control-output "$arm/run_default/control/orch.toml"
   for step in $(seq 1 "$updates"); do
     rollout_dir="$arm/run_default/rollouts/step_$step"
     mkdir -p "$rollout_dir"
