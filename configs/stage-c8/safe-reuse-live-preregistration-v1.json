@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c8-safe-single-adapter-two-update-reuse-v1",
+  "status": "frozen_before_gpu_observation",
+  "question": "Can one persistent trainer process complete exactly two optimizer updates on content-identical frozen examples when the one-adapter LoRA path uses ordinary matrix multiplication, and what does a separate raw grouped-MM probe reveal about the earlier CUDA failure?",
+  "motivation": {
+    "prior_result": "Stage C7 reuse-1 completed one update, while the separate max_steps=2 trainer failed on its first forward through torch._grouped_mm with CUDA illegal memory access.",
+    "adversarial_review": "The prior result does not establish a process-lifecycle failure. Both trainers used the private one-group grouped-MM path and a shared default TorchInductor cache. A one-group grouped operation has no grouping benefit, so the safe algebraically equivalent path should be tested directly.",
+    "implementation_transition": "For exactly one LoRA adapter, MultiLoRALinear dispatches to Prime-RL's existing ordinary-matmul fallback. Multi-adapter dispatch remains unchanged.",
+    "not_an_estimator_change": true
+  },
+  "scope": {
+    "classification": "engineering-only bounded failure-isolation microcheck",
+    "fresh_scientific_outcomes": false,
+    "not_claimed": [
+      "fresh-rollout learning",
+      "a powered estimator comparison",
+      "the definitive root cause of the Stage C7 CUDA fault",
+      "byte-identical continuity with grouped-MM training",
+      "the safety or correctness of grouped-MM for multiple adapters"
+    ]
+  },
+  "source": {
+    "base_model": "Qwen/Qwen3-4B-Instruct-2507",
+    "prime_rl_commit": "3b22dd951cad1036d1fe8dd0a0bfc40807a9b360",
+    "stage_c2_adapter_sha256": "28fba5d421ea611db2e0d9cd411e40a0fc2035a9a45eb0bb3be24c84947e0ab6",
+    "stage_c5_adapter_sha256": "e1d56f45485eef065bae42980427ee3c88176a5c864cbb350fa8494d0370e623",
+    "original_batch_sha256": "6ceb8d2d7f476bf4ec4e370262cbe6b3351a9e80b6d28758797df9162cc75ed2",
+    "frozen_examples_msgpack_sha256": "e737412ca16c2530910f5896af4d32f816fd96b1e86527b3af7aff31e9c07342",
+    "normalized_batches": {
+      "step_1_sha256": "6ceb8d2d7f476bf4ec4e370262cbe6b3351a9e80b6d28758797df9162cc75ed2",
+      "step_2_sha256": "a000030d42effda06d980c06254513e8327d46d98485bb4b50905b98c1ffd7a9",
+      "contract": "The example stream is byte-identical after msgpack encoding; only TrainingBatch.step changes from 1 to 2 so filesystem transport metadata matches each rollout path."
+    },
+    "packing": {
+      "seq_len": 512,
+      "num_train_workers": 1,
+      "num_loras": 1,
+      "microbatch_count": 24,
+      "packed_msgpack_sha256": "1c488ec34d47c501a31a5ae4ed537ec90760d3bb1f1b6a99b15daccb13c9eeb0"
+    }
+  },
+  "cpu_preflight": {
+    "single_adapter_dispatch": "ordinary-matmul fallback even when grouped-MM is requested",
+    "single_adapter_forward_and_gradients": "exactly equal to the explicit ordinary-matmul expression on CPU",
+    "multi_adapter_dispatch": "grouped-MM remains selected when eligible",
+    "offset_contract": "int32, monotone, and final offset equals the total token count",
+    "frozen_batch_contract": "all aligned training streams and packed tensor shape/dtype/stride metadata are audited"
+  },
+  "raw_grouped_mm_probe": {
+    "runs_before_model_loading": true,
+    "device": "GPU 0",
+    "seed": 7308101,
+    "representative_shape": {
+      "tokens": 476,
+      "in_features": 2560,
+      "out_features": 4096,
+      "rank": 32,
+      "groups": 1,
+      "dtype": "bfloat16",
+      "offset_dtype": "int32"
+    },
+    "cases_in_order": [
+      "eager isolated subprocess",
+      "compiled isolated subprocess, first use",
+      "compiled isolated subprocess, second use of the same TorchInductor cache"
+    ],
+    "synchronization": "CUDA_LAUNCH_BLOCKING=1 plus explicit synchronization after grouped operations and backward",
+    "comparison": {
+      "reference": "ordinary matmul",
+      "forward_and_gradients": true,
+      "absolute_tolerance": 0.03,
+      "relative_tolerance": 0.03
+    },
+    "interpretation": {
+      "all_pass": "The old failure remains unresolved or transient; this does not exonerate the private kernel.",
+      "only_second_compiled_fails": "A shared compiled-cache failure is supported.",
+      "any_other_failure": "A private grouped-kernel failure is observed under the frozen probe."
+    },
+    "trainer_proceeds_after_any_recorded_probe_disposition": true
+  },
+  "safe_reuse_trainer": {
+    "processes": 1,
+    "max_steps": 2,
+    "third_update": false,
+    "separate_one_step_control": false,
+    "seed": 7308101,
+    "cuda_launch_blocking": true,
+    "isolated_torchinductor_cache": true,
+    "single_lora_adapter": true,
+    "single_adapter_dispatch": "ordinary matmul",
+    "lora_rank": 32,
+    "lora_alpha": 64,
+    "learning_rate": 1e-05,
+    "optimizer": "adamw",
+    "weight_decay": 0.01,
+    "max_grad_norm": 1.0,
+    "loss": "exact-sequence clipped node loss",
+    "clip_epsilon": 0.2,
+    "kl_tau": 0.001,
+    "ratio_mode": "exact_sequence",
+    "exact_categorical_root_token_ids": [
+      7141,
+      19127,
+      32214,
+      20255
+    ]
+  },
+  "decision": {
+    "pass": [
+      "the raw grouped-MM probe reaches one recorded frozen interpretation",
+      "one persistent trainer process completes exactly optimizer steps 1 and 2",
+      "both steps have finite grad norm, node ratio, node clipping, and node KL metrics",
+      "both steps emit adapter artifacts",
+      "both rollout batch hashes match the normalized batch contract"
+    ],
+    "terminal_failure": [
+      "the safe fallback trainer completes step 1 but fails before completing step 2",
+      "a frozen input or source hash differs",
+      "the verifier does not pass"
+    ],
+    "meaning_of_pass": "Two-update frozen-batch reuse mechanics work through the safe single-adapter fallback.",
+    "meaning_of_failure_after_step_1": "A true within-process reuse failure remains after removing the private grouped kernel.",
+    "no_learning_threshold": true
+  },
+  "repair_policy": {
+    "before_any_optimizer_step": "At most one outcome-independent environment repair and redeployment may be made if documented and committed.",
+    "after_any_optimizer_step": "No retry or redeployment. Recover artifacts, report the terminal result, and stop.",
+    "raw_probe": "The raw probe is diagnostic and cannot be rerun or used to modify the frozen trainer."
+  },
+  "future_symmetry": {
+    "rule": "If adopted beyond this engineering microcheck, the same single-adapter fallback must be used in every scientific arm and baseline.",
+    "reporting": "The transition from private grouped-MM to ordinary matmul must be disclosed as an implementation change."
+  },
+  "hardware": {
+    "gpu_count": 1,
+    "allowed_non_spot_types": [
+      "A6000",
+      "RTX 6000 Ada",
+      "L40",
+      "L40S",
+      "A40",
+      "RTX 8000"
+    ],
+    "maximum_hourly_rate_usd": 1.0,
+    "forbidden": [
+      "A100",
+      "H100",
+      "spot or preemptible compute",
+      "persistent storage"
+    ]
+  },
+  "resource_policy": {
+    "maximum_total_compute_usd": 1.0,
+    "one_pod_only": true,
+    "terminate_after_artifact_recovery": true,
+    "persistent_disks": 0,
+    "persistent_ephemeral_pod_uv_cache": true,
+    "retain_locally": [
+      "preregistration and audit",
+      "batch contract audit and normalized batches",
+      "raw-probe result and logs",
+      "rendered config",
+      "trainer metrics and logs",
+      "signed verifier result",
+      "adapter hashes"
+    ],
+    "do_not_retain_locally": [
+      "merged 4B models",
+      "optimizer state",
+      "CUDA, TorchInductor, or uv caches",
+      "adapter weights"
+    ]
+  },
+  "source_sha256": {
+    "configs/stage-c8/safe-reuse-trainer.template.toml": "ca27e24edf70fe5ad281c4b52e8c5ffcdddb226772ded99c723965d5de2a5086",
+    "patches/prime-rl-redco-stage-c8-single-adapter-fallback.patch": "051915b2ee27903355a7923d6607115be5f6178ffe3f8ef789e9ee4cb7309716",
+    "reports/stage-c8-batch-contract-audit-v1.json": "f000ae10ba05c6db43e3e9525839f1c8f662c42323e45500b46d633e7e16f731",
+    "scripts/merge_stage_c_warmstart.py": "06046f345d0ac29e0919d43fce50c2a6ae20a29d03be215785323413e28d0416",
+    "scripts/render_stage_c7_reuse_config.py": "68694b66d591f1ca06e16fc4806c2afe98e82bd6c225aabe6f8efce9950d60f5",
+    "scripts/run_stage_c8_raw_probe.py": "86100a2576da56980e7d1801eca0af4e8de9cf7409a56e80377b2be9427483fd",
+    "scripts/run_stage_c8_safe_reuse_live.sh": "08a8951d1c63c3855baf814a3855ad57244fb14b653e904b63193762632f19d1",
+    "scripts/stage_c8_batch_contract.py": "de6489068c06cc37d1fa60a8ed4a6963fa2fa8daa42e5a354d8439cde87252f0",
+    "scripts/stage_c8_grouped_mm_probe.py": "5a3f5be1aad914b34670f0cbce94f6ccca6c4752f3e3dfc3839b70c74843e77e",
+    "src/redco/analysis/stage_c8_safe_reuse.py": "9156b2610fcd2bd55280dbca9de3e6e776ce35a0adb20be3524627d0f73fb123",
+    "tests/test_stage_c8_safe_reuse.py": "a3258a68f8d683df2f636644be9ad53c6267d1cd9872ade05694c8b654532063",
+    "source_control_orch_toml": "862b0efa564b94bf0637bff94880c25dffd4c90cf77b283245b038cb69e6fdc0"
+  }
+}

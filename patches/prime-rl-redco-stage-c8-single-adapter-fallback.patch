@@ -1,0 +1,135 @@
+diff --git a/src/prime_rl/trainer/models/layers/lora/multi_linear.py b/src/prime_rl/trainer/models/layers/lora/multi_linear.py
+index fd9b59e78..7b2bf73f9 100644
+--- a/src/prime_rl/trainer/models/layers/lora/multi_linear.py
++++ b/src/prime_rl/trainer/models/layers/lora/multi_linear.py
+@@ -60,7 +60,11 @@ class MultiLoRALinear(MultiLoRAModule):
+         self.n_adapters = n_adapters
+         self.alpha = alpha
+         self.lora_dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
+-        self.use_grouped_mm = use_grouped_mm
++        # A grouped GEMM has no grouping benefit for one adapter, while
++        # torch._grouped_mm is a private API with a less mature compiled CUDA
++        # path than ordinary matmul. Use the algebraically equivalent fallback
++        # for the common single-run trainer configuration.
++        self.use_grouped_mm = use_grouped_mm and n_adapters > 1
+         self.in_features = base_layer.in_features
+         self.out_features = base_layer.out_features
+ 
+diff --git a/tests/unit/train/models/test_multi_lora_linear.py b/tests/unit/train/models/test_multi_lora_linear.py
+new file mode 100644
+index 000000000..1e12a1ac4
+--- /dev/null
++++ b/tests/unit/train/models/test_multi_lora_linear.py
+@@ -0,0 +1,112 @@
++from __future__ import annotations
++
++import torch
++from torch import nn
++
++from prime_rl.trainer.models.layers.lora import MultiLoRALinear, multi_linear
++from prime_rl.trainer.models.layers.lora.base import (
++    set_lora_num_tokens,
++    set_multilora_scaling,
++)
++
++
++def _set_run_state(token_counts: list[int], scaling: list[float]) -> None:
++    set_lora_num_tokens(None, reset_reference=True)  # type: ignore[arg-type]
++    set_multilora_scaling(None, reset_reference=True)  # type: ignore[arg-type]
++    set_lora_num_tokens(
++        torch.tensor(token_counts, dtype=torch.int32),
++        reset_reference=True,
++    )
++    set_multilora_scaling(
++        torch.tensor(scaling, dtype=torch.float32),
++        reset_reference=True,
++    )
++
++
++def test_single_adapter_uses_matmul_fallback_with_exact_gradients() -> None:
++    torch.manual_seed(7)
++    _set_run_state([5], [2.0])
++    base = nn.Linear(8, 16, bias=False)
++    layer = MultiLoRALinear(
++        base_layer=base,
++        rank=8,
++        n_adapters=1,
++        alpha=16.0,
++        use_grouped_mm=True,
++    )
++    assert not layer.use_grouped_mm
++
++    x = torch.randn(5, 8, requires_grad=True)
++    actual = layer(x)
++    actual_grads = torch.autograd.grad(
++        actual.square().sum(),
++        (x, layer.lora_A[0], layer.lora_B[0]),
++    )
++
++    expected = base(x) + 2.0 * (
++        (x @ layer.lora_A[0].transpose(-2, -1))
++        @ layer.lora_B[0].transpose(-2, -1)
++    )
++    expected_grads = torch.autograd.grad(
++        expected.square().sum(),
++        (x, layer.lora_A[0], layer.lora_B[0]),
++    )
++
++    torch.testing.assert_close(actual, expected)
++    for actual_grad, expected_grad in zip(
++        actual_grads,
++        expected_grads,
++        strict=True,
++    ):
++        torch.testing.assert_close(actual_grad, expected_grad)
++
++
++def test_multi_adapter_keeps_grouped_dispatch(monkeypatch) -> None:
++    _set_run_state([2, 3], [1.0, 1.0])
++    layer = MultiLoRALinear(
++        base_layer=nn.Linear(8, 16, bias=False),
++        rank=8,
++        n_adapters=2,
++        use_grouped_mm=True,
++    )
++    assert layer.use_grouped_mm
++
++    called = False
++
++    def grouped_stub(
++        x: torch.Tensor,
++        lora_a: torch.Tensor,
++        lora_b: torch.Tensor,
++        offsets: torch.LongTensor,
++    ) -> torch.Tensor:
++        nonlocal called
++        called = True
++        assert offsets.dtype == torch.int32
++        assert offsets.tolist() == [2, 5]
++        assert lora_a.shape == (2, 8, 8)
++        assert lora_b.shape == (2, 16, 8)
++        return torch.zeros((x.shape[0], 16), dtype=x.dtype)
++
++    monkeypatch.setattr(multi_linear, "_run_lora_grouped_mm", grouped_stub)
++    output = layer(torch.randn(5, 8))
++
++    assert called
++    assert output.shape == (5, 16)
++
++
++def test_fallback_offsets_are_monotone_and_cover_all_tokens() -> None:
++    torch.manual_seed(11)
++    _set_run_state([2, 0, 3], [1.0, 1.0, 1.0])
++    layer = MultiLoRALinear(
++        base_layer=nn.Linear(8, 16, bias=False),
++        rank=8,
++        n_adapters=3,
++        use_grouped_mm=False,
++    )
++    offsets = layer._lora_num_tokens.cumsum(dim=0, dtype=torch.int32)
++
++    assert offsets.dtype == torch.int32
++    assert offsets.tolist() == [2, 2, 5]
++    assert torch.all(offsets[1:] >= offsets[:-1])
++    assert offsets[-1].item() == 5
++    assert layer(torch.randn(5, 8)).shape == (5, 16)

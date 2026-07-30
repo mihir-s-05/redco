@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "analysis": "stage-c8-safe-reuse-preregistration-audit-v1",
+  "status": "passed",
+  "checks": {
+    "adversarial_review_completed_before_implementation": true,
+    "prior_stage_c7_evidence_does_not_claim_lifecycle_root_cause": true,
+    "single_adapter_fallback_is_algebraically_equivalent": true,
+    "single_adapter_forward_and_gradient_cpu_test_passes": true,
+    "multi_adapter_grouped_dispatch_cpu_test_passes": true,
+    "offset_contract_cpu_test_passes": true,
+    "existing_exact_categorical_and_practical_loss_cpu_tests_pass": true,
+    "prime_patch_applies_to_clean_pinned_commit": true,
+    "batch_examples_are_content_identical_across_transport_steps": true,
+    "batch_packing_contract_recorded": true,
+    "raw_probe_tolerance_and_interpretations_frozen": true,
+    "one_persistent_two_step_trainer_only": true,
+    "no_fresh_scientific_outcome": true,
+    "bash_driver_syntax_valid": true,
+    "local_analyzer_test_passes": true,
+    "resource_ceiling_at_most_1_usd": true,
+    "no_persistent_storage": true
+  },
+  "validation": {
+    "external_prime_cpu_tests_passed": 10,
+    "local_stage_c8_tests_passed": 1,
+    "ruff": "passed",
+    "batch_examples": 96,
+    "batch_total_tokens": 11080,
+    "batch_trainable_tokens": 152,
+    "packed_microbatches": 24
+  },
+  "preregistration": "configs/stage-c8/safe-reuse-live-preregistration-v1.json"
+}

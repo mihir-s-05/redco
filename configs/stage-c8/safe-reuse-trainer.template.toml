@@ -1,0 +1,131 @@
+output_dir = "__OUTPUT_DIR__"
+matmul_precision = "high"
+max_steps = __MAX_STEPS__
+enable_router_replay = false
+dist_timeout_seconds = 3600
+max_concurrent_runs = 1
+enable_token_export = false
+
+[model]
+name = "runs/stage-c8/safe-reuse-live/selected-initialization-merged"
+trust_remote_code = false
+seq_len = 512
+attn = "auto"
+fsdp_cpu_offload = false
+optim_cpu_offload = true
+reshard_after_forward = true
+dp_replicate = 1
+ep = "auto"
+ep_comm_backend = "torch"
+deepep_num_sms = 20
+cp = 1
+cp_style = "ring"
+impl = "auto"
+optimization_dtype = "float32"
+reduce_dtype = "float32"
+moe_router_dtype = "float32"
+moe_use_grouped_mm = true
+freeze_moe_router = false
+fused_lm_head_token_chunk_size = "disabled"
+
+[model.compile]
+fullgraph = false
+
+[model.ac]
+mode = "full"
+freq = 1
+targets = ["norm"]
+
+[model.ac_offloading]
+pin_memory = true
+max_inflight_activations = 5
+
+[model.lora]
+rank = 32
+alpha = 64.0
+dropout = 0.0
+target_modules = [
+  "q_proj",
+  "k_proj",
+  "v_proj",
+  "o_proj",
+  "gate_proj",
+  "up_proj",
+  "down_proj",
+  "experts",
+  "fc1_latent_proj",
+  "fc2_latent_proj",
+]
+modules_to_save = []
+
+[model.debug]
+random_init = false
+force_balanced_routing = false
+
+[tokenizer]
+name = "runs/stage-c8/safe-reuse-live/selected-initialization-merged"
+trust_remote_code = false
+
+[data]
+
+[loss]
+type = "custom"
+import_path = "prime_rl.trainer.rl.redco_loss.clipped_node_loss"
+
+[loss.kwargs]
+clip_epsilon = 0.2
+kl_tau = 0.001
+ratio_mode = "exact_sequence"
+
+[exact_categorical]
+token_groups = [[7141, 19127, 32214, 20255]]
+
+[optim]
+lr = 1e-5
+weight_decay = 0.01
+max_norm = 1.0
+type = "adamw"
+betas1 = 0.9
+betas2 = 0.999
+
+[scheduler]
+type = "constant"
+
+[ckpt]
+skip_gather_master_weights = true
+weights_only = true
+keep_last = 1
+skip_progress = false
+skip_scheduler = false
+skip_dataloader = false
+skip_optimizer = false
+
+[ckpt.weights]
+save_sharded = true
+save_format = "safetensors"
+save_adapter_separately = false
+adapter_only = false
+
+[weight_broadcast]
+type = "filesystem"
+save_sharded = true
+save_format = "safetensors"
+
+[rollout_transport]
+type = "filesystem"
+
+[log]
+level = "info"
+vf_level = "info"
+json_logging = false
+log_data = false
+interval = 10.0
+ranks_filter = [0]
+
+[file_monitor]
+filename = "metrics.jsonl"
+
+[gc]
+interval = 50
+
+[env_vars]
