@@ -73,6 +73,10 @@ def _sliced_config(source: str, *, arm: str, seed: int) -> str:
     text = text.replace("9923000", str(seed * 1000))
     text = text.replace("9923500", str(seed * 1000 + 500))
     text = _replace_once(text, "seed = 9923", f"seed = {seed}")
+    # Exact checkpoint-curve analysis needs all six collection endpoints.
+    # Prime-RL also retains the current in-flight broadcast, so keep_last=6
+    # is sufficient even though two directories may coexist transiently.
+    text = _replace_once(text, "keep_last = 1", "keep_last = 6")
     return text
 
 
@@ -106,6 +110,7 @@ def _stock_config(source: str, *, seed: int) -> str:
     text = text.replace("9923000", str(seed * 1000))
     text = text.replace("9923500", str(seed * 1000 + 500))
     text = _replace_once(text, "seed = 9923", f"seed = {seed}")
+    text = _replace_once(text, "keep_last = 1", "keep_last = 6")
     return text
 
 
