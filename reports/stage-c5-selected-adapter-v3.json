@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c5-bounded-infrastructure-repair-v3",
+  "status": "passed",
+  "selected_step": 18,
+  "selection_signed_payload_sha256": "5324c76a293b3ecbab9f25df44e8ad3f084f8395c46ce1e9dc24638d4269920a",
+  "selected_candidate_signed_payload_sha256": "cdad032630d637039f0baa6de6f13daea091a3386394f031b6c9921c3de42030",
+  "constrained_interface_signed_payload_sha256": "1e027bd36a9d8742d0c30f8c379f06d692eb8496adc1cd4814743a75b3c7e02f",
+  "adapter": {
+    "local_path": "runs/stage-c5/constrained-successor-v3-selection/evidence/runs/stage-c5/warmstart-selected-v3/lora-adapters",
+    "adapter_model_bytes": 132188392,
+    "adapter_model_sha256": "e1d56f45485eef065bae42980427ee3c88176a5c864cbb350fa8494d0370e623",
+    "remote_manifest_signed_payload_sha256": "8cc1b5784bfb3885522cd3eaf822f7b6967a148fcf996f0f9fe0c798da5d7cb3"
+  },
+  "evidence_archive": {
+    "local_path": "runs/stage-c5/constrained-successor-v3-selection/stage-c5-v3-selection-evidence.tar.gz",
+    "sha256": "43e403a4835e5f11beb52bd6da181c5e51583a631d7bd07c2ea0a3ee8f1a5c57"
+  },
+  "independent_local_verification": {
+    "selection_recomputed_byte_identical": true,
+    "constrained_interface_recomputed_byte_identical": true,
+    "adapter_hash_matches_remote_manifest": true
+  }
+}
