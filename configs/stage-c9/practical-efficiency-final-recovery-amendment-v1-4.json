@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c9-practical-efficiency-bridge-v1",
+  "amendment": "final-only-partial-recovery-v1-4",
+  "frozen_at_utc": "2026-07-30T22:05:31.3731403Z",
+  "base_protocol": "configs/stage-c9/practical-efficiency-preregistration-v1.json",
+  "prior_amendment": "configs/stage-c9/practical-efficiency-analysis-amendment-v1-3.json",
+  "terminal_history": {
+    "preserve_marker": "runs/stage-c9/practical-efficiency/CAMPAIGN_TERMINAL_FAILURE",
+    "arms_completed_once": 12,
+    "arms_invariant_passed": 12,
+    "exact_scores_observed": 0,
+    "failure": "The postprocessor requested six adapter checkpoints per run after Prime-RL had enforced the frozen [ckpt] keep_last = 1 setting. Only the last two filesystem broadcasts survived.",
+    "inventory": "An exhaustive read-only search of /home/ubuntu found exactly the warm-start adapters, smoke adapters, and the final two broadcasts for each arm. Every file had link count one; no deleted checkpoint bytes, hardlinks, trainer checkpoints, archives, or temporary copies survived.",
+    "irrecoverable_frozen_targets": 57,
+    "required_frozen_targets": 72
+  },
+  "adversarial_review": {
+    "performed_before_recovery_implementation": true,
+    "verdict": "Score the complete predetermined surviving final subset once, preserve terminal status, make checkpoint AUC indeterminate, and never reconstruct or rerun training."
+  },
+  "authorized_recovery": {
+    "model_calls": "One deterministic float32 exact-scoring pass over warmstart plus all 12 final adapters.",
+    "scorer": "scripts/score_stage_c6_canonical_transformers.py",
+    "scorer_sha256": "1e51000616fc010c1cc5c2d3f0ea9cb8bd774eb11e39c23cd40d49c68bb6c7ba",
+    "action_cases": "configs/stage-c4/selection-action-cases.json",
+    "root_cases": "configs/stage-c4/selection-root-cases.json",
+    "temperature": 2.0,
+    "selection": "All and only the final adapter for every frozen arm and seed; no penultimate adapter may be substituted.",
+    "prohibited": [
+      "training or arm reruns",
+      "checkpoint reconstruction",
+      "threshold changes",
+      "using sampled live-evaluation AUC in a decision",
+      "promoting final endpoint gain to the missing AUC criterion",
+      "removing or replacing the terminal-failure marker"
+    ]
+  },
+  "final_adapters": {
+    "local-e1--s10031--final": {
+      "step": 6,
+      "sha256": "3257c27818379b5e02b6134d3c40f52dd29c973b3efa7f7aa5acd18d3ad12235"
+    },
+    "local-e2--s10031--final": {
+      "step": 12,
+      "sha256": "d00671180e859e0261aefe093c0627f3ed929b24295f285b98ad8c9977de8b46"
+    },
+    "branch-global-e2--s10031--final": {
+      "step": 12,
+      "sha256": "4bf506dd6204e199fbaed8e354177d48cd6022ca8a25e26c5114e6aa3c11b1e5"
+    },
+    "stock--s10031--final": {
+      "step": 36,
+      "sha256": "f86096efd9ab89ee0caa161b5062b2412a751181bb23103b91203c9ea52e1125"
+    },
+    "local-e1--s10032--final": {
+      "step": 6,
+      "sha256": "f93274af7ed465f76563b424df404b74fa51dde021e0092763a223de867f62c4"
+    },
+    "local-e2--s10032--final": {
+      "step": 12,
+      "sha256": "4d006ee5597ed65ee819b94ee8d2b18a427a6b490a913dec50acf9a67b7c88c1"
+    },
+    "branch-global-e2--s10032--final": {
+      "step": 12,
+      "sha256": "bc64e2de3fa0067f311aa3d7542ac095946c85fdcfac5012fa83b9281fe28b6e"
+    },
+    "stock--s10032--final": {
+      "step": 36,
+      "sha256": "f5df0c039b45017a90833af4fcb753f24f6b3c1e34ec14ed6059b36aa9804a05"
+    },
+    "local-e1--s10033--final": {
+      "step": 6,
+      "sha256": "ca07252a71a1218017b775bd9cd17fc12e7c57a3ac330deab35f94581d717fb5"
+    },
+    "local-e2--s10033--final": {
+      "step": 12,
+      "sha256": "d52cb671548a3f455dc5595f622d6868e9d7aa63e03fe8eb4120af73139194ab"
+    },
+    "branch-global-e2--s10033--final": {
+      "step": 12,
+      "sha256": "925b3d5877b6aeec6b2c66f39e35e9a116bd1c589f4cd837b7da42eb378d193f"
+    },
+    "stock--s10033--final": {
+      "step": 36,
+      "sha256": "9384d5e612a66bd334d38f8f5d8ce903b708d23c12b9142c8a6e0294116eca64"
+    }
+  },
+  "analysis": {
+    "path": "src/redco/analysis/stage_c9_partial_recovery.py",
+    "sha256": "4300ac4b25e121cab5d38718a86741a8bee95defe9e4667ce41f5064eb83e869",
+    "test_path": "tests/test_stage_c9_partial_recovery.py",
+    "test_sha256": "0e003c522f0c500e8845aba0bed11dae837b86c876e211091da9cd8ae64ee1d2",
+    "overall_status": "terminal_postprocessing_failure_with_partial_preregistered_evidence",
+    "engineering_reuse_and_ledger": "fully evaluable",
+    "reuse_efficiency_gate": "indeterminate because the exact six-point checkpoint AUC is irrecoverable",
+    "final_gain_ratio": "independently evaluable but insufficient for the conjunctive reuse gate",
+    "matched_data_credit_gate": "fully evaluable under all unchanged frozen final-endpoint rules",
+    "stock": "final endpoint Pareto comparator only"
+  },
+  "stop_rule": "After this one final-only score pass, recover compact evidence, terminate compute, close Stage C9 without synthetic retuning, and proceed to Stage D prerequisites."
+}
