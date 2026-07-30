@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "status": "terminal_fail",
+  "protocol": {
+    "preregistration": "configs/stage-d/stage-d0-judge-audit-preregistration-v1.json",
+    "hardware_successor": "configs/stage-d/stage-d0-judge-audit-hardware-successor-v1-2.json",
+    "commit_before_live_calls": "94cf85e"
+  },
+  "provisioning": {
+    "retired_resource": {
+      "resource_id": "e0cf54",
+      "attempts": 2,
+      "result": "HTTP 500 before pod creation or model calls"
+    },
+    "used_resource": {
+      "resource_id": "6705b0",
+      "pod_id": "79706f0fcbdf4e778768c6cb21e16d10",
+      "gpu": "2x L40S 48GB",
+      "rate_usd_per_hour": 1.64,
+      "ssh_private_key_check": "pass",
+      "persistent_storage": false
+    },
+    "outcome_independent_repair": {
+      "failure": "The sparse bundle omitted root README.md, so Hatch could not build the local redco package.",
+      "model_calls_before_failure": 0,
+      "repair": "Preserved the empty failed run directory, copied README.md, and restarted the unchanged frozen launcher on the same pod-local uv cache."
+    }
+  },
+  "frozen_calibration_result": {
+    "model": "Qwen/Qwen3-8B",
+    "revision": "b968826d9c46dd6066d109eabc6255188de91218",
+    "cases": 12,
+    "repeats_per_case": 3,
+    "model_calls": 36,
+    "parse_failures": 0,
+    "frozen_analyzer_repeat_disagreements": 4,
+    "exact_numeric_verdict_disagreements_recomputed": 0,
+    "balanced_accuracy": 0.75,
+    "minimum_balanced_accuracy": 0.8,
+    "decision": "fail"
+  },
+  "analyzer_note": {
+    "issue": "The frozen analyzer compared full parsed objects, including free-text reasons, so its four repeat disagreements are reason-text drift rather than numeric verdict drift.",
+    "effect_on_decision": "None. Balanced accuracy independently fails the frozen 0.80 minimum.",
+    "observed_failure_pattern": [
+      "All three padded responses received precision 10 and were misclassified.",
+      "Three incomplete responses received recall 7; the frozen >=7 strong-verdict threshold misclassified them."
+    ],
+    "historical_integrity": "The frozen analyzer and raw result are preserved unchanged. Any corrected analyzer must be versioned separately."
+  },
+  "scientific_disposition": {
+    "judge_accepted": false,
+    "ga_d_lite_launched": false,
+    "optimizer_steps": 0,
+    "stage_d1_launched": false,
+    "reason": "The separately frozen judge did not meet its acceptance gate."
+  },
+  "artifacts": {
+    "archive": {
+      "path": "runs/stage-d0/judge-audit-v1-evidence/stage-d0-judge-evidence.tar.gz",
+      "bytes": 12838,
+      "sha256": "261acbe83cf6162f79a7698fb6ab7b9f344901c89d770bf23cc76640fb827af2"
+    },
+    "manifest": {
+      "path": "runs/stage-d0/judge-audit-v1-evidence/artifact-sha256.txt",
+      "bytes": 971,
+      "sha256": "06ae730c0c63e27fac95936a0886681965c9fdd6190ac7e97b46be237fba40fd"
+    },
+    "verification": "Every manifest entry verified after extracting the compressed archive locally."
+  },
+  "billing_and_cleanup": {
+    "compute_cost_usd": 0.3339,
+    "wallet_before_usd": 17.7968,
+    "wallet_after_usd": 17.4629,
+    "active_pods_after_cleanup": 0,
+    "persistent_disks_after_cleanup": 0
+  },
+  "next_step": "Adversarial review required before choosing a new judge, a deterministic exact-evidence reward with narrower claims, or stopping live Stage D."
+}
