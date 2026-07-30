@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c6-credit-confusion-live-v3",
+  "amendment": "outcome-independent-repair-v3-1",
+  "frozen_at_local_date": "2026-07-29",
+  "base_protocol": "configs/stage-c6/credit-confusion-live-preregistration-v3.json",
+  "base_protocol_sha256": "46c1c996fb90809973d934d4befe467ccb917c1742267ef8bc766a1246404337",
+  "base_hardware_amendment": "configs/stage-c6/credit-confusion-hardware-amendment-v3-1.json",
+  "repair_implementation_commit": "5dba72e785b3633770354cee49bbf30081274d73",
+  "attempt_1": {
+    "pod_id": "ddddd9a94a504da19c4e4c13b5eabfc0",
+    "resource_id": "cc7cf9",
+    "gpu": "2x RTX6000Ada 48GB",
+    "rate_usd_per_hour": 1.5,
+    "billing_usd": 0.3583,
+    "wallet_after_usd": 24.1641,
+    "evidence_archive": "runs/stage-c6/credit-confusion-live-v3-control/stage-c6-v3-attempt1-evidence.tar.gz",
+    "evidence_archive_sha256": "a85743a6b297ff7a9a9edc9da5d2e4a9e44f2977b773332d5f0d04785629cc66",
+    "classification": "outcome-independent launcher path defect",
+    "root_cause": "Prime-RL's token exporter writes under the trainer output root, but the frozen launcher passed the nonexistent run_default/token_exports path to the verifier.",
+    "detected_before_verifier": true,
+    "signed_interface_result_exists": false,
+    "scientific_policy_calls": 0,
+    "scientific_optimizer_steps": 0,
+    "disposition": "Processes stopped, compact evidence recovered and verified locally, pod terminated, and zero persistent disks confirmed."
+  },
+  "repair": {
+    "description": "Change exactly one launcher argument from $structural_output/run_default/token_exports to $structural_output/token_exports.",
+    "regression": "The runtime test now requires the trainer-output-root path and forbids the incorrect run_default path.",
+    "model_or_algorithm_change": false
+  },
+  "source_replacements": {
+    "scripts/run_stage_c6_campaign_v3.sh": {
+      "old_sha256": "d2f7b5405799ac69be3859027d398c105331a26a84d769ddf9c0dd71cb737d9b",
+      "new_sha256": "2510abe23ef62683ad86da3042ca0271336829021f869d2653eb1c7204fde43f"
+    },
+    "tests/test_stage_c6_v3_preregistration.py": {
+      "old_sha256": "91c807041fa99152d9bf06f271f2df412e6d8b3e5bc29af5132269a2a83a8f1d",
+      "new_sha256": "6e7f70e4bf53adc6a6c4c85e1f40362ebc9a546b4f771942b52f1c425520443d"
+    },
+    "tests/test_stage_c6_v3_runtime.py": {
+      "old_sha256": "6f8e342756f2ab15c65987bbd196647eba48ffe84293c53ca0b4df7fd4dd258a",
+      "new_sha256": "af1754c0a26dd69ef1102f66b12ca9234bc3dee968e3d9cd1e01081cd11ffa5b"
+    }
+  },
+  "repair_audit_source": {
+    "scripts/audit_stage_c6_repair_v3_1.py": "ee2f99f302e36e39c00454771ea788d8826e7d2eb389a39fdf041c3073a03987",
+    "src/redco/analysis/stage_c6_v3_repair.py": "74f15f50459eb2f4917ac0344d2954bb47841892050bf9558978bb04d7fcba42",
+    "tests/test_stage_c6_v3_repair.py": "907e443acdba414661abf207d83295c7bc4700c552f5777a2cf1781d12d56038"
+  },
+  "redeployment": {
+    "deployment_number": 2,
+    "remaining_redeployments_after_launch": 0,
+    "rule": "Use the same exact pinned resource if genuinely available. Otherwise commit a hardware-only amendment. Never perform a third deployment.",
+    "smoke_rule": "Run the same seed-9920 smoke from scratch because attempt 1 emitted no usable signed interface result.",
+    "scientific_arm_rule": "No scientific arm was started. The original eight fresh-seed arms and order remain frozen."
+  },
+  "scientific_changes": [],
+  "rendered_config_changes": [],
+  "decision_rule_changes": [],
+  "support_threshold_changes": [],
+  "initialization_changes": []
+}

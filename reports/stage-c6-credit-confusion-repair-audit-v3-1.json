@@ -1,0 +1,46 @@
+{
+  "analysis": "stage-c6-v3-outcome-independent-repair-audit",
+  "checks": {
+    "attempt_evidence_bytes_match": true,
+    "base_protocol_bytes_match": true,
+    "failure_is_outcome_independent": true,
+    "rendered_hashes_match": true,
+    "replacement_hashes_match": true,
+    "scientific_fields_unchanged": true,
+    "single_redeployment_consumed": true,
+    "unchanged_source_hashes_match": true
+  },
+  "passed": true,
+  "rendered_checks": {
+    "configs/stage-c6/rendered-v3/confusion_irrelevant-broadcast-s9921.toml": true,
+    "configs/stage-c6/rendered-v3/confusion_irrelevant-broadcast-s9922.toml": true,
+    "configs/stage-c6/rendered-v3/confusion_irrelevant-sliced-s9921.toml": true,
+    "configs/stage-c6/rendered-v3/confusion_irrelevant-sliced-s9922.toml": true,
+    "configs/stage-c6/rendered-v3/confusion_lucky-broadcast-s9924.toml": true,
+    "configs/stage-c6/rendered-v3/confusion_lucky-sliced-s9924.toml": true,
+    "configs/stage-c6/rendered-v3/confusion_redundant-broadcast-s9923.toml": true,
+    "configs/stage-c6/rendered-v3/confusion_redundant-sliced-s9923.toml": true,
+    "configs/stage-c6/rendered-v3/structural-broadcast-s9920.toml": true
+  },
+  "replacement_checks": {
+    "scripts/run_stage_c6_campaign_v3.sh": true,
+    "tests/test_stage_c6_v3_preregistration.py": true,
+    "tests/test_stage_c6_v3_runtime.py": true
+  },
+  "schema_version": 1,
+  "unchanged_source_checks": {
+    "environments/redco_credit_v1/redco_credit_v1/taskset.py": true,
+    "patches/prime-rl-redco-stage-c6-v3.patch": true,
+    "scripts/audit_stage_c6_preregistration_v3.py": true,
+    "scripts/merge_stage_c_warmstart.py": true,
+    "scripts/run_stage_c2_campaign_arm.sh": true,
+    "scripts/run_stage_c3_supervised_arm.py": true,
+    "scripts/score_stage_c6_canonical_transformers.py": true,
+    "scripts/verify_stage_c6_v3_interface.py": true,
+    "src/redco/analysis/stage_c6_v3_interface.py": true,
+    "src/redco/analysis/stage_c6_v3_live.py": true,
+    "src/redco/analysis/stage_c6_v3_preregistration.py": true,
+    "tests/test_stage_c6_v3_interface.py": true,
+    "tests/test_stage_c6_v3_live.py": true
+  }
+}
