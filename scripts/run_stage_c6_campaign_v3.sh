@@ -166,7 +166,7 @@ run_supervised \
 "${uv_prime[@]}" python scripts/verify_stage_c6_v3_interface.py \
   --traces "$structural_output/run_default/rollouts/step_1/train/all/traces.jsonl" \
   --batch "$structural_output/run_default/rollouts/step_1/train_rollouts.bin" \
-  --token-exports "$structural_output/token_exports" \
+  --token-exports "$structural_output/run_default/token_exports" \
   --root-scores "$runtime_root/root-scores.json" \
   --expected-context-traces 8 \
   --output "$run_root/smoke/exact-constrained-interface.json"

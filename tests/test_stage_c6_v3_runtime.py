@@ -39,12 +39,11 @@ def test_prime_patch_contains_exact_normalizer_and_gradient_regression() -> None
     assert "group normalizer" in patch
 
 
-def test_stage_c6_v3_driver_reads_token_exports_from_trainer_output_root() -> None:
+def test_stage_c6_v3_driver_reads_multi_run_token_export_path() -> None:
     driver = Path("scripts/run_stage_c6_campaign_v3.sh").read_text(
         encoding="utf-8"
     )
-    assert '--token-exports "$structural_output/token_exports"' in driver
     assert (
         '--token-exports "$structural_output/run_default/token_exports"'
-        not in driver
+        in driver
     )
