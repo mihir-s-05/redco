@@ -1,0 +1,109 @@
+{
+  "analysis": "stage-c6-v2-scientific-preregistration-audit",
+  "checks": {
+    "all_rendered_hashes_match": true,
+    "all_source_hashes_match": true,
+    "bounded_repair_is_outcome_independent": true,
+    "canonical_failure_stops_before_science": true,
+    "canonical_replicates_exact": true,
+    "eight_runs_exact": true,
+    "factorization_thresholds_unchanged": true,
+    "final_endpoints_are_canonical": true,
+    "fresh_seed_block_exact": true,
+    "matched_policy_calls_exact": true,
+    "merged_model_byte_identity_required": true,
+    "observed_arm_never_rerun": true,
+    "original_scientific_decision_rule_unchanged": true,
+    "protocol_frozen_before_v2_model_call": true,
+    "runtime_power_is_separate": true,
+    "same_constraint_in_both_arms_everywhere": true,
+    "selected_adapters_unchanged": true,
+    "v1_terminal_zero_science_recorded": true
+  },
+  "decision_rule_canonical_sha256": "73453e9424f79b85542cba46f0656561c789b4a3d00d01755b04ab608f8c2d3b",
+  "passed": true,
+  "rendered_config_checks": {
+    "configs/stage-c6/rendered-v2/confusion_irrelevant-broadcast-s9911.toml": true,
+    "configs/stage-c6/rendered-v2/confusion_irrelevant-broadcast-s9912.toml": true,
+    "configs/stage-c6/rendered-v2/confusion_irrelevant-sliced-s9911.toml": true,
+    "configs/stage-c6/rendered-v2/confusion_irrelevant-sliced-s9912.toml": true,
+    "configs/stage-c6/rendered-v2/confusion_lucky-broadcast-s9914.toml": true,
+    "configs/stage-c6/rendered-v2/confusion_lucky-sliced-s9914.toml": true,
+    "configs/stage-c6/rendered-v2/confusion_redundant-broadcast-s9913.toml": true,
+    "configs/stage-c6/rendered-v2/confusion_redundant-sliced-s9913.toml": true,
+    "configs/stage-c6/rendered-v2/structural-broadcast-s9910.toml": true
+  },
+  "rendered_semantics": {
+    "configs/stage-c6/rendered-v2/confusion_irrelevant-broadcast-s9911.toml": {
+      "constraint_in_train_and_eval": true,
+      "selected_initialization_path": true
+    },
+    "configs/stage-c6/rendered-v2/confusion_irrelevant-broadcast-s9912.toml": {
+      "constraint_in_train_and_eval": true,
+      "selected_initialization_path": true
+    },
+    "configs/stage-c6/rendered-v2/confusion_irrelevant-sliced-s9911.toml": {
+      "constraint_in_train_and_eval": true,
+      "selected_initialization_path": true
+    },
+    "configs/stage-c6/rendered-v2/confusion_irrelevant-sliced-s9912.toml": {
+      "constraint_in_train_and_eval": true,
+      "selected_initialization_path": true
+    },
+    "configs/stage-c6/rendered-v2/confusion_lucky-broadcast-s9914.toml": {
+      "constraint_in_train_and_eval": true,
+      "selected_initialization_path": true
+    },
+    "configs/stage-c6/rendered-v2/confusion_lucky-sliced-s9914.toml": {
+      "constraint_in_train_and_eval": true,
+      "selected_initialization_path": true
+    },
+    "configs/stage-c6/rendered-v2/confusion_redundant-broadcast-s9913.toml": {
+      "constraint_in_train_and_eval": true,
+      "selected_initialization_path": true
+    },
+    "configs/stage-c6/rendered-v2/confusion_redundant-sliced-s9913.toml": {
+      "constraint_in_train_and_eval": true,
+      "selected_initialization_path": true
+    },
+    "configs/stage-c6/rendered-v2/structural-broadcast-s9910.toml": {
+      "constraint_in_train_and_eval": true,
+      "selected_initialization_path": true
+    }
+  },
+  "schema_version": 1,
+  "source_checks": {
+    "configs/stage-c4/selection-action-cases.json": true,
+    "configs/stage-c4/selection-root-cases.json": true,
+    "datasets/stage-c4/factorized-warmstart-manifest.json": true,
+    "environments/redco_credit_v1/redco_credit_v1/taskset.py": true,
+    "patches/prime-rl-redco-stage-c3-v3.patch": true,
+    "reports/stage-c6-credit-confusion-live-v1-2026-07-29.md": true,
+    "reports/stage-c6-score-stability-2026-07-29.json": true,
+    "scripts/audit_stage_c6_preregistration_v2.py": true,
+    "scripts/evaluate_stage_c5_candidate.py": true,
+    "scripts/evaluate_stage_c6_canonical_scores.py": true,
+    "scripts/merge_stage_c_warmstart.py": true,
+    "scripts/run_signed_vllm_scorer.py": true,
+    "scripts/run_stage_c2_campaign_arm.sh": true,
+    "scripts/run_stage_c3_supervised_arm.py": true,
+    "scripts/run_stage_c6_campaign_v2.sh": true,
+    "scripts/score_stage_c3_root_routes_vllm.py": true,
+    "scripts/score_stage_c6_canonical_transformers.py": true,
+    "scripts/score_stage_c_policies_vllm.py": true,
+    "scripts/verify_stage_c5_constraint_smoke.py": true,
+    "src/redco/analysis/canonical_logits.py": true,
+    "src/redco/analysis/stage_c3_invariants.py": true,
+    "src/redco/analysis/stage_c3_live.py": true,
+    "src/redco/analysis/stage_c5_constrained.py": true,
+    "src/redco/analysis/stage_c6_canonical.py": true,
+    "src/redco/analysis/stage_c6_v2_live.py": true,
+    "src/redco/analysis/stage_c6_v2_preregistration.py": true,
+    "tests/test_canonical_logits.py": true,
+    "tests/test_stage_c6_canonical.py": true,
+    "tests/test_stage_c6_canonical_scorer_contract.py": true,
+    "tests/test_stage_c6_v2_live.py": true,
+    "tests/test_stage_c6_v2_preregistration.py": true,
+    "tests/test_stage_c6_v2_runtime.py": true
+  }
+}
