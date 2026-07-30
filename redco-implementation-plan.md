@@ -75,7 +75,7 @@ every node affects every future prompt (no slicing savings), the correct fallbac
 a simpler C3-style turn-level credit method for RLMs — still novel, much simpler —
 rather than continuing into the critic and structural phases.
 
-### Implementation checkpoint — through 2026-07-26
+### Implementation checkpoint — through 2026-07-30
 
 - The Tier-0 CPU campaign passed 10,000/10,000 deterministic sliced-vs-full
   comparisons, but only for value replacements on a static synthetic command
@@ -99,6 +99,42 @@ rather than continuing into the critic and structural phases.
   result: before Stage C, ingest recorded or live verifiers RLM traces, measure
   actual prompt provenance and costs, and complete the stochastic reward and
   same-prompt/same-seed model audits.
+- Gate GB's broad live campaign subsequently validated dynamic graph-sliced replay
+  on the pinned 4B stack and measured a representative live RAF of 1.62. Together
+  with sliced-vs-full learning-outcome agreement, this supports the replay-system
+  contribution in the tested restricted substrate; it does not yet establish the
+  general-REPL contract reserved for Stage E.
+- The first Stage C learning battery exposed an exploration bottleneck rather than
+  a credit result: 94% of branch groups had zero advantage. A factorized warm start
+  raised the informative-group rate from roughly 6% to 82%, confirming that
+  counterfactual credit cannot recover actions absent from the behavior policy.
+- The first warm-started planted-needle comparison was not a decisive credit test.
+  Its endpoint rule became unreachable when broadcast saturated, and its
+  single-decision tasks made trajectory and node credit nearly the same estimand.
+  Those runs are retained as exploration and design findings, not as evidence
+  against the credit thesis.
+- The corrected Stage C6 battery used genuine two-decision confusion workflows and
+  exact four-way constrained route likelihoods inside Prime-RL
+  (`z_a − logsumexp(z_allowed)`, including the normalizer gradient) symmetrically
+  in both arms. The signed interface smoke passed and all eight scientific runs
+  completed once, totaling 4,608 matched policy calls.
+- Stage C6 passed its frozen directional decision. On the known-noncausal control,
+  mean selected-action JS drift was 0.103272 for broadcast versus 0.000788 for
+  sliced credit (99.24% lower). Redundant-task drift was 0.277610 versus 0.019924;
+  lucky-task drift was 0.517126 versus 0.050644. This is positive evidence that
+  node credit avoids assigning terminal credit to nuisance actions on the
+  preregistered mechanistic battery.
+- The result is a Pareto tradeoff, not dominance: broadcast learned the causal
+  target faster and more strongly (including reaching the lucky-task 50% success
+  threshold at 288 calls, while sliced did not reach it by 576). Therefore the
+  original broad Gate GC language below is **not fully satisfied**: the
+  credit-attribution mechanism passed, but a learning-efficiency or OOD-performance
+  benefit has not yet been shown, and the full ablation matrix was not run.
+- Stage D may begin only as a bounded, preregistered transfer test whose primary
+  question is whether reduced nuisance drift improves held-out/long performance
+  enough to offset branch cost. Outcome-independent environment/integration
+  failures may be repaired and redeployed under the revised repair policy, but a
+  scientific arm is never silently rerun after its outcomes are observed.
 
 ---
 
