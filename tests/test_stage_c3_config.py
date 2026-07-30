@@ -70,3 +70,22 @@ def test_stage_c3_smoke_rejects_sliced_arm(tmp_path: Path) -> None:
             run_root="runs/stage-c3/credit-confusion-live-v2/smoke",
             smoke=True,
         )
+
+
+def test_stage_c6_render_uses_one_constrained_policy_everywhere(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "stage-c6.toml"
+    render(
+        Path("configs/stage-c3/credit-confusion-broadcast-template.toml"),
+        output,
+        arm="broadcast",
+        probe="confusion_irrelevant",
+        seed=9901,
+        run_root="runs/stage-c6/credit-confusion-live-v1",
+        model_path="runs/stage-c6/selected-initialization-merged",
+        constrained_root_routes=True,
+    )
+    text = output.read_text(encoding="utf-8")
+    assert text.count("env.constrained_root_routes = true") == 2
+    assert 'name = "runs/stage-c6/selected-initialization-merged"' in text

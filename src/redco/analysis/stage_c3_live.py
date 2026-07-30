@@ -141,13 +141,19 @@ def _learning_curve(run_dir: Path, arm: str) -> dict[str, Any]:
     }
 
 
-def verify_campaign(run_root: Path, score_path: Path) -> dict[str, Any]:
+def verify_campaign(
+    run_root: Path,
+    score_path: Path,
+    *,
+    run_seeds: dict[str, tuple[int, ...]] = RUNS,
+    analysis: str = "stage-c3-credit-confusion-live",
+) -> dict[str, Any]:
     models = _models(score_path)
     if "warmstart" not in models:
         raise ValueError("scores must include a warmstart model")
     initial = models["warmstart"]
     runs: dict[str, Any] = {}
-    for probe, seeds in RUNS.items():
+    for probe, seeds in run_seeds.items():
         for seed in seeds:
             for arm in ARMS:
                 name = f"{probe}--{arm}--s{seed}"
@@ -187,7 +193,7 @@ def verify_campaign(run_root: Path, score_path: Path) -> dict[str, Any]:
                     "mean_selected_action_js_from_initial"
                 ]
             )
-            for seed in RUNS["confusion_irrelevant"]
+            for seed in run_seeds["confusion_irrelevant"]
         ]
         for arm in ARMS
     }
@@ -208,10 +214,11 @@ def verify_campaign(run_root: Path, score_path: Path) -> dict[str, Any]:
         ),
     }
     causal_sanity: dict[str, bool] = {}
-    for probe, seed in (
-        ("confusion_redundant", 9503),
-        ("confusion_lucky", 9504),
-    ):
+    for probe in ("confusion_redundant", "confusion_lucky"):
+        seeds = run_seeds[probe]
+        if len(seeds) != 1:
+            raise ValueError(f"{probe} requires exactly one frozen seed")
+        seed = seeds[0]
         improvements = [
             float(runs[f"{probe}--{arm}--s{seed}"]["mean_target_action_mass"])
             - initial_target_mass
@@ -244,7 +251,7 @@ def verify_campaign(run_root: Path, score_path: Path) -> dict[str, Any]:
     )
     return {
         "schema_version": 1,
-        "analysis": "stage-c3-credit-confusion-live",
+        "analysis": analysis,
         "status": status,
         "initial": {
             "mean_target_action_mass": initial_target_mass,

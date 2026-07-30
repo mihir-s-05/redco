@@ -22,6 +22,8 @@ def render(
     seed: int,
     run_root: str,
     smoke: bool = False,
+    model_path: str | None = None,
+    constrained_root_routes: bool = False,
 ) -> dict[str, object]:
     if arm not in ARMS:
         raise ValueError(f"unsupported arm: {arm}")
@@ -41,6 +43,19 @@ def render(
         if text.count(placeholder) < 1:
             raise ValueError(f"template is missing {placeholder}")
         text = text.replace(placeholder, value)
+    if model_path is not None:
+        frozen_model = "runs/stage-c2/warmstart-merged-candidates-v2/step_23"
+        if text.count(frozen_model) != 1:
+            raise ValueError("template has an unexpected frozen model path")
+        text = text.replace(frozen_model, model_path)
+    if constrained_root_routes:
+        anchor = "env.context_temperature = 2.0\n"
+        if text.count(anchor) != 2:
+            raise ValueError("template has an unexpected context-temperature layout")
+        text = text.replace(
+            anchor,
+            anchor + "env.constrained_root_routes = true\n",
+        )
     if "__" in text:
         raise ValueError("rendered config retains an unresolved placeholder")
     if smoke:
@@ -64,6 +79,8 @@ def render(
         "probe": probe,
         "seed": seed,
         "smoke": smoke,
+        "model_path": model_path,
+        "constrained_root_routes": constrained_root_routes,
         "template": template.as_posix(),
         "output": output.as_posix(),
         "sha256": digest,
