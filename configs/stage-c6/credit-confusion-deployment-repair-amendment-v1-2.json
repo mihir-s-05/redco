@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c6-credit-confusion-live-v1",
+  "amendment": "bounded-deployment-repair-v1-2",
+  "status": "frozen_after_failed_initial_provisioning_and_before_single_permitted_redeployment",
+  "frozen_at_local_date": "2026-07-29",
+  "protocol_commit": "613a269",
+  "protocol_audit_commit": "f1bdd65",
+  "hardware_amendment_commit": "491b28f",
+  "failed_initial_deployment": {
+    "resource_id": "cc7cf9",
+    "pod_name": "redco-stage-c6-v1",
+    "operation": "prime pods create",
+    "terminal_error": "HTTP 500: Error during pod provisioning",
+    "pod_created": false,
+    "active_pods_after_failure": 0,
+    "persistent_disks_after_failure": 0,
+    "wallet_before_usd": 25.9341,
+    "wallet_after_usd": 25.9341,
+    "billings_created": 0,
+    "repository_or_artifacts_transferred": false,
+    "model_calls": 0,
+    "optimizer_steps": 0,
+    "candidate_support_payloads": 0,
+    "scientific_arm_outcomes": 0
+  },
+  "classification": {
+    "eligible": true,
+    "class": "provider provisioning failure before a pod existed",
+    "outcome_independent": true,
+    "scientific_information_observed": false,
+    "basis": "The provider returned HTTP 500 while creating compute. No pod, SSH endpoint, filesystem, model process, score payload, or arm data existed."
+  },
+  "repair": {
+    "source_changes": 0,
+    "configuration_changes": 0,
+    "scientific_changes": 0,
+    "action": "Permit the single frozen redeployment attempt against the same still-available hardware resource.",
+    "maximum_remaining_redeployments_after_this_attempt": 0,
+    "failure_disposition": "If the redeployment fails, stop Stage C6 v1 and report a terminal infrastructure failure. Do not try another resource."
+  },
+  "immutable_fields": "All initialization bytes, constrained semantics, tasks, arms, seeds, order, policy-call budgets, optimizer settings, support thresholds, scientific metrics, decision rules, artifact policy, and cost ceiling remain unchanged."
+}
