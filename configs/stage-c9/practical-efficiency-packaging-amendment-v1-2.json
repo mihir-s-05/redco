@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c9-practical-efficiency-bridge-v1",
+  "amendment": "outcome-independent-packaging-v1-2",
+  "status": "frozen_after_provisioning_before_sync_or_model_calls",
+  "observed_state": {
+    "pod_provisioned": true,
+    "ssh_verified_noninteractively": true,
+    "repository_synced": false,
+    "model_calls": 0,
+    "optimizer_steps": 0,
+    "scientific_outcomes": 0
+  },
+  "change": {
+    "file": "scripts/run_stage_c9_practical_efficiency.sh",
+    "old_sha256": "abf0a332804c83d5cbc185e5a5e4c2db222f1313bf26f5bc72fee164fe7e4714",
+    "new_sha256": "b25fd1301ccce0c3a59640a6493f69c34828f2407baa48f365d23cf12f1074a3",
+    "old_command": "git -C external/prime-rl apply --reverse --check",
+    "new_command": "git -C external/prime-rl apply --no-index --reverse --check",
+    "reason": "The sparse pod bundle intentionally excludes Git metadata. --no-index validates the exact same reverse patch against source bytes without requiring a repository database."
+  },
+  "unchanged": [
+    "all source bytes in the Prime patch",
+    "all rendered arm and smoke configs",
+    "adapters and initialization",
+    "probe, seeds, order, calls, K, updates, optimizer, and loss",
+    "reuse semantics",
+    "metrics, thresholds, repair rule, and stop rule",
+    "hardware, compute ceiling, and artifact policy"
+  ],
+  "audit": {
+    "preregistration_reaudited": true,
+    "all_checks_passed": true,
+    "signed_payload_sha256": "9b6ea5b2bc37c728a6e6c72a77a314985d6cfe0f00be25864f44f43c0ba51834"
+  }
+}

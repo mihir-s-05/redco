@@ -28,7 +28,8 @@ test "$(sha256sum "$stage_c2_adapter/adapter_model.safetensors" | cut -d' ' -f1)
   "28fba5d421ea611db2e0d9cd411e40a0fc2035a9a45eb0bb3be24c84947e0ab6"
 test "$(sha256sum "$stage_c5_adapter/adapter_model.safetensors" | cut -d' ' -f1)" = \
   "e1d56f45485eef065bae42980427ee3c88176a5c864cbb350fa8494d0370e623"
-git -C external/prime-rl apply --reverse --check "$repo_root/$prime_patch"
+git -C external/prime-rl apply --no-index --reverse --check \
+  "$repo_root/$prime_patch"
 
 export REDCO_PRIME_PATCH="$prime_patch"
 export REDCO_RUN_SEED=7309101
