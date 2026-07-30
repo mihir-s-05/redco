@@ -7,6 +7,7 @@ run_root="${REDCO_RUN_ROOT:-runs/stage-c6/credit-confusion-live-v2}"
 launcher="${REDCO_ARM_LAUNCHER:-scripts/run_stage_c2_campaign_arm.sh}"
 invariant_timeout="${REDCO_INVARIANT_TIMEOUT_SECONDS:-900}"
 uv_binary="${REDCO_UV_BINARY:-uv}"
+resume_evidence_root="${REDCO_RESUME_EVIDENCE_ROOT:-}"
 stage_c2_adapter="runs/stage-c2/warmstart-selected-v2/step_23/lora_adapters"
 stage_c5_adapter="runs/stage-c5/constrained-successor-v3-selection/evidence/runs/stage-c5/warmstart-selected-v3/lora-adapters"
 stage_c2_merged="runs/stage-c6/stage-c2-initialization-merged"
@@ -34,6 +35,10 @@ test -f "$structural_config"
 test ! -e "$stage_c2_merged"
 test ! -e "$model_path"
 test ! -e "$run_root"
+if test -n "$resume_evidence_root"; then
+  test -d "$resume_evidence_root/initialization/canonical"
+  test -d "$resume_evidence_root/initialization/runtime"
+fi
 
 stage_c2_sha="$(sha256sum "$stage_c2_adapter/adapter_model.safetensors" | cut -d' ' -f1)"
 stage_c5_sha="$(sha256sum "$stage_c5_adapter/adapter_model.safetensors" | cut -d' ' -f1)"
@@ -48,6 +53,7 @@ export REDCO_UV_ENVIRONMENT="${REDCO_UV_ENVIRONMENT:-/home/ubuntu/.cache/redco/s
 export REDCO_UV_CACHE_DIR="${REDCO_UV_CACHE_DIR:-/home/ubuntu/.cache/redco/uv-cache}"
 export UV_PROJECT_ENVIRONMENT="$REDCO_UV_ENVIRONMENT"
 export UV_CACHE_DIR="$REDCO_UV_CACHE_DIR"
+export PATH="$(dirname "$uv_binary"):$PATH"
 export WANDB_MODE=disabled
 export TOKENIZERS_PARALLELISM=false
 export VLLM_USE_FLASHINFER_SAMPLER=0
@@ -94,8 +100,27 @@ test "$(
     "$selection_root/model-identity.json"
 )" = "passed"
 
-# Three independent process loads must produce byte-identical canonical scores.
-for replicate in 1 2 3; do
+# A repaired redeployment reuses completed score payloads; it never rescores.
+if test -n "$resume_evidence_root"; then
+  cp -a "$resume_evidence_root/initialization/canonical/." "$canonical_root/"
+  cp -a "$resume_evidence_root/initialization/runtime/." "$runtime_root/"
+  for replicate in 1 2 3; do
+    replicate_root="$canonical_root/replicate_$replicate"
+    "${uv_prime[@]}" python scripts/evaluate_stage_c5_candidate.py evaluate \
+      --step 18 \
+      --action-scores "$replicate_root/action-scores.json" \
+      --root-scores "$replicate_root/root-scores.json" \
+      --dataset-manifest "$dataset_manifest" \
+      --output "$replicate_root/support-verification.json"
+    test "$(
+      "${uv_prime[@]}" python -c \
+        'import json,sys; print(json.load(open(sys.argv[1]))["status"])' \
+        "$replicate_root/support-verification.json"
+    )" = "passed"
+  done
+else
+  # Three independent process loads must produce byte-identical canonical scores.
+  for replicate in 1 2 3; do
   replicate_root="$canonical_root/replicate_$replicate"
   mkdir -p "$replicate_root"
   CUDA_VISIBLE_DEVICES=0 "${uv_prime[@]}" python \
@@ -113,12 +138,13 @@ for replicate in 1 2 3; do
     --root-scores "$replicate_root/root-scores.json" \
     --dataset-manifest "$dataset_manifest" \
     --output "$replicate_root/support-verification.json"
-  test "$(
-    "${uv_prime[@]}" python -c \
-      'import json,sys; print(json.load(open(sys.argv[1]))["status"])' \
-      "$replicate_root/support-verification.json"
-  )" = "passed"
-done
+    test "$(
+      "${uv_prime[@]}" python -c \
+        'import json,sys; print(json.load(open(sys.argv[1]))["status"])' \
+        "$replicate_root/support-verification.json"
+    )" = "passed"
+  done
+fi
 
 "${uv_prime[@]}" python scripts/evaluate_stage_c6_canonical_scores.py \
   verify-replicates \
@@ -145,7 +171,8 @@ signed_field() {
 action_cases_signed="$(signed_field "$action_cases")"
 root_cases_signed="$(signed_field "$root_cases")"
 
-CUDA_VISIBLE_DEVICES=0 "${uv_prime[@]}" python scripts/run_signed_vllm_scorer.py \
+if test -z "$resume_evidence_root"; then
+  CUDA_VISIBLE_DEVICES=0 "${uv_prime[@]}" python scripts/run_signed_vllm_scorer.py \
   --output "$runtime_root/action-scores.json" \
   --verified "$runtime_root/action-scores.verified.json" \
   --expected-cases-sha256 "$action_cases_signed" \
@@ -175,14 +202,15 @@ CUDA_VISIBLE_DEVICES=1 "${uv_prime[@]}" python scripts/run_signed_vllm_scorer.py
     --gpu-memory-utilization 0.7 \
     --output "$runtime_root/root-scores.json" \
   >"$runtime_root/root-score.log" 2>&1 &
-root_pid=$!
+  root_pid=$!
 
-action_status=0
-root_status=0
-wait "$action_pid" || action_status=$?
-wait "$root_pid" || root_status=$?
-test "$action_status" -eq 0
-test "$root_status" -eq 0
+  action_status=0
+  root_status=0
+  wait "$action_pid" || action_status=$?
+  wait "$root_pid" || root_status=$?
+  test "$action_status" -eq 0
+  test "$root_status" -eq 0
+fi
 
 "${uv_prime[@]}" python scripts/evaluate_stage_c5_candidate.py evaluate \
   --step 18 \

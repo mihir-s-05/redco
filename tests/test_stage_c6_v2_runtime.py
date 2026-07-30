@@ -21,6 +21,11 @@ def test_stage_c6_v2_driver_freezes_measurement_split_and_fresh_runs() -> None:
     assert "python -m redco.analysis.stage_c6_v2_live" in driver
     assert "confusion_lucky|broadcast|9914" in driver
     assert "uv_binary=" in driver
+    assert 'export PATH="$(dirname "$uv_binary"):$PATH"' in driver
+    assert 'resume_evidence_root="${REDCO_RESUME_EVIDENCE_ROOT:-}"' in driver
+    assert driver.index('cp -a "$resume_evidence_root/initialization') < (
+        driver.index("STRUCTURAL_SMOKE_PASS")
+    )
     assert "\npip " not in driver
     for config in configs:
         text = config.read_text(encoding="utf-8")
