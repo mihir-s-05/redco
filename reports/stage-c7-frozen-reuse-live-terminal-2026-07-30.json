@@ -1,0 +1,86 @@
+{
+  "experiment": "stage-c7-frozen-batch-practical-loss-reuse-v1",
+  "date": "2026-07-30",
+  "status": "terminal_partial_integration",
+  "scientific_classification": "engineering and descriptive microcampaign on an already-observed frozen batch",
+  "protocol": {
+    "preregistration": "configs/stage-c7/frozen-reuse-live-preregistration-v1.json",
+    "hardware_amendment": "configs/stage-c7/frozen-reuse-live-hardware-amendment-v1-1.json",
+    "control_repair_amendment": "configs/stage-c7/frozen-reuse-live-repair-amendment-v1-2.json"
+  },
+  "hardware": {
+    "pod_id": "5bc3a15936d1483db7d070013069e3f0",
+    "gpu": "RTX 6000 Ada 48GB",
+    "count": 1,
+    "provider": "massedcompute",
+    "location": "us-central-3",
+    "non_spot": true,
+    "hourly_rate_usd": 0.75,
+    "billing_usd": 0.26,
+    "wallet_before_usd": 22.1,
+    "wallet_after_usd": 21.84,
+    "active_pods_after": 0,
+    "persistent_disks_after": 0
+  },
+  "source_batch": {
+    "sha256": "6ceb8d2d7f476bf4ec4e370262cbe6b3351a9e80b6d28758797df9162cc75ed2",
+    "local_and_remote_hash_match": true
+  },
+  "arms": {
+    "reuse-1": {
+      "status": "completed",
+      "optimizer_updates": 1,
+      "final_adapter_sha256": "979e5ca8f70d9f25cfedde7fa11c151b8dbcf563972079d6a4a361ff40932a6c",
+      "metrics": {
+        "optim_grad_norm": 4.570082664489746,
+        "loss_mean": 0.00025569944409653544,
+        "node_ratio_mean": 0.991569995880127,
+        "node_ratio_min": 0.8019888401031494,
+        "node_ratio_max": 1.050724744796753,
+        "node_clipped_mean": 0.0,
+        "node_kl_mean": 0.0023366305977106094,
+        "forward_backward_seconds": 28.10439502600002,
+        "step_seconds": 28.851784825999857
+      }
+    },
+    "reuse-2": {
+      "status": "failed_before_first_update",
+      "optimizer_updates": 0,
+      "metrics_bytes": 0,
+      "failure": "CUDA illegal memory access in torch._grouped_mm from Prime's MultiLoRALinear forward path"
+    },
+    "reuse-3": {
+      "status": "not_run_by_frozen_no_retry_rule",
+      "optimizer_updates": 0
+    }
+  },
+  "decision": {
+    "integration_gate_passed": false,
+    "one_update_practical_loss_path_validated": true,
+    "two_or_three_update_reuse_validated": false,
+    "action_scoring_completed": false,
+    "rerun_performed_after_observed_update": false,
+    "interpretation": "The exact-sequence clipped node loss executed one finite 4B LoRA update with no clipping. The campaign cannot establish mini-epoch reuse because a subsequent fresh trainer process hit a CUDA grouped-LoRA kernel failure. This is an implementation/runtime failure, not evidence for or against the credit estimator."
+  },
+  "pre_update_repairs": [
+    "Bound the provider's /home/ubuntu/redco path to the frozen /workspace/redco contract.",
+    "Installed the standalone uv binary; pip was never used.",
+    "Added the omitted root README.md required by editable packaging.",
+    "Added the missing offline orchestrator control-file binding under the committed v1.2 repair amendment."
+  ],
+  "artifacts": {
+    "root": "runs/stage-c7/frozen-reuse-live",
+    "compact_evidence_sha256": "8787daf24d9c3a03e783f0e8a88a5c044855da476327d7e7e4cfab707bd7ee25",
+    "reuse_1_metrics_sha256": "86fed9b7865ad71799254d8e52b6269536460db8b77e0c5db06d939fb596b462",
+    "reuse_2_trainer_log_sha256": "7c63550a5deaa7e82b76934c080281c41eaf9548b46978cb37680d3ca402568b",
+    "retained_bytes": 175391,
+    "retained_model_weight_files": 0
+  },
+  "storage": {
+    "temporary_transfer_archive_deleted": true,
+    "merged_models_retained_locally": false,
+    "optimizer_state_retained_locally": false,
+    "cuda_or_uv_cache_retained_locally": false,
+    "system_drive_free_gib_after": 37.94
+  }
+}
