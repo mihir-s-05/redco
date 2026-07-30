@@ -1,0 +1,270 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c6-credit-confusion-live-v3",
+  "status": "frozen_before_any_stage_c6_v3_model_call",
+  "frozen_at_local_date": "2026-07-29",
+  "scientific_question": "On genuine two-decision workflows, does node-level all-branch LOO reduce policy drift at a known non-causal target compared with trajectory-broadcast GRPO, while preserving the ability to learn causal target actions?",
+  "predecessor": {
+    "protocol": "configs/stage-c6/credit-confusion-live-preregistration-v2.json",
+    "terminal_report": "reports/stage-c6-credit-confusion-live-v2-2026-07-29.json",
+    "terminal_report_commit": "adaea41",
+    "status": "terminal_interface_failure",
+    "scientific_policy_calls": 0,
+    "scientific_optimizer_steps": 0,
+    "interpretation": "V2 produced no arm outcome. Its smoke exposed a static-reference comparison that is not the trainer behavior-policy contract, plus an incorrect expected root count. V3 is a distinct successor with the theoretical likelihood defect fixed and fresh seeds."
+  },
+  "decision_rule": {
+    "source": "configs/stage-c6/credit-confusion-live-preregistration-v2.json#frozen_metrics_and_decision",
+    "canonical_sha256": "73453e9424f79b85542cba46f0656561c789b4a3d00d01755b04ab608f8c2d3b",
+    "changes_from_v2": [],
+    "primary_outcomes": [
+      "Known-noncausal target Jensen-Shannon drift from initialization.",
+      "Policy calls to the frozen causal target-success threshold."
+    ],
+    "composite_score": false,
+    "claim_limit": "A pass supports reduced nuisance drift on this small mechanistic battery, not a broad population claim."
+  },
+  "exact_training_policy": {
+    "route_choices": [
+      "<route>alpha</route>",
+      "<route>beta</route>",
+      "<route>gamma</route>",
+      "<route>delta</route>"
+    ],
+    "route_token_ids": [
+      7141,
+      19127,
+      32214,
+      20255
+    ],
+    "normalization": "selected_logit_minus_logsumexp_of_four_allowed_logits",
+    "gradient_includes_log_normalizer": true,
+    "entropy": "exact entropy of the four-way normalized categorical",
+    "behavior_logprob": "The per-request vLLM constrained logprob is serialized unchanged as the behavior-policy likelihood.",
+    "trainer_logprob": "Prime-RL recomputes the current four-way constrained categorical from full logits at every configured route token.",
+    "importance_ratio": "exp(trainer constrained logprob minus serialized behavior constrained logprob)",
+    "applies_to_broadcast_and_sliced": true,
+    "applies_to_training_and_evaluation": true,
+    "target_digit_policy": "unconstrained",
+    "out_of_group_route_gradient": 0.0,
+    "fused_lm_head": "disabled so the four allowed logits are available"
+  },
+  "initialization": {
+    "base_model": "Qwen/Qwen3-4B-Instruct-2507",
+    "runtime_path": "runs/stage-c6/selected-initialization-merged",
+    "stage_c2_adapter_path": "runs/stage-c2/warmstart-selected-v2/step_23/lora_adapters",
+    "stage_c2_adapter_sha256": "28fba5d421ea611db2e0d9cd411e40a0fc2035a9a45eb0bb3be24c84947e0ab6",
+    "stage_c5_adapter_path": "runs/stage-c5/constrained-successor-v3-selection/evidence/runs/stage-c5/warmstart-selected-v3/lora-adapters",
+    "stage_c5_adapter_sha256": "e1d56f45485eef065bae42980427ee3c88176a5c864cbb350fa8494d0370e623",
+    "byte_identity_required": true,
+    "reference_manifest": "runs/stage-c5/constrained-successor-v3-selection/evidence/runs/stage-c5/warmstart-selection-v3/candidates/step_18/merge-manifest.json",
+    "support_threshold_changes": []
+  },
+  "design": {
+    "logical_campaigns": 1,
+    "arms": {
+      "broadcast": "Stock GRPO trajectory advantage assigned to root and target decisions.",
+      "sliced": "ReDCO trajectory LOO at the root and 11-branch LOO at the target with sliced replay."
+    },
+    "trajectory_group_size": 8,
+    "branch_group_size": 11,
+    "matched_policy_calls_per_run": 576,
+    "total_policy_calls": 4608,
+    "total_runs": 8,
+    "optimizer": {
+      "broadcast_steps": 36,
+      "sliced_steps": 6,
+      "learning_rate": 1e-05,
+      "lora_rank": 32,
+      "lora_alpha": 64
+    },
+    "runs": [
+      {
+        "probe": "confusion_irrelevant",
+        "seed": 9921,
+        "order": [
+          "broadcast",
+          "sliced"
+        ]
+      },
+      {
+        "probe": "confusion_irrelevant",
+        "seed": 9922,
+        "order": [
+          "sliced",
+          "broadcast"
+        ]
+      },
+      {
+        "probe": "confusion_redundant",
+        "seed": 9923,
+        "order": [
+          "broadcast",
+          "sliced"
+        ]
+      },
+      {
+        "probe": "confusion_lucky",
+        "seed": 9924,
+        "order": [
+          "sliced",
+          "broadcast"
+        ]
+      }
+    ],
+    "unchanged_from_v2": [
+      "tasks",
+      "arm definitions",
+      "matched policy-call budgets",
+      "optimizer settings",
+      "sampling settings",
+      "support thresholds",
+      "scientific metrics",
+      "decision rules"
+    ]
+  },
+  "execution": {
+    "driver": "scripts/run_stage_c6_campaign_v3.sh",
+    "package_manager": "uv only; pip is forbidden",
+    "environment": "Use persistent paths within the single ephemeral pod for the uv environment and cache.",
+    "inherited_initialization_evidence": {
+      "source": "runs/stage-c6/credit-confusion-live-v2-attempt2/runs/stage-c6/credit-confusion-live-v2/initialization",
+      "rescore": false,
+      "reverify_signatures_and_support": true,
+      "canonical_reproducibility_file_sha256": "e442fd5fa6bb16e8f7c997a27b77e1031a0f701706c22faa36f5321d298ec7fd",
+      "canonical_reproducibility_signed_payload_sha256": "7e764e4c287ed76b0e59083fbe4dc9d93587c7c5a83ff544adeb121ff135dade",
+      "runtime_action_scores_file_sha256": "066f3ead38189d4ba85f895457ceeb67fd7834894edc1c0da79c1b7abc9dbef8",
+      "runtime_root_scores_file_sha256": "3bf6fb28a28fe429449a9aebff5c9ce7d5904744cff910712835d84a3c275b71",
+      "runtime_support_signed_payload_sha256": "7595eafb8dde4332563e84add91b1bfbc06009f1de40b8b1872ca05d307e1454"
+    },
+    "pre_science_order": [
+      "Verify every frozen hash and the combined Prime-RL patch.",
+      "Reconstruct and byte-verify the shared initialization.",
+      "Copy and reverify the completed signed v2 canonical and runtime support evidence without model rescoring.",
+      "Run one exact-likelihood structural smoke with token export.",
+      "Only after a passing smoke, launch all eight arms in the frozen order.",
+      "Score all final adapters together and apply the unchanged v2 decision."
+    ],
+    "smoke": {
+      "seed": 9920,
+      "expected_context_trace_count": 8,
+      "expected_total_sampled_agent_calls": 16,
+      "token_export_required": true,
+      "required_checks": [
+        "every root request uses the exact four-choice constraint",
+        "trace behavior logprobs are finite",
+        "packed behavior logprobs match trace behavior logprobs",
+        "trainer-export behavior logprobs match packed behavior logprobs",
+        "trainer constrained logprobs are finite and nonpositive",
+        "exported importance log-ratios equal trainer minus behavior logprob"
+      ],
+      "static_reference_is_decision_bearing": false,
+      "static_reference_role": "Descriptive backend-drift diagnostic only.",
+      "failure_rule": "A completed failing exact-likelihood smoke stops v3 before scientific arms."
+    },
+    "scientific_early_abort": {
+      "context_token_budget_contract_fraction": 1.0,
+      "rollout_error_fraction": 0.0,
+      "sampling_dependent_rules": 0
+    },
+    "per_run_timeout_seconds": 10800,
+    "whole_pod_timeout_hours": 3.5,
+    "artifacts": "Recover every compact log, metric, trace, token export, signed verifier output, final adapter, and decision. Compress final adapters independently. Do not retain merged 4B models, optimizer state, CUDA caches, uv caches, or redundant intermediate broadcasts.",
+    "teardown": "Always terminate compute after artifact recovery or failure and confirm zero persistent disks."
+  },
+  "repair_and_redeploy_policy": {
+    "principle": "Outcome-independent environment failures may be repaired transparently; measurements and scientific outcomes may not be redesigned or silently retried.",
+    "initial_deployments": 1,
+    "maximum_redeployments_after_initial": 1,
+    "no_outcome_informed_repairs": true,
+    "no_silent_retries": true,
+    "eligible_failures": [
+      "provider interruption or pod disappearance",
+      "SSH or network transport failure",
+      "dependency or environment setup failure",
+      "outcome-independent launcher, path, serialization, or orchestration defect",
+      "shared hardware failure unrelated to either algorithm"
+    ],
+    "smoke_repair": "A smoke may be redeployed only when no usable signed interface result exists and the failure is demonstrated outcome-independent.",
+    "never_rerun_observed_scientific_arm": true,
+    "scientific_continuation": "After an arm outcome, continue only previously unobserved frozen arms from the byte-identical initialization. If exact continuation is impossible, report the partial campaign.",
+    "immutable_fields": [
+      "initialization bytes",
+      "tasks, arms, seeds, order, and call budgets",
+      "optimizer and sampling settings",
+      "exact constrained policy",
+      "support thresholds",
+      "scientific metrics and decision rules"
+    ]
+  },
+  "hardware": {
+    "gpu_count": 2,
+    "minimum_memory_per_gpu_gb": 48,
+    "eligible_gpu_types": [
+      "L40 48GB",
+      "L40S 48GB",
+      "RTX 6000 Ada 48GB"
+    ],
+    "spot": false,
+    "maximum_hourly_rate_usd": 2.0,
+    "maximum_compute_charge_usd": 6.0,
+    "persistent_storage": false,
+    "forbidden": [
+      "spot/preemptible resources",
+      "A100",
+      "H100",
+      "persistent disk"
+    ],
+    "resource_id": null,
+    "resource_pin_rule": "Commit a hardware-only amendment naming an exact eligible resource before provisioning.",
+    "ssh_key": "C:/Users/mihir/.ssh/id_rsa",
+    "ssh_rule": "Verify SSH noninteractively immediately and terminate without model calls if it fails.",
+    "wallet_before_provisioning_usd": 24.5224
+  },
+  "stop_rule": {
+    "initialization_engineering": "closed",
+    "successor_limit": "This is the one bounded exact-likelihood successor authorized after v2.",
+    "if_smoke_fails_for_interface_reason": "Stop the scientific program before arms and report the systems and CPU results.",
+    "if_scientific_gate_fails": "Report the powered directional result under the unchanged rule; do not redesign Stage C again.",
+    "if_scientific_gate_passes": "Advance the credit claim only within the preregistered mechanistic scope."
+  },
+  "rendered_configs": {
+    "count": 9,
+    "sha256": {
+      "configs/stage-c6/rendered-v3/confusion_irrelevant-broadcast-s9921.toml": "294c954d4728329eb39adb6fb4a13969dbf26b836ab1f97d7b8e4d02f7f49865",
+      "configs/stage-c6/rendered-v3/confusion_irrelevant-broadcast-s9922.toml": "ad18bb0d1fe5126bc928f5c4eb0549b9aba0c3cef640704bd37690aaeae4f0eb",
+      "configs/stage-c6/rendered-v3/confusion_irrelevant-sliced-s9921.toml": "e99fceaf5ece3022479dbece6dc3002c47c84e9534cc2a9ab267de920045c035",
+      "configs/stage-c6/rendered-v3/confusion_irrelevant-sliced-s9922.toml": "72c2d10d97a0f3cb7505eb5bb4f81052f79577a4dfdb912a4eb283c76fa14dc7",
+      "configs/stage-c6/rendered-v3/confusion_lucky-broadcast-s9924.toml": "6faef8160baf650d76a9c4d44ea8164cb0ca47a62fc179060a115862aedc881f",
+      "configs/stage-c6/rendered-v3/confusion_lucky-sliced-s9924.toml": "22b7df7cd454a2d046781da72c6fc6b7befd9f458af3dfe6080520e3f8511d2d",
+      "configs/stage-c6/rendered-v3/confusion_redundant-broadcast-s9923.toml": "0aaab95d157d6bf8d08852dc2d36d6ca0d382431cf6ff6df9e0d2b1e4df4fb4c",
+      "configs/stage-c6/rendered-v3/confusion_redundant-sliced-s9923.toml": "544facb54b2f6af1dd29c880e5449675e32670ff4f87a914ed7712809313c7e4",
+      "configs/stage-c6/rendered-v3/structural-broadcast-s9920.toml": "ab62416e8ab084dbf5d1ca53e45f8f245277b2680b28ef4897c3feaeb79ca5c7"
+    }
+  },
+  "source": {
+    "implementation_commits": [
+      "35fa242",
+      "de0f5f0",
+      "f2c3b64"
+    ],
+    "sha256": {
+      "environments/redco_credit_v1/redco_credit_v1/taskset.py": "528c11891687ab1262b26fe2e0c56e26ee5b0b7bf16cc8b3e4c026b285440981",
+      "patches/prime-rl-redco-stage-c6-v3.patch": "2aed2193b61c5e484778dc24673b4d805187d3676d67d05f12d16cca716d97e6",
+      "scripts/audit_stage_c6_preregistration_v3.py": "d9f8b2fb962d1a1f4f723b90c49514d0569fa4ce545e8a3c99d6e7fca80f38f0",
+      "scripts/merge_stage_c_warmstart.py": "06046f345d0ac29e0919d43fce50c2a6ae20a29d03be215785323413e28d0416",
+      "scripts/run_stage_c2_campaign_arm.sh": "64c3bc16c2196fe40d5cc275922fc461de615ff352d750f7303327d0ec385cfc",
+      "scripts/run_stage_c3_supervised_arm.py": "c364d6088e08ec4679c4622de08ad424ce9dd6698ee0f2255fa0a551028eb5ed",
+      "scripts/run_stage_c6_campaign_v3.sh": "d2f7b5405799ac69be3859027d398c105331a26a84d769ddf9c0dd71cb737d9b",
+      "scripts/score_stage_c6_canonical_transformers.py": "1e51000616fc010c1cc5c2d3f0ea9cb8bd774eb11e39c23cd40d49c68bb6c7ba",
+      "scripts/verify_stage_c6_v3_interface.py": "a88461b353d71d948b59ee44e7703f5d8c728d7db1f94a47e23257b0d553eb53",
+      "src/redco/analysis/stage_c6_v3_interface.py": "1ffa06a77491db3c46d7d18f106e659904d6e68f55e1a3165ab64c685c00c6d5",
+      "src/redco/analysis/stage_c6_v3_live.py": "7183fc772da0113811b1e7472029b080583cce8b4eaa0fa4a08d9f1142777b71",
+      "src/redco/analysis/stage_c6_v3_preregistration.py": "1f429c686cfabb546855d238bc23e110c7305203bd3db895a6a640f6e01f165f",
+      "tests/test_stage_c6_v3_interface.py": "63c2db4ec83321a185971afdca7394d87a2fa6c1378571c1d4d7ce7564f6567d",
+      "tests/test_stage_c6_v3_live.py": "98c104ebc396f2eb3f66b153fd0f50ccef34bdc1c2b1ecd2f75cb5762acfbfd9",
+      "tests/test_stage_c6_v3_preregistration.py": "91c807041fa99152d9bf06f271f2df412e6d8b3e5bc29af5132269a2a83a8f1d",
+      "tests/test_stage_c6_v3_runtime.py": "6f8e342756f2ab15c65987bbd196647eba48ffe84293c53ca0b4df7fd4dd258a"
+    }
+  }
+}

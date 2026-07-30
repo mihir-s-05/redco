@@ -1,0 +1,106 @@
+{
+  "analysis": "stage-c6-v3-scientific-preregistration-audit",
+  "checks": {
+    "all_rendered_hashes_match": true,
+    "all_rendered_semantics_match": true,
+    "all_source_hashes_match": true,
+    "bounded_outcome_independent_repair": true,
+    "decision_rule_is_exact_v2_rule": true,
+    "eight_runs_and_matched_calls_exact": true,
+    "exact_training_group_frozen": true,
+    "fresh_seed_block_exact": true,
+    "frozen_before_v3_model_call": true,
+    "live_smoke_checks_transport_and_trainer": true,
+    "predecessor_had_zero_scientific_calls": true,
+    "reuse_never_rescores_initialization": true,
+    "same_adapters_exact": true
+  },
+  "passed": true,
+  "predecessor_decision_rule_sha256": "73453e9424f79b85542cba46f0656561c789b4a3d00d01755b04ab608f8c2d3b",
+  "rendered_config_checks": {
+    "configs/stage-c6/rendered-v3/confusion_irrelevant-broadcast-s9921.toml": true,
+    "configs/stage-c6/rendered-v3/confusion_irrelevant-broadcast-s9922.toml": true,
+    "configs/stage-c6/rendered-v3/confusion_irrelevant-sliced-s9921.toml": true,
+    "configs/stage-c6/rendered-v3/confusion_irrelevant-sliced-s9922.toml": true,
+    "configs/stage-c6/rendered-v3/confusion_lucky-broadcast-s9924.toml": true,
+    "configs/stage-c6/rendered-v3/confusion_lucky-sliced-s9924.toml": true,
+    "configs/stage-c6/rendered-v3/confusion_redundant-broadcast-s9923.toml": true,
+    "configs/stage-c6/rendered-v3/confusion_redundant-sliced-s9923.toml": true,
+    "configs/stage-c6/rendered-v3/structural-broadcast-s9920.toml": true
+  },
+  "rendered_semantics": {
+    "configs/stage-c6/rendered-v3/confusion_irrelevant-broadcast-s9921.toml": {
+      "constraint_train_and_eval": true,
+      "exact_group_once": true,
+      "full_logits_enabled": true,
+      "token_export_smoke_only": true
+    },
+    "configs/stage-c6/rendered-v3/confusion_irrelevant-broadcast-s9922.toml": {
+      "constraint_train_and_eval": true,
+      "exact_group_once": true,
+      "full_logits_enabled": true,
+      "token_export_smoke_only": true
+    },
+    "configs/stage-c6/rendered-v3/confusion_irrelevant-sliced-s9921.toml": {
+      "constraint_train_and_eval": true,
+      "exact_group_once": true,
+      "full_logits_enabled": true,
+      "token_export_smoke_only": true
+    },
+    "configs/stage-c6/rendered-v3/confusion_irrelevant-sliced-s9922.toml": {
+      "constraint_train_and_eval": true,
+      "exact_group_once": true,
+      "full_logits_enabled": true,
+      "token_export_smoke_only": true
+    },
+    "configs/stage-c6/rendered-v3/confusion_lucky-broadcast-s9924.toml": {
+      "constraint_train_and_eval": true,
+      "exact_group_once": true,
+      "full_logits_enabled": true,
+      "token_export_smoke_only": true
+    },
+    "configs/stage-c6/rendered-v3/confusion_lucky-sliced-s9924.toml": {
+      "constraint_train_and_eval": true,
+      "exact_group_once": true,
+      "full_logits_enabled": true,
+      "token_export_smoke_only": true
+    },
+    "configs/stage-c6/rendered-v3/confusion_redundant-broadcast-s9923.toml": {
+      "constraint_train_and_eval": true,
+      "exact_group_once": true,
+      "full_logits_enabled": true,
+      "token_export_smoke_only": true
+    },
+    "configs/stage-c6/rendered-v3/confusion_redundant-sliced-s9923.toml": {
+      "constraint_train_and_eval": true,
+      "exact_group_once": true,
+      "full_logits_enabled": true,
+      "token_export_smoke_only": true
+    },
+    "configs/stage-c6/rendered-v3/structural-broadcast-s9920.toml": {
+      "constraint_train_and_eval": true,
+      "exact_group_once": true,
+      "full_logits_enabled": true,
+      "token_export_smoke_only": true
+    }
+  },
+  "schema_version": 1,
+  "source_checks": {
+    "environments/redco_credit_v1/redco_credit_v1/taskset.py": true,
+    "patches/prime-rl-redco-stage-c6-v3.patch": true,
+    "scripts/audit_stage_c6_preregistration_v3.py": true,
+    "scripts/merge_stage_c_warmstart.py": true,
+    "scripts/run_stage_c2_campaign_arm.sh": true,
+    "scripts/run_stage_c3_supervised_arm.py": true,
+    "scripts/run_stage_c6_campaign_v3.sh": true,
+    "scripts/score_stage_c6_canonical_transformers.py": true,
+    "scripts/verify_stage_c6_v3_interface.py": true,
+    "src/redco/analysis/stage_c6_v3_interface.py": true,
+    "src/redco/analysis/stage_c6_v3_live.py": true,
+    "src/redco/analysis/stage_c6_v3_preregistration.py": true,
+    "tests/test_stage_c6_v3_interface.py": true,
+    "tests/test_stage_c6_v3_live.py": true,
+    "tests/test_stage_c6_v3_preregistration.py": true,
+    "tests/test_stage_c6_v3_runtime.py": true
+  }
+}
