@@ -123,7 +123,14 @@ def _trace_policy_versions(path: Path) -> set[int]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line
     ]
-    return {int(row["policy_version"]) for row in rows}
+    return {
+        int(
+            row["policy_version"]
+            if "policy_version" in row
+            else row["info"]["policy_version"]
+        )
+        for row in rows
+    }
 
 
 def _reuse_contract(run_dir: Path) -> dict[str, Any]:

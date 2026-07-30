@@ -91,7 +91,7 @@ def test_reuse_contract_checks_pair_identity_and_snapshot_progression(
         )
         trace.parent.mkdir(parents=True)
         trace.write_text(
-            json.dumps({"policy_version": first - 1}) + "\n",
+            json.dumps({"info": {"policy_version": first - 1}}) + "\n",
             encoding="utf-8",
         )
 

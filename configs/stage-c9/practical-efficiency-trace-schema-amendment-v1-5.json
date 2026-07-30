@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c9-practical-efficiency-bridge-v1",
+  "amendment": "trace-policy-version-schema-repair-v1-5",
+  "frozen_at_utc": "2026-07-30T22:08:51.9024595Z",
+  "timing": {
+    "exact_final_scoring": "completed successfully",
+    "partial_analysis": "stopped before writing a decision",
+    "scientific_values_inspected": false
+  },
+  "failure": "The reuse-contract parser expected policy_version at the trace row top level. Real Prime-RL traces store it at info.policy_version. The parser raised KeyError before evaluating or signing any scientific result.",
+  "repair": "Read the real nested info.policy_version field while retaining compatibility with the top-level field used by older fixtures.",
+  "unchanged": [
+    "all model outputs and exact score bytes",
+    "all arms, thresholds, and decision rules",
+    "terminal and partial-recovery status",
+    "no model call or training rerun"
+  ],
+  "source_replacements": {
+    "src/redco/analysis/stage_c9_efficiency.py": {
+      "old_sha256": "5823661db3eb52cbe8a94d14a0385da7fb3cfa45f3d3b40eea018c30f4262618",
+      "new_sha256": "a97214df21b70c76216e0e9fcc73bc782600eaa059509ccecc45a507c10f477c"
+    },
+    "tests/test_stage_c9_efficiency.py": {
+      "old_sha256": "2157047ed7af9fff14c88b9b2a33a69f85ff7bb865fee7dd85ea39d6df753212",
+      "new_sha256": "8162ef354e1cbfc3dc8cd762081249efc99bcd91667cff9dc79ab8d90d818865"
+    }
+  }
+}
