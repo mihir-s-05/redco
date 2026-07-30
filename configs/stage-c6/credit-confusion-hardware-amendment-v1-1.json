@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-c6-credit-confusion-live-v1",
+  "amendment": "hardware-only-v1-1",
+  "status": "frozen_before_provisioning_and_before_any_stage_c6_scientific_model_call",
+  "frozen_at_local_date": "2026-07-29",
+  "protocol": "configs/stage-c6/credit-confusion-live-preregistration-v1.json",
+  "protocol_commit": "613a269",
+  "protocol_audit": "reports/stage-c6-credit-confusion-preregistration-audit-v1.json",
+  "protocol_audit_commit": "f1bdd65",
+  "resource": {
+    "id": "cc7cf9",
+    "cloud_id": "gpu_2x_6000_ada",
+    "gpu_type": "RTX6000Ada 48GB",
+    "gpu_count": 2,
+    "gpu_memory_total_gb": 96,
+    "provider": "massedcompute",
+    "location": "US",
+    "security": "datacenter",
+    "spot": false,
+    "vcpus": 26,
+    "memory_gb": 144,
+    "ephemeral_disk_gb": 700,
+    "hourly_rate_usd": 1.5,
+    "stock_status_at_freeze": "Available"
+  },
+  "selection": {
+    "rule": "Cheapest genuinely available eligible non-spot 2x48GB resource at or below $2.00/hour.",
+    "eligible_alternatives_observed": [
+      {
+        "id": "6705b0",
+        "gpu_type": "L40S 48GB",
+        "hourly_rate_usd": 1.64
+      },
+      {
+        "id": "9260ad",
+        "gpu_type": "L40 48GB",
+        "hourly_rate_usd": 1.72
+      }
+    ]
+  },
+  "unchanged_fields": "All initialization bytes, constrained semantics, tasks, arms, seeds, order, call budgets, optimizer settings, support thresholds, scientific metrics, decision rules, repair policy, cost ceiling, artifact policy, and teardown rules remain byte-identical to the committed protocol.",
+  "persistent_storage": false,
+  "ssh_key": "C:/Users/mihir/.ssh/id_rsa",
+  "wallet_before_provisioning_usd": 25.9341
+}
