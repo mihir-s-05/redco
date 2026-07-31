@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d0-all-child-support-v1-repair-hardware-2",
+  "status": "frozen_before_the_only_bounded_repair_deployment",
+  "frozen_at_utc": "2026-07-31T20:01:45Z",
+  "controlling_repair": "configs/stage-d/stage-d0-all-child-support-repair-amendment-v1-1.json",
+  "controlling_repair_sha256": "cfabb9e79d02bda9ea558876c75eab004803aa30212a717661f5f246a0518b04",
+  "repair_commit": "f7a6d4973fe6601469c7e9b8ce74b3a05ebb12c2",
+  "read_only_state_before_selection": {
+    "checked_at_utc": "2026-07-31T19:59:00Z",
+    "active_pods": 0,
+    "persistent_disks": 0,
+    "wallet_exact_usd": 45.1917
+  },
+  "selected_resource": {
+    "resource_id": "7574d6",
+    "cloud_id": "gpu_1x_a6000",
+    "gpu_type": "A6000 48GB",
+    "gpu_count": 1,
+    "gpu_memory_gb": 48,
+    "provider": "massedcompute",
+    "location": "US",
+    "socket": "PCIe",
+    "security": "datacenter",
+    "stock_status": "Available",
+    "is_spot": null,
+    "pricing_type": "on-demand non-spot",
+    "rate_usd_per_hour": 0.54,
+    "vcpus": 6,
+    "host_memory_gb": 48,
+    "ephemeral_disk_gb": 256,
+    "selection_reason": "cheapest genuinely available qualifying non-spot 1x48GB resource"
+  },
+  "cumulative_budget": {
+    "original_total_lifetime_seconds": 21600,
+    "first_pod_lifetime_seconds_conservative": 2018,
+    "repair_pod_lifetime_cap_seconds": 19582,
+    "repair_termination_trigger_seconds": 19282,
+    "provider_shutdown_grace_seconds": 300,
+    "first_pod_billed_usd": 0.2763,
+    "repair_cost_cap_usd": 4.2237,
+    "hardware_specific_repair_maximum_usd": 2.9373,
+    "hardware_specific_cumulative_maximum_usd": 3.2136,
+    "protocol_total_cost_cap_usd": 4.5,
+    "wallet_after_hardware_specific_maximum_usd": 42.2544,
+    "science_plus_untouchable_reserve_usd": 29.0,
+    "constraint": "2018 + 19582 = 21600 seconds; 0.2763 + 0.54 * 19582 / 3600 = 3.2136 USD < 4.50 USD",
+    "passes": true
+  },
+  "lifetime_supervisor": {
+    "script": "scripts/supervise_prime_pod_lifetime_v4_9.ps1",
+    "script_sha256": "3046b686bd5469b992dae5c401cc433920237d866893514982e22ad89beccea2",
+    "start_boundary": "immediately after pod creation returns and before SSH or transfer",
+    "created_at_source": "exact created_at returned by prime pods status",
+    "repair_pod_lifetime_cap_seconds": 19582,
+    "termination_trigger_seconds_after_creation": 19282,
+    "provider_shutdown_grace_seconds": 300,
+    "poll_seconds": 30,
+    "launch_mode": "hidden independent local PowerShell process",
+    "log": "runs/stage-d0/all-child-support-v1-repair-lifetime-supervisor.log"
+  },
+  "transfer": {
+    "repository": "https://github.com/mihir-s-05/redco.git",
+    "exact_checkout": "f7a6d4973fe6601469c7e9b8ce74b3a05ebb12c2",
+    "overlay": "runs/stage-d0/scaffold-support-v4-8-frozen-source-overlay.tar.gz",
+    "overlay_sha256": "634a39993a3d716a4e675d4af8c7e537e5ffc09d7104cabf4d2a3d132cb6990d",
+    "adapter": "runs/stage-d0/scaffold-support-v4/selected-adapter.tar.gz",
+    "adapter_sha256": "296a7d6163d1e1a7e8800f3fb1114a9646a8aaf6e9dfbd8437ba006025745263"
+  },
+  "launch": {
+    "pod_name": "redco-stage-d-all-child-v1-repair",
+    "image": "ubuntu_22_cuda_12",
+    "persistent_storage": "forbidden",
+    "ssh_key": "C:/Users/mihir/.ssh/id_rsa",
+    "runner": "scripts/run_stage_d0_all_child_support_v1_1.sh",
+    "runner_sha256": "d2a4cc39d1a4056dc7128046ddfb9d82d7e69c9c5ae8590ece86b0832ebe6476",
+    "authorized_wrapper_timeout_seconds": 18000
+  },
+  "deployment_rule": {
+    "ordinal": 2,
+    "maximum_deployments": 2,
+    "no_further_repair_deployment": true,
+    "after_any_address_started": "any failure is terminal; no retry or resume"
+  },
+  "unchanged_fields": "all model, adapter, prompt, dataset, fixture, support, seed, order, sampling, replay, threshold, metric, and future scientific fields",
+  "teardown": "always recover artifacts, terminate compute, confirm zero active pods and zero persistent disks, and record exact billing"
+}
