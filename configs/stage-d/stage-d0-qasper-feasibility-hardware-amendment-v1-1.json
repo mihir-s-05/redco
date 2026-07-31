@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "amends": "configs/stage-d/stage-d0-qasper-feasibility-preregistration-v1.json",
+  "change_class": "hardware_only",
+  "availability_observed_utc": "2026-07-31T00:22:26Z",
+  "resource": {
+    "resource_id": "03c728",
+    "cloud_id": "gpu_1x_6000_ada",
+    "gpu_type": "RTX6000Ada 48GB",
+    "gpu_count": 1,
+    "provider": "massedcompute",
+    "location": "US",
+    "stock_status": "Available",
+    "is_spot": false,
+    "price_per_hour_usd": 0.75,
+    "vcpus": 12,
+    "memory_gb": 72,
+    "ephemeral_disk_gb": 350
+  },
+  "selection": "Cheapest genuinely available qualifying non-spot 48GB GPU returned by the read-only ungrouped availability query.",
+  "active_pods_before": 0,
+  "persistent_disks_before": 0,
+  "wallet_before_usd": 17.4629,
+  "scientific_fields_changed": false,
+  "persistent_storage": false,
+  "maximum_create_calls": 1
+}
