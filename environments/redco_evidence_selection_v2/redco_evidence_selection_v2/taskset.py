@@ -29,6 +29,20 @@ the paper. Return the minimum contiguous spans that directly answer the question
 Do not paraphrase, pad, or include commentary.
 """
 
+ALIGNED_SYSTEM_V2 = f"""You extract VERBATIM evidence from one scientific paper.
+
+The complete paper is stored at `{CONTEXT_PATH}`. Use IPython to read and search
+that file without printing the entire paper into the root context. Search several
+keyword variants and inspect surrounding text. Verify every proposed span against
+the local paper text before answering.
+
+After tool use, stop calling tools and state exactly one bare Python list of
+nonempty exact strings copied from the paper. Do not wrap the list in FINAL(...)
+and do not add prose. Every returned string must occur verbatim in the paper.
+Return the minimum contiguous spans that directly answer the question. Do not
+paraphrase or pad.
+"""
+
 FORCED_TRACE_FIXTURE = """
 
 INTEGRATION FIXTURE ONLY: in your first IPython action, read the paper, make two
@@ -117,8 +131,14 @@ class EvidenceSelectionConfig(vf.TasksetConfig):
     dataset_path: Path
     dataset_sha256: str
     split: str = "audit"
-    prompt_profile: Literal["natural", "forced_trace_fixture"] = "natural"
+    prompt_profile: Literal[
+        "natural",
+        "forced_trace_fixture",
+        "fewshot_scaffold_v2",
+    ] = "natural"
     policy_checkpoint_id: str = BASE_POLICY_CHECKPOINT
+    scaffold_prompt_path: Path | None = None
+    scaffold_prompt_sha256: str | None = None
 
 
 class EvidenceSelectionTaskset(
@@ -147,9 +167,29 @@ class EvidenceSelectionTaskset(
                 raise ValueError(
                     f"{row['example_id']} has invalid reference evidence"
                 )
-            system = SYSTEM
+            if self.config.prompt_profile == "fewshot_scaffold_v2":
+                system = ALIGNED_SYSTEM_V2
+            else:
+                system = SYSTEM
             if self.config.prompt_profile == "forced_trace_fixture":
                 system += FORCED_TRACE_FIXTURE
+            elif self.config.prompt_profile == "fewshot_scaffold_v2":
+                if (
+                    self.config.scaffold_prompt_path is None
+                    or self.config.scaffold_prompt_sha256 is None
+                ):
+                    raise ValueError(
+                        "fewshot_scaffold_v2 requires a prompt path and SHA-256"
+                    )
+                scaffold = self.config.scaffold_prompt_path.read_bytes()
+                scaffold_sha256 = hashlib.sha256(scaffold).hexdigest()
+                if scaffold_sha256 != self.config.scaffold_prompt_sha256:
+                    raise ValueError(
+                        "shared scaffold prompt hash mismatch: "
+                        f"got {scaffold_sha256}, expected "
+                        f"{self.config.scaffold_prompt_sha256}"
+                    )
+                system += "\n\n" + scaffold.decode("utf-8")
             data = EvidenceSelectionData(
                 idx=row_index,
                 name=row["example_id"],

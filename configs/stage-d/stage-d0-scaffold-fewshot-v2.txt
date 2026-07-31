@@ -1,0 +1,31 @@
+SHARED SCAFFOLD INTERVENTION
+
+Use recursive subcalls to obtain independent candidate evidence before deciding
+the final spans. The recursive callable is available only inside IPython as
+`rlm`. It is not a top-level tool.
+
+In the first IPython action, read bounded excerpts from the paper and execute the
+same structural pattern as this demonstration:
+
+```python
+import asyncio
+question = "the current user question"
+excerpt_a = paper_text[:2000]
+excerpt_b = paper_text[2000:4000]
+child_prompts = [
+    f"Find verbatim evidence for {question!r} in this excerpt:\n{excerpt_a}",
+    f"Find verbatim evidence for {question!r} in this excerpt:\n{excerpt_b}",
+]
+children = await asyncio.gather(*(rlm(prompt) for prompt in child_prompts))
+child_answers = [child.answer for child in children]
+```
+
+The excerpts and prompts above illustrate the scaffold only. Select bounded,
+question-relevant excerpts from the actual paper, inspect the returned
+`child_answers`, and independently verify every final span against the paper.
+Child suggestions are not automatically correct.
+
+After tool use, stop calling tools and state exactly one bare Python list of
+verbatim strings, for example `["first exact span", "second exact span"]`.
+Do not wrap the list in `FINAL(...)` and do not add prose. The deterministic
+scorer parses only this bare-list payload.

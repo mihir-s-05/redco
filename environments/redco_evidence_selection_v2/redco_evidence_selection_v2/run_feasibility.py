@@ -51,6 +51,12 @@ def build_config(args: argparse.Namespace) -> EvalConfig:
                 "dataset_sha256": args.dataset_sha256,
                 "split": args.split,
                 "prompt_profile": args.prompt_profile,
+                "scaffold_prompt_path": (
+                    args.scaffold_prompt.resolve()
+                    if args.scaffold_prompt is not None
+                    else None
+                ),
+                "scaffold_prompt_sha256": args.scaffold_prompt_sha256,
             },
             "agent": {
                 "max_total_tokens": args.max_total_tokens,
@@ -200,9 +206,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--split", choices=("train", "validation"), default="train")
     parser.add_argument(
         "--prompt-profile",
-        choices=("natural", "forced_trace_fixture"),
+        choices=("natural", "forced_trace_fixture", "fewshot_scaffold_v2"),
         default="natural",
     )
+    parser.add_argument("--scaffold-prompt", type=Path)
+    parser.add_argument("--scaffold-prompt-sha256")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--num-tasks", type=int, default=8)
     parser.add_argument("--replicates", type=int, default=4)

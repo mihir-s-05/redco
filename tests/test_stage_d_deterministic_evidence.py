@@ -105,6 +105,21 @@ def test_unparseable_empty_prediction_and_empty_reference_score_zero() -> None:
     assert score_exact_spans(PAPER, [REFERENCE[0]], [])["f1"] == 0.0
 
 
+def test_v2_bare_list_contract_roundtrips_edge_cases() -> None:
+    cases = (
+        [],
+        ["one"],
+        ["first", "second"],
+        ["quote: 'x'", 'double: "y"', "line\nbreak"],
+    )
+    for spans in cases:
+        parsed = parse_evidence(repr(spans))
+        assert parsed.parseable
+        assert parsed.spans == tuple(spans)
+    assert not parse_evidence("FINAL(['one'])").parseable
+    assert not parse_evidence("Answer: ['one']").parseable
+
+
 def test_repeated_reference_text_has_deterministic_occurrence_semantics() -> None:
     score = score_exact_spans(PAPER, [REFERENCE[0]], REFERENCE)
     assert score["f1"] == 1.0
@@ -149,11 +164,33 @@ def test_prompt_profiles_separate_science_from_trace_fixture(
             prompt_profile="forced_trace_fixture",
         )
     ).load()[0]
+    scaffold_path = (
+        Path(__file__).parents[1]
+        / "configs"
+        / "stage-d"
+        / "stage-d0-scaffold-fewshot-v2.txt"
+    )
+    scaffold = EvidenceSelectionTaskset(
+        EvidenceSelectionConfig(
+            dataset_path=dataset,
+            dataset_sha256=digest,
+            split="train",
+            prompt_profile="fewshot_scaffold_v2",
+            scaffold_prompt_path=scaffold_path,
+            scaffold_prompt_sha256=hashlib.sha256(
+                scaffold_path.read_bytes()
+            ).hexdigest(),
+        )
+    ).load()[0]
 
     assert "call exactly two `rlm(...)` children" not in natural.data.prompt
     assert "minimum child" not in natural.data.prompt.lower()
+    assert "submitted with FINAL(...)" in natural.data.prompt
     assert "call exactly two `rlm(...)` children" in fixture.data.prompt
     assert "excluded from scientific feasibility metrics" in fixture.data.prompt
+    assert "await asyncio.gather" in scaffold.data.prompt
+    assert "Do not wrap the list in `FINAL(...)`" in scaffold.data.prompt
+    assert "Do not wrap the list in FINAL(...)" in scaffold.data.prompt
 
 
 def test_episode_seed_uses_task_and_replicate_address() -> None:
@@ -182,6 +219,8 @@ def test_served_snapshot_and_renderer_identity_are_separate(
         dataset_sha256="a" * 64,
         split="train",
         prompt_profile="natural",
+        scaffold_prompt=None,
+        scaffold_prompt_sha256=None,
         output_dir=tmp_path / "output",
         num_tasks=8,
         replicates=4,

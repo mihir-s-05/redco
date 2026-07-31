@@ -1,0 +1,159 @@
+{
+  "schema_version": 2,
+  "status": "cpu_design_not_live_authorized",
+  "objective": "Induce and measure branchable RLM scaffold use on deterministic QASPER without conflating interface feasibility, scaffold induction, branch informativeness, or scientific credit comparisons.",
+  "history": {
+    "v1_terminal_report": "reports/stage-d0-qasper-feasibility-terminal-disposition-v1.json",
+    "v1_clean_result": "The exact stock policy and v1 interface produced zero depth-one child calls in 32 natural episodes.",
+    "v1_confounds": [
+      "Prompt requested FINAL(...) while the scorer parsed only a bare Python list.",
+      "The forced fixture demonstrated a top-level rlm tool although rlm is callable only inside IPython."
+    ]
+  },
+  "fairness": {
+    "classification": "shared_scaffold_intervention",
+    "required_arms": [
+      "stock",
+      "branch-global",
+      "local"
+    ],
+    "shared_byte_identical_fields": [
+      "few-shot demonstration bytes",
+      "task prompt and parser",
+      "tool schema",
+      "base checkpoint or selected SFT adapter",
+      "root and child checkpoint",
+      "decoding configuration"
+    ],
+    "no_composite_primary_score": true,
+    "oracle_floor_trigger": "Dropping either branch-global or local for a labeling-based design choice triggers configs/stage-c9/oracle-floor-trigger-v1.json."
+  },
+  "adaptive_cascade": {
+    "order": [
+      "CPU prompt-parser and renderer-tool roundtrip",
+      "complete three-arm budget projection",
+      "one frozen few-shot support block",
+      "conditional pre-frozen SFT fallback",
+      "independent eligible-target density and branch-informativeness audit",
+      "separately preregistered scientific campaign"
+    ],
+    "fewshot_result_may_only": "Select the already-frozen few-shot-pass or few-shot-fail branch.",
+    "sft_fallback_freeze_deadline": "Before the first few-shot support model output.",
+    "sft_maximum_traces": 50,
+    "sft_not_yet_frozen": true,
+    "consequence": "No few-shot support model call is authorized by this design version.",
+    "required_disjoint_sets": [
+      "interface development",
+      "few-shot support",
+      "SFT generation and selection",
+      "eligible-target and informativeness power audit",
+      "scientific training and evaluation"
+    ]
+  },
+  "interface_contract": {
+    "shared_scaffold_prompt": "configs/stage-d/stage-d0-scaffold-fewshot-v2.txt",
+    "shared_scaffold_prompt_sha256": "b0db1850aecc8f6f65f530de4ce2ce4ecf6c15a75daf20596564ddf17d7540e2",
+    "taskset_source_sha256": "de44545363b2a43da7100bca677a3db8dcb07712f47d4289bd0800cb875a46f8",
+    "feasibility_runner_source_sha256": "af1c6d4e7c3453f14250ffdc3474991fb78d8b2da0b05abb98467a3acb127cf7",
+    "answer_contract": "After tool use, the root emits exactly one bare Python list of strings; FINAL(...) and prose are invalid.",
+    "only_exposed_top_level_tool": "ipython",
+    "child_invocation_inside_ipython": "children = await asyncio.gather(*(rlm(prompt) for prompt in child_prompts))",
+    "child_result_access": "child.answer",
+    "cpu_roundtrip_cases": [
+      "empty list",
+      "single span",
+      "multiple spans",
+      "escaped quotes",
+      "embedded newline",
+      "FINAL wrapper rejection",
+      "prose prefix rejection"
+    ]
+  },
+  "eligible_target_contract": {
+    "denominator": "Every natural support rollout, including parse errors, timeouts, and zero-child traces.",
+    "maximum_count_per_rollout": 1,
+    "commitment": "The selector commits before the child output/action is observed and consumes only structural PrefixFeatures.",
+    "required_exact_fields": [
+      "structural event address",
+      "child prompt token IDs",
+      "checkpoint ID",
+      "decoding config hash",
+      "event seed",
+      "behavior logprobs",
+      "pre-call restorable snapshot bytes and SHA-256",
+      "downstream provenance proving the child return entered later state or prompt",
+      "exact original replay",
+      "valid full-suffix alternative replay",
+      "valid sliced alternative replay"
+    ],
+    "correctness_tolerance": "exact only"
+  },
+  "eligible_target_power": {
+    "groups_per_update": 8,
+    "minimum_groups_per_update": 5,
+    "required_probability": 0.95,
+    "minimum_underlying_probability": 0.808,
+    "support_rollouts": 64,
+    "support_successes_required": 58,
+    "two_sided_95pct_z": 1.959963984540054,
+    "primary_support_metrics": [
+      "selector_eligible_restorable_target_probability",
+      "informative_branch_group_probability_conditional_on_eligible",
+      "joint_eligible_and_informative_probability"
+    ],
+    "joint_pass_rule": "At least 58 of 64 support rollouts must contain the one committed target and produce a reward-informative branch group under the exact planned K and deterministic reward.",
+    "task_stratum_coverage_required": true,
+    "anti_overuse_cost_band": {
+      "median_depth_one_children_minimum": 1,
+      "median_depth_one_children_maximum": 2,
+      "p95_child_calls_and_tokens": "Must be frozen after CPU ledger design and before support sampling."
+    }
+  },
+  "live_preflights_required_before_support": [
+    "real pinned renderer exposes only IPython and renders the exact shared prompt",
+    "first fixture IPython code literally executes await asyncio.gather over two rlm calls",
+    "two depth-one calls and exact return links are serialized",
+    "episode seeds, exact prompt/action tokens, checkpoint, decoding hash, and logprobs are present",
+    "pre-call snapshot restoration reproduces the original exactly",
+    "one alternative passes both full and sliced replay",
+    "adapter archive/hash/reload reproduces fixed logits",
+    "miniature checkpoint-retention run physically preserves and reloads every requested adapter"
+  ],
+  "budget": {
+    "wallet_usd": 16.94,
+    "reserve_usd": 4.0,
+    "scientific_arms": 3,
+    "root_rollouts_per_arm": 192,
+    "setup_and_download_seconds": 1689.0,
+    "observed_root_episode_p95_seconds": 31.453525014000206,
+    "training_seconds_per_arm": 900.0,
+    "contingency_multiplier": 1.3,
+    "hourly_rate_scenarios_usd": [
+      2.0,
+      1.5,
+      1.2,
+      1.0
+    ],
+    "missing_before_authorization": [
+      "alternative branch continuation service time and tokens",
+      "few-shot repeated prompt-token and KV cost",
+      "64-rollout density support cost",
+      "planned-K branch-informativeness support cost",
+      "conditional SFT and exact-scoring cost"
+    ],
+    "pass_rule": "Feasibility, any SFT, all three scientific arms, artifact recovery, and teardown must fit the live wallet while retaining the reserve."
+  },
+  "repair_and_stop": {
+    "before_model_output": "Outcome-independent deterministic integration fixes may be versioned and re-audited.",
+    "after_support_output": "Never rerun the same task or seed. A demonstrated outcome-independent defect requires a distinct committed protocol and fresh support block.",
+    "after_first_sft_step": "Resume only from a prevalidated full-state checkpoint before candidate support metrics; otherwise the SFT draw terminates.",
+    "after_candidate_score": "Only the frozen earliest-pass selection is allowed.",
+    "after_scientific_outcome": "No arm retry.",
+    "terminal_before_training": [
+      "few-shot and the predeclared SFT fallback both fail",
+      "joint eligible-and-informative power fails",
+      "full campaign budget fails",
+      "checkpoint or adapter reload roundtrip fails"
+    ]
+  }
+}
