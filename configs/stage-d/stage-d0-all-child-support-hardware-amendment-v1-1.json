@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d0-all-child-support-v1-hardware-1",
+  "status": "frozen_before_the_first_all_child_support_deployment",
+  "frozen_at_utc": "2026-07-31T19:08:17Z",
+  "controlling_protocol": "configs/stage-d/stage-d0-all-child-support-preregistration-v1.json",
+  "controlling_protocol_sha256": "98a9a57ca05c6bf21acbc9061a3601f11896f008f06d12074a271b7cc4e1b515",
+  "controlling_audit": "reports/stage-d0-all-child-support-preregistration-audit-v1.json",
+  "controlling_audit_sha256": "ea7ee8cfeed5213f51d45a0e3971994144c407ec4d05f5236c5ace1781d54dc3",
+  "controlling_audit_signature": "d736001b270ce02f08da7d844db3d4484aa922acec4b260d66aa078edbb4e156",
+  "scientific_commit": "4e6e6f08b9ae768674378f9dd07cc8ab3f4b031b",
+  "read_only_state_before_selection": {
+    "checked_at_utc": "2026-07-31T19:06:00Z",
+    "active_pods": 0,
+    "persistent_disks": 0,
+    "wallet_exact_usd": 45.468
+  },
+  "selected_resource": {
+    "resource_id": "ea69b8",
+    "cloud_id": "gpu_1x_a6000",
+    "gpu_type": "A6000 48GB",
+    "gpu_count": 1,
+    "gpu_memory_gb": 48,
+    "provider": "massedcompute",
+    "location": "US",
+    "socket": "PCIe",
+    "security": "datacenter",
+    "stock_status": "Available",
+    "is_spot": null,
+    "pricing_type": "on-demand non-spot",
+    "rate_usd_per_hour": 0.54,
+    "vcpus": 6,
+    "host_memory_gb": 48,
+    "ephemeral_disk_gb": 256,
+    "selection_reason": "cheapest genuinely available qualifying non-spot 1x48GB resource"
+  },
+  "lifetime_budget": {
+    "authorized_total_billed_pod_lifetime_seconds": 21600,
+    "authorized_total_billed_pod_lifetime_hours": 6.0,
+    "maximum_rate_usd_per_hour": 0.54,
+    "maximum_hardware_specific_cost_usd": 3.24,
+    "controlling_protocol_cost_cap_usd": 4.5,
+    "wallet_after_hardware_specific_maximum_usd": 42.228,
+    "required_science_plus_untouchable_reserve_usd": 29.0,
+    "authorized_wrapper_timeout_seconds": 18000,
+    "non_wrapper_lifetime_reserve_seconds": 3600,
+    "termination_grace_seconds": 300,
+    "constraint": "0.54 * 21600 / 3600 = 3.24 <= 4.50 and 45.468 - 3.24 = 42.228 >= 29.00",
+    "passes": true
+  },
+  "lifetime_supervisor": {
+    "script": "scripts/supervise_prime_pod_lifetime_v4_9.ps1",
+    "script_sha256": "3046b686bd5469b992dae5c401cc433920237d866893514982e22ad89beccea2",
+    "start_boundary": "immediately after pod creation returns and before SSH or transfer",
+    "created_at_source": "exact created_at returned by prime pods status",
+    "total_billed_lifetime_cap_seconds": 21600,
+    "termination_trigger_seconds_after_creation": 21300,
+    "provider_shutdown_grace_seconds": 300,
+    "poll_seconds": 30,
+    "launch_mode": "hidden independent local PowerShell process",
+    "log": "runs/stage-d0/all-child-support-v1-lifetime-supervisor.log",
+    "failure_policy": "repeatedly request termination until an authoritative pod list omits the pod; failure to confirm by the absolute cap is fatal"
+  },
+  "transfer": {
+    "repository": "https://github.com/mihir-s-05/redco.git",
+    "exact_checkout": "4e6e6f08b9ae768674378f9dd07cc8ab3f4b031b",
+    "order": [
+      "clone the HTTPS repository and check out the exact commit",
+      "initialize clean pinned Prime submodules over HTTPS",
+      "extract the exact byte-preserving 48-file overlay",
+      "require an empty 48-file hash failure set",
+      "copy the compressed adapter by exact hash",
+      "invoke the frozen all-child support wrapper"
+    ],
+    "overlay": "runs/stage-d0/scaffold-support-v4-8-frozen-source-overlay.tar.gz",
+    "overlay_sha256": "634a39993a3d716a4e675d4af8c7e537e5ffc09d7104cabf4d2a3d132cb6990d",
+    "overlay_member_count": 48,
+    "adapter": "runs/stage-d0/scaffold-support-v4/selected-adapter.tar.gz",
+    "adapter_sha256": "296a7d6163d1e1a7e8800f3fb1114a9646a8aaf6e9dfbd8437ba006025745263",
+    "forbidden": [
+      "git archive as the source of frozen working-tree bytes",
+      "CUDA or uv caches",
+      "merged 4B models",
+      "optimizer state",
+      "persistent storage"
+    ]
+  },
+  "launch": {
+    "pod_name": "redco-stage-d-all-child-v1",
+    "image": "ubuntu_22_cuda_12",
+    "persistent_storage": "forbidden",
+    "ssh_key": "C:/Users/mihir/.ssh/id_rsa",
+    "ssh_must_pass_noninteractively_before_transfer": true,
+    "environment": {
+      "REDCO_ALL_CHILD_AUTHORIZED_TIMEOUT_SECONDS": "18000"
+    },
+    "runner": "scripts/run_stage_d0_all_child_support_v1.sh",
+    "runner_sha256": "80d66b38e6dbd662665a664805247c433c796d7772a6f99c016b9a2cdb6ee9d2"
+  },
+  "repair_boundary": {
+    "address_marker": "ADDRESS_STARTED",
+    "before_any_address": "one separately amended bounded repair deployment is permitted",
+    "after_any_address": "terminal for the entire support campaign; no retry, resume, or later slot",
+    "monitor_requirement": "inspect recovered markers before authorizing any repair deployment",
+    "cumulative_limit": "both deployments, if needed, share one six-hour and 4.50 USD cap"
+  },
+  "unchanged_fields": "all model, adapter, prompt, dataset, fixture, support, seed, order, sampling, replay, threshold, metric, and future scientific fields",
+  "teardown": "always recover artifacts, terminate compute, confirm zero active pods and zero persistent disks, and record exact billing"
+}
