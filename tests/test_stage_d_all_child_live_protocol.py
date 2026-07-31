@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import sys
 from pathlib import Path
@@ -20,6 +21,7 @@ from audit_stage_d_all_child_live_plan_v1 import (  # noqa: E402
 )
 from audit_stage_d_fixture_integration_v1 import audit as audit_fixture  # noqa: E402
 from generate_stage_d_all_child_live_runner_v1 import generate  # noqa: E402
+from generate_stage_d_all_child_live_runner_v1_1 import generate as generate_repair  # noqa: E402
 
 SLOTS = ROOT / "configs/stage-d/stage-d0-all-child-live-slots-v1.json"
 
@@ -258,3 +260,31 @@ def test_generated_runner_preserves_atomic_order_and_separates_fixture_semantics
     assert 'done <"$materialized/support.tsv"' in runner
     assert 'if test "$decision" = terminal_fail' in runner
     assert 'if test "$decision" = pass' not in runner.split('done <"$materialized/support.tsv"')[0]
+
+
+def test_live_parser_accepts_both_frozen_successor_splits() -> None:
+    source = (
+        ROOT
+        / "environments/redco_evidence_selection_v2/redco_evidence_selection_v2"
+        / "run_feasibility_successor_v1.py"
+    ).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    assignments = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "SUCCESSOR_SPLITS"
+            for target in node.targets
+        )
+    ]
+    assert len(assignments) == 1
+    assert isinstance(assignments[0].value, ast.Tuple)
+    values = {
+        element.value for element in assignments[0].value.elts if isinstance(element, ast.Constant)
+    }
+    assert {"successor_fixture", "successor_support"} <= values
+    runner = generate_repair(
+        (ROOT / "scripts/run_stage_d0_scaffold_support_v4_6.sh").read_text(encoding="utf-8")
+    )
+    assert runner.count("redco_evidence_selection_v2.run_feasibility_successor_v1") == 2

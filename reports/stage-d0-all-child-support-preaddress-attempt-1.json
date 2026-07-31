@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d0-all-child-support-v1-preaddress-attempt-1",
+  "decision": "outcome_independent_preaddress_failure",
+  "scientific_gate_evaluated": false,
+  "support_addresses_observed": 0,
+  "fixture_addresses_observed": 0,
+  "failure_stage": "fixture dry-run argparse validation",
+  "failure": "successor_fixture was absent from the frozen run_feasibility --split choices",
+  "evidence": "runs/stage-d0/stage-d-all-child-preaddress-attempt-1.tar.gz",
+  "evidence_sha256": "1e8956e0711d070b1a24c8a63b92882a96631c43828674316feb0f4aed003fb1",
+  "evidence_bytes": 682738,
+  "compute": {
+    "pod_id": "70c1ef3189e74ab682e00602f58b0951",
+    "gpu": "A6000 48GB",
+    "rate_usd_per_hour": 0.54,
+    "created_at_utc": "2026-07-31T19:09:29Z",
+    "terminated_at_utc": "2026-07-31T19:43:06Z",
+    "billed_usd": 0.2763,
+    "wallet_after_usd": 45.1917,
+    "active_pods_after": 0,
+    "persistent_disks_after": 0
+  },
+  "disposition": "one bounded repair deployment remains under the original cumulative lifetime and cost caps"
+}
