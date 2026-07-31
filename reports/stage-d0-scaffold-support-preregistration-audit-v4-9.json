@@ -1,0 +1,98 @@
+{
+  "analysis": "stage-d0-scaffold-support-preregistration-audit-v4-9",
+  "checks": {
+    "all_scientific_fields_inherited_except_named_validation_line": true,
+    "bounded_repair_and_request_boundaries_preserved": true,
+    "budget_arithmetic_exact": true,
+    "distinct_successor_frozen_before_request": true,
+    "generated_runner_is_one_hunk_only": true,
+    "github_https_plus_exact_overlay_frozen": true,
+    "linux_serialization_regressions_pass": true,
+    "only_signed_json_comparison_changes": true,
+    "parent_protocol_and_audit_signed_exact": true,
+    "source_hashes_exact": true,
+    "timeout_and_depleted_cap_executable": true,
+    "transfer_order_and_empty_failure_gate_frozen": true,
+    "uv_only": true,
+    "v4_8_terminal_signed_exact_and_zero_requests": true,
+    "wrapper_generates_audits_and_parses_inner_before_run": true
+  },
+  "passes": true,
+  "protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v4-9.json",
+  "protocol_sha256": "a48b684f342d36ed16243d90cc7a0ec2ef007f0fcfeba829d7ea01408b88d47c",
+  "recomputed_remaining_envelope_usd": 43.555574,
+  "schema_version": 1,
+  "signed_payload_sha256": "0cd7589162da2e2a0dca5a8c844b4d1abaca4067efb4b3961b57a700da9b4fad",
+  "source_results": {
+    "configs/stage-d/stage-d0-scaffold-support-preregistration-v4-8.json": {
+      "actual": "64353a18f7d907357f521bb9db89f6163d24525e03ac5d6122c9d13e652a4816",
+      "expected": "64353a18f7d907357f521bb9db89f6163d24525e03ac5d6122c9d13e652a4816",
+      "passes": true
+    },
+    "reports/stage-d0-scaffold-support-preregistration-audit-v4-8.json": {
+      "actual": "946bd9d7b5c43793ab04b2cd54fbf486c790e1e6beb85f6ef28305c6b3e0bdd2",
+      "expected": "946bd9d7b5c43793ab04b2cd54fbf486c790e1e6beb85f6ef28305c6b3e0bdd2",
+      "passes": true
+    },
+    "reports/stage-d0-scaffold-support-v4-8-terminal-2026-07-31.json": {
+      "actual": "d07d9c8c7c5bc19f64516c6bcb2bfa4d47468d5c454cb9d5048e250df3d908c4",
+      "expected": "d07d9c8c7c5bc19f64516c6bcb2bfa4d47468d5c454cb9d5048e250df3d908c4",
+      "passes": true
+    },
+    "reports/stage-d0-scaffold-support-v4-8-transfer-overlay-audit.json": {
+      "actual": "a0ae3da6466f6743d4ed6358ba2b1bdc3bf3974c47acb650b819e02e4c13a457",
+      "expected": "a0ae3da6466f6743d4ed6358ba2b1bdc3bf3974c47acb650b819e02e4c13a457",
+      "passes": true
+    },
+    "reports/stage-d0-scaffold-support-v4-9-inner-runner-audit.json": {
+      "actual": "b925bbf7781ccb82cdadbf0007ba1e7dc7885aff69f2f58e9f9cf8356e7037af",
+      "expected": "b925bbf7781ccb82cdadbf0007ba1e7dc7885aff69f2f58e9f9cf8356e7037af",
+      "passes": true
+    },
+    "reports/stage-d0-scaffold-support-v4-9-linux-serialization-audit.json": {
+      "actual": "153bbae4cc172677a1007395cd55813e8be043ecce5ff7dc945f7c69b08570e5",
+      "expected": "153bbae4cc172677a1007395cd55813e8be043ecce5ff7dc945f7c69b08570e5",
+      "passes": true
+    },
+    "reports/stage-d0-scaffold-support-v4-9-linux-serialization-regression.json": {
+      "actual": "4bb1311974359395f855b70e532bafe0d28f93b78cf3dacfdb35314b0300d169",
+      "expected": "4bb1311974359395f855b70e532bafe0d28f93b78cf3dacfdb35314b0300d169",
+      "passes": true
+    },
+    "scripts/audit_signed_json_equivalence_v4_9.py": {
+      "actual": "05ac7648671638ec1d33b08f080057cf1a39c99267f89c9239d80205b1e755e2",
+      "expected": "05ac7648671638ec1d33b08f080057cf1a39c99267f89c9239d80205b1e755e2",
+      "passes": true
+    },
+    "scripts/audit_stage_d0_scaffold_support_preregistration_v4_9.py": {
+      "actual": "636cb11c4b3cac408668da65a58437b8cd6ddf7aa0a627e447f324a0b326251e",
+      "expected": "636cb11c4b3cac408668da65a58437b8cd6ddf7aa0a627e447f324a0b326251e",
+      "passes": true
+    },
+    "scripts/generate_stage_d_v4_9_inner_runner.py": {
+      "actual": "5464dd0138c351740ebe707aaa591517522b8ebf1006f5fc84465851f901eb03",
+      "expected": "5464dd0138c351740ebe707aaa591517522b8ebf1006f5fc84465851f901eb03",
+      "passes": true
+    },
+    "scripts/preflight_stage_d_runtime_paths_v4_8.sh": {
+      "actual": "0f9efad1514669735a5026076e25a72a067439641b2991763dca8a3a9f947a10",
+      "expected": "0f9efad1514669735a5026076e25a72a067439641b2991763dca8a3a9f947a10",
+      "passes": true
+    },
+    "scripts/report_stage_d_v4_9_linux_serialization.py": {
+      "actual": "92504c3c8dd303e3730a187c7a8d402481f8896af7f27d170e391ba8b9b2789b",
+      "expected": "92504c3c8dd303e3730a187c7a8d402481f8896af7f27d170e391ba8b9b2789b",
+      "passes": true
+    },
+    "scripts/run_stage_d0_scaffold_support_v4_7.sh": {
+      "actual": "cdc470b0044349cab5c60abf04245e6322797f6547c46b29c1a97851109accd8",
+      "expected": "cdc470b0044349cab5c60abf04245e6322797f6547c46b29c1a97851109accd8",
+      "passes": true
+    },
+    "scripts/run_stage_d0_scaffold_support_v4_9.sh": {
+      "actual": "548f226afefd4db3e8c75e290dbd5e57b79024d77583946cf162548b67e9aa0b",
+      "expected": "548f226afefd4db3e8c75e290dbd5e57b79024d77583946cf162548b67e9aa0b",
+      "passes": true
+    }
+  }
+}

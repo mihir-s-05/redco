@@ -1,0 +1,38 @@
+{
+  "analysis": "stage-d-v4-9-generated-inner-runner",
+  "checks": {
+    "exactly_one_diff_hunk": true,
+    "new_verifier_exactly_once": true,
+    "old_line_exactly_once": true,
+    "request_sentinels_unchanged": true,
+    "scientific_tail_unchanged": true
+  },
+  "generated": "runs/stage-d0/scaffold-support-v4-9-cpu-preflight/generated-inner.sh",
+  "generated_sha256": "f1f08c1c3cd77f0423271ad4ef9bed216aa591829aa779f99b8b51a254c0edbf",
+  "parent": "scripts/run_stage_d0_scaffold_support_v4_7.sh",
+  "parent_sha256": "cdc470b0044349cab5c60abf04245e6322797f6547c46b29c1a97851109accd8",
+  "passes": true,
+  "replacement": {
+    "new": "\"$uv_bin\" run --frozen python \\\n  scripts/audit_signed_json_equivalence_v4_9.py \\\n  --expected \"$migration_report\" \\\n  --actual \"$run_root/fixture-migration-recomputed.json\" \\\n  --output \"$run_root/fixture-migration-equivalence-v4-9.json\"",
+    "old": "cmp -s \"$migration_report\" \"$run_root/fixture-migration-recomputed.json\""
+  },
+  "schema_version": 1,
+  "signed_payload_sha256": "7e6da0fca30f4766cb15c0adf6cd15c02a33107055e532c10d29feb616ce27fe",
+  "unified_diff": [
+    "--- scripts/run_stage_d0_scaffold_support_v4_7.sh",
+    "+++ runs/stage-d0/scaffold-support-v4-9-cpu-preflight/generated-inner.sh",
+    "@@ -107,7 +107,11 @@",
+    "     environments/redco_evidence_selection_v2/redco_evidence_selection_v2/seeding.py \\",
+    "   --master-seed redco-stage-d0-selected-fixture-v4 \\",
+    "   --output \"$run_root/fixture-migration-recomputed.json\"",
+    "-cmp -s \"$migration_report\" \"$run_root/fixture-migration-recomputed.json\"",
+    "+\"$uv_bin\" run --frozen python \\",
+    "+  scripts/audit_signed_json_equivalence_v4_9.py \\",
+    "+  --expected \"$migration_report\" \\",
+    "+  --actual \"$run_root/fixture-migration-recomputed.json\" \\",
+    "+  --output \"$run_root/fixture-migration-equivalence-v4-9.json\"",
+    " ",
+    " verifiers_source=\"external/prime-rl/deps/verifiers\"",
+    " test \"$("
+  ]
+}
