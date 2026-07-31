@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -164,4 +165,38 @@ def test_episode_seed_uses_task_and_replicate_address() -> None:
     assert len(seeds) == 8
     assert derive_episode_seed("master", "example-a", 0) == derive_episode_seed(
         "master", "example-a", 0
+    )
+
+
+def test_served_snapshot_and_renderer_identity_are_separate(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("verifiers.v1")
+    from redco_evidence_selection_v2.run_feasibility import build_config
+
+    args = Namespace(
+        model="/workspace/models/exact-snapshot",
+        renderer_model_name="Qwen/Qwen3-4B-Instruct-2507",
+        base_url="http://127.0.0.1:8000/v1",
+        dataset=tmp_path / "dataset.jsonl",
+        dataset_sha256="a" * 64,
+        split="train",
+        prompt_profile="natural",
+        output_dir=tmp_path / "output",
+        num_tasks=8,
+        replicates=4,
+        master_seed="master",
+        temperature=0.7,
+        top_p=1.0,
+        max_completion_tokens=768,
+        max_total_tokens=8192,
+        rlm_version="56218f33796ecbe465445bc43948886354fde196",
+        setup_timeout=900.0,
+        harness_timeout=900.0,
+    )
+    config = build_config(args)
+    assert config.model == "/workspace/models/exact-snapshot"
+    assert (
+        config.client.renderer_model_name
+        == "Qwen/Qwen3-4B-Instruct-2507"
     )

@@ -113,6 +113,7 @@ grep -Fx "REDCO_STRICT_TOOL_CALLING_ENV=1" "$inference_log"
     "$repo_root/environments/redco_evidence_selection_v2" \
     python -m redco_evidence_selection_v2.run_feasibility \
     --model "$model_path" \
+    --renderer-model-name "$model_repo" \
     --dataset "$repo_root/$dataset" \
     --output-dir "$repo_root/$run_root/natural" \
     --num-tasks 8 \
@@ -131,6 +132,7 @@ grep -Fx "REDCO_STRICT_TOOL_CALLING_ENV=1" "$inference_log"
     "$repo_root/environments/redco_evidence_selection_v2" \
     python -m redco_evidence_selection_v2.run_feasibility \
     --model "$model_path" \
+    --renderer-model-name "$model_repo" \
     --dataset "$repo_root/$dataset" \
     --output-dir "$repo_root/$run_root/fixture" \
     --num-tasks 1 \

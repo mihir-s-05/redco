@@ -33,7 +33,7 @@ def build_config(args: argparse.Namespace) -> EvalConfig:
             "base_url": args.base_url,
             "api_key_var": "VLLM_API_KEY",
             "renderer": {"name": "auto"},
-            "renderer_model_name": args.model,
+            "renderer_model_name": args.renderer_model_name,
             "pool_size": 1,
         },
         # This placeholder never reaches a model call. Each RunSlot receives an
@@ -186,6 +186,14 @@ async def run_grouped(args: argparse.Namespace) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--renderer-model-name",
+        default=DEFAULT_MODEL,
+        help=(
+            "Canonical checkpoint ID used only to select the typed renderer; "
+            "--model remains the exact served snapshot name."
+        ),
+    )
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--dataset-sha256", default=DEFAULT_DATASET_SHA256)

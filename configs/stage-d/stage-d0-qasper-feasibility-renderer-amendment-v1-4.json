@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "status": "frozen_before_relaunch_and_before_any_sampled_model output",
+  "parent_protocol": "configs/stage-d/stage-d0-qasper-feasibility-preregistration-v1.json",
+  "parent_protocol_sha256": "30ac3bbccd7a8362a39a96193eb4ff7058b7f6dcdcc8253ddbbe2f4f64b0bfff",
+  "prior_runtime_amendment": "configs/stage-d/stage-d0-qasper-feasibility-runtime-amendment-v1-3.json",
+  "prior_runtime_amendment_sha256": "04f0235ad722e58cc5aa94f7ee4544717aff23c2619e698fb1099b8ec39d97d7",
+  "failed_attempt": {
+    "classification": "outcome-independent renderer routing failure",
+    "inference_server_started": true,
+    "intercepted_request_attempts": 12,
+    "inference_endpoint_generation_requests": 0,
+    "successful_model_api_calls": 0,
+    "model_generated_tokens": 0,
+    "natural_trace_records": 0,
+    "natural_model_completions_observed": 0,
+    "fixture_model_completions_observed": 0,
+    "scientific_outputs_observed": false,
+    "error": "The exact served snapshot pathname was also supplied as renderer_model_name. Prime's renderer registry therefore selected its fallback renderer, which rejects tools, and every intercepted request failed before reaching the inference endpoint.",
+    "evidence_bundle": "runs/stage-d0/qasper-feasibility-v1-infra-attempt3.tar.gz",
+    "evidence_bundle_sha256": "06ae3b9048af247eabe89fe47217de8cf5073d252f6c4079a26fbb2aab18d26a"
+  },
+  "bounded_repair": {
+    "change": "Keep ModelContext.model equal to the exact served immutable snapshot pathname while independently setting renderer_model_name to the canonical registered checkpoint ID Qwen/Qwen3-4B-Instruct-2507.",
+    "reason": "Prime's TrainClient explicitly supports a separate renderer_model_name for this exact case: runtime/adapter names may differ from the base model identity used to select tokenization and tool rendering.",
+    "served_model_changed": false,
+    "model_weights_changed": false,
+    "renderer_class_after_repair": "qwen3",
+    "renderer_semantics_changed_from_intended_protocol": false,
+    "scientific_fields_changed": false,
+    "dataset_or_task_changed": false,
+    "prompt_or_seed_changed": false,
+    "decoding_changed": false,
+    "threshold_or_decision_rule_changed": false,
+    "resource_changed": false
+  },
+  "repaired_sources": {
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/run_feasibility.py": "99c0c30efd47ca1001beface20187c2719dda29400cb1dfbda0849d2f67df532",
+    "scripts/run_stage_d0_qasper_feasibility_v1.sh": "f8b82878b8bdc6614661387259f9b9add0d923e12146e4f18e30a1b9ded0a3d1",
+    "tests/test_stage_d_deterministic_evidence.py": "2959635f3ea6eb7c74a60c34a1c9a39904e08c16720cca34bfe8c17bdeca0d91"
+  },
+  "preflight": {
+    "windows_tests": "10 passed, 2 skipped",
+    "ruff": "passed",
+    "bash_syntax": "passed",
+    "pinned_remote_stack_dry_run": "passed",
+    "assertions": [
+      "config.model is /workspace/models/qwen3-4b-instruct-2507-cdbee75",
+      "config.client.renderer_model_name is Qwen/Qwen3-4B-Instruct-2507"
+    ]
+  },
+  "repair_rule": "The v1-3 zero-output repair rule remains controlling. This attempt had no inference-endpoint generation request, successful model call, sampled token, trace, or scientific outcome, so the repair is eligible. From the first successful model output onward, no affected episode may be rerun.",
+  "authorization": "Relaunch is authorized on the same pod after syncing the repaired sources and verifying their hashes."
+}
