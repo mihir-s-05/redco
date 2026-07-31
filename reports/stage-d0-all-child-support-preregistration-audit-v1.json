@@ -1,0 +1,176 @@
+{
+  "analysis": "stage-d0-all-child-support-preregistration-audit-v1",
+  "checks": {
+    "budget_and_reserve_exact": true,
+    "cpu_design_audit_passed": true,
+    "fixture_gate_excludes_semantics": true,
+    "frozen_before_live_completion": true,
+    "full_seed_strings_frozen": true,
+    "generated_runner_exact": true,
+    "https_uv_no_persistent_storage": true,
+    "paper_rule_and_early_stop_exact": true,
+    "partial_observation_rule_exact": true,
+    "pre_request_and_runtime_gates_present": true,
+    "sequential_atomic_runner": true,
+    "slots_signed_and_exact": true,
+    "source_hashes_exact": true,
+    "timeout_inside_absolute_lifetime": true
+  },
+  "passes": true,
+  "protocol": "configs/stage-d/stage-d0-all-child-support-preregistration-v1.json",
+  "protocol_sha256": "98a9a57ca05c6bf21acbc9061a3601f11896f008f06d12074a271b7cc4e1b515",
+  "schema_version": 1,
+  "signed_payload_sha256": "d736001b270ce02f08da7d844db3d4484aa922acec4b260d66aa078edbb4e156",
+  "source_results": {
+    "configs/stage-d/stage-d0-all-child-live-slots-v1.json": {
+      "actual": "c22e4f720640083ee41449ffa71735181b51b53ad71c82a54198fc8c99c27695",
+      "expected": "c22e4f720640083ee41449ffa71735181b51b53ad71c82a54198fc8c99c27695",
+      "passes": true
+    },
+    "configs/stage-d/stage-d0-all-child-successor-design-v1.json": {
+      "actual": "24b35189782f85b02494fb83bb70072a4c9c872bd4788b7b778e76c6dbe60e07",
+      "expected": "24b35189782f85b02494fb83bb70072a4c9c872bd4788b7b778e76c6dbe60e07",
+      "passes": true
+    },
+    "configs/stage-d/stage-d0-scaffold-fewshot-v3.txt": {
+      "actual": "1d67c4bf6dc01efada3721b6026128bb56eb49704b6c4789e4057af0b1e1fea7",
+      "expected": "1d67c4bf6dc01efada3721b6026128bb56eb49704b6c4789e4057af0b1e1fea7",
+      "passes": true
+    },
+    "configs/stage-d/stage-d0-scaffold-inference-sft-v5-midpoint-eager.toml": {
+      "actual": "95f4af5d6667a955f6b087a03f836085015b21aef80f6f4e5a91dfa598cfe555",
+      "expected": "95f4af5d6667a955f6b087a03f836085015b21aef80f6f4e5a91dfa598cfe555",
+      "passes": true
+    },
+    "datasets/stage-d/evidence-selection-complementary-fixtures-manifest-v1.json": {
+      "actual": "fbeb3840223cd6ac28ec07132275c5acba0daadbdac419eac1ec34418af9d39b",
+      "expected": "fbeb3840223cd6ac28ec07132275c5acba0daadbdac419eac1ec34418af9d39b",
+      "passes": true
+    },
+    "datasets/stage-d/evidence-selection-complementary-fixtures-v1.jsonl": {
+      "actual": "d5712f21e74d935707dae66832c916cb2bb3722c1c3c9ef47b551c7f949fd5fa",
+      "expected": "d5712f21e74d935707dae66832c916cb2bb3722c1c3c9ef47b551c7f949fd5fa",
+      "passes": true
+    },
+    "datasets/stage-d/qasper-successor-extension-manifest-v1.json": {
+      "actual": "6960fcd92e4c7806cefa70da00dd1d3b65ba69fda1d0c0d1938a5205b4dfda69",
+      "expected": "6960fcd92e4c7806cefa70da00dd1d3b65ba69fda1d0c0d1938a5205b4dfda69",
+      "passes": true
+    },
+    "datasets/stage-d/qasper-successor-extension-v1.jsonl": {
+      "actual": "8a1b55482d3c5f151741f42ba645b1cad2a0d20e2a445f69432c4e31c0c744b8",
+      "expected": "8a1b55482d3c5f151741f42ba645b1cad2a0d20e2a445f69432c4e31c0c744b8",
+      "passes": true
+    },
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/run_feasibility.py": {
+      "actual": "2885bde81c926b0d1680614c2c1570de73188985df49d1236942bcdcb802435c",
+      "expected": "2885bde81c926b0d1680614c2c1570de73188985df49d1236942bcdcb802435c",
+      "passes": true
+    },
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/scoring.py": {
+      "actual": "650e7e7cbec59a2ccc81f133d0bbfb8f5edb72fc6d4579b8e6d136c3dce1bb8e",
+      "expected": "650e7e7cbec59a2ccc81f133d0bbfb8f5edb72fc6d4579b8e6d136c3dce1bb8e",
+      "passes": true
+    },
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/seeding.py": {
+      "actual": "451972d0a44e5c251b15baf4e329f2656daada5f7fb9e4792b3528cbe3b52ad5",
+      "expected": "451972d0a44e5c251b15baf4e329f2656daada5f7fb9e4792b3528cbe3b52ad5",
+      "passes": true
+    },
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/taskset.py": {
+      "actual": "7705077fb78dbbfc6b28d50cda3c7dce7df3bc12b2a1f25e1891aa05a2141457",
+      "expected": "7705077fb78dbbfc6b28d50cda3c7dce7df3bc12b2a1f25e1891aa05a2141457",
+      "passes": true
+    },
+    "reports/stage-d0-all-child-live-runner-generation-v1.json": {
+      "actual": "ec501bef1ea60578ddb0b85cf5c1301d6ac0cde04a7080dd07e7bb4257b92d56",
+      "expected": "ec501bef1ea60578ddb0b85cf5c1301d6ac0cde04a7080dd07e7bb4257b92d56",
+      "passes": true
+    },
+    "reports/stage-d0-scaffold-step8-adapter-manifest-v1.json": {
+      "actual": "1b3cc7f5e374919f90f41b537f398ec59c12b1c31e25482b5bcf6f3b7bc1ddbe",
+      "expected": "1b3cc7f5e374919f90f41b537f398ec59c12b1c31e25482b5bcf6f3b7bc1ddbe",
+      "passes": true
+    },
+    "scripts/audit_stage_d0_all_child_support_preregistration_v1.py": {
+      "actual": "b46ab8723fc42f8bd22b1e264d22744846e97eadea10a5b3705a30aab72fdb2a",
+      "expected": "b46ab8723fc42f8bd22b1e264d22744846e97eadea10a5b3705a30aab72fdb2a",
+      "passes": true
+    },
+    "scripts/audit_stage_d_all_child_live_plan_v1.py": {
+      "actual": "8ef8a66ad2ca025376cb2a8cdd9afa748a7738c5c9d0d27e20ae4e6fdf05e7c9",
+      "expected": "8ef8a66ad2ca025376cb2a8cdd9afa748a7738c5c9d0d27e20ae4e6fdf05e7c9",
+      "passes": true
+    },
+    "scripts/audit_stage_d_all_child_support.py": {
+      "actual": "3d796a1394c2ca0ceb07730b243571c8a180bf0ff8b11afa57920d19efbc779a",
+      "expected": "3d796a1394c2ca0ceb07730b243571c8a180bf0ff8b11afa57920d19efbc779a",
+      "passes": true
+    },
+    "scripts/audit_stage_d_fixture_integration_v1.py": {
+      "actual": "95fa522e95eff126dbc65d10e6445b8964bac389bc2e9ac91b2f2879fd7ec91b",
+      "expected": "95fa522e95eff126dbc65d10e6445b8964bac389bc2e9ac91b2f2879fd7ec91b",
+      "passes": true
+    },
+    "scripts/audit_stage_d_runtime_context_v1.py": {
+      "actual": "01ff84f5437cbe52689f2bde7e9c680642c17dafeb1fd831b64a0273d05be200",
+      "expected": "01ff84f5437cbe52689f2bde7e9c680642c17dafeb1fd831b64a0273d05be200",
+      "passes": true
+    },
+    "scripts/build_stage_d_all_child_live_slots_v1.py": {
+      "actual": "58a508ec92db235501972b7f651142fb03d07ea077ebc73c8ecbfd6f974d53a4",
+      "expected": "58a508ec92db235501972b7f651142fb03d07ea077ebc73c8ecbfd6f974d53a4",
+      "passes": true
+    },
+    "scripts/generate_stage_d_all_child_live_runner_v1.py": {
+      "actual": "b1f6e7a6cb0f9f2cb7dc40764ed2f2c6fbf83cf12e4c271445c2e2aeb9a0fe0d",
+      "expected": "b1f6e7a6cb0f9f2cb7dc40764ed2f2c6fbf83cf12e4c271445c2e2aeb9a0fe0d",
+      "passes": true
+    },
+    "scripts/preflight_stage_d_runtime_paths_v4_8.sh": {
+      "actual": "0f9efad1514669735a5026076e25a72a067439641b2991763dca8a3a9f947a10",
+      "expected": "0f9efad1514669735a5026076e25a72a067439641b2991763dca8a3a9f947a10",
+      "passes": true
+    },
+    "scripts/run_stage_d0_all_child_support_v1.sh": {
+      "actual": "80d66b38e6dbd662665a664805247c433c796d7772a6f99c016b9a2cdb6ee9d2",
+      "expected": "80d66b38e6dbd662665a664805247c433c796d7772a6f99c016b9a2cdb6ee9d2",
+      "passes": true
+    },
+    "scripts/run_stage_d0_scaffold_support_v4_6.sh": {
+      "actual": "e4f8923a3b1dc40ccd2442fe7766cd6df00638df974ebcdc7e90da59cf469849",
+      "expected": "e4f8923a3b1dc40ccd2442fe7766cd6df00638df974ebcdc7e90da59cf469849",
+      "passes": true
+    },
+    "scripts/run_stage_d_all_child_branch_group.py": {
+      "actual": "f67a536df901371be7efc6f0ca09f2c78329aa8a973bc0989968f8cf64f69173",
+      "expected": "f67a536df901371be7efc6f0ca09f2c78329aa8a973bc0989968f8cf64f69173",
+      "passes": true
+    },
+    "scripts/score_stage_d_all_child_replay.py": {
+      "actual": "1365dcb6b0c0d64e9cd73eefac206e8008b761843ac7fc09e9e93067121adfa2",
+      "expected": "1365dcb6b0c0d64e9cd73eefac206e8008b761843ac7fc09e9e93067121adfa2",
+      "passes": true
+    },
+    "src/redco/analysis/empirical_branch_replay.py": {
+      "actual": "c21a3ebaca6b37edae1145ba731db9043e7319d9180def28f39e79a27e5b5dc5",
+      "expected": "c21a3ebaca6b37edae1145ba731db9043e7319d9180def28f39e79a27e5b5dc5",
+      "passes": true
+    },
+    "src/redco/analysis/stage_d_all_child_branch_group.py": {
+      "actual": "23e8a5c33f7110516829d0224c4b32d0b52b0d7427d598f715fa39db3fb77dd0",
+      "expected": "23e8a5c33f7110516829d0224c4b32d0b52b0d7427d598f715fa39db3fb77dd0",
+      "passes": true
+    },
+    "src/redco/analysis/stage_d_all_child_support.py": {
+      "actual": "15c2be1501943569966d2c9732e0154ba209f16e4c42eaa158b68be9c6a2f293",
+      "expected": "15c2be1501943569966d2c9732e0154ba209f16e4c42eaa158b68be9c6a2f293",
+      "passes": true
+    },
+    "tests/test_stage_d_all_child_live_protocol.py": {
+      "actual": "689ee32e2c0995a2ccc920b0ab86638c181c15287b932479104c10174f58e5e7",
+      "expected": "689ee32e2c0995a2ccc920b0ab86638c181c15287b932479104c10174f58e5e7",
+      "passes": true
+    }
+  }
+}
