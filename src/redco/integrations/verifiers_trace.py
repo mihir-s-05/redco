@@ -37,6 +37,8 @@ class RecordedPolicyCall:
     call_kind: str | None
     parent_session_id: str | None
     parent_turn_index: int | None
+    parent_tool_call_id: str | None = None
+    invocation_id: str | None = None
 
     @property
     def exact_key_complete(self) -> bool:
@@ -266,6 +268,12 @@ def extract_policy_calls(trace: dict[str, Any]) -> tuple[RecordedPolicyCall, ...
                 ),
                 parent_turn_index=_nonnegative_integer_or_none(
                     rlm_payload.get("parent_turn")
+                ),
+                parent_tool_call_id=_nonempty_string_or_none(
+                    rlm_payload.get("parent_tool_call_id")
+                ),
+                invocation_id=_nonempty_string_or_none(
+                    rlm_payload.get("invocation_id")
                 ),
             )
         )

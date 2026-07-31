@@ -177,6 +177,13 @@ def test_structural_session_turns_remove_cross_component_fallback() -> None:
     for call, structure in zip(calls, structures, strict=True):
         assert isinstance(call, dict)
         call["rlm"] = structure
+    nodes = trace["nodes"]
+    assert isinstance(nodes, list)
+    tool_message = nodes[6]["message"]
+    assert isinstance(tool_message, dict)
+    tool_message["tool_call_id"] = "call_0"
+    structures[1]["parent_tool_call_id"] = "call_0"
+    structures[1]["invocation_id"] = "shard-0"
 
     result = import_trace(trace)
     edges = {
@@ -195,14 +202,51 @@ def test_structural_session_turns_remove_cross_component_fallback() -> None:
         "recursive-trace:policy:0",
         "recursive-trace:message:3",
         EdgeKind.CALL,
-        "cross_component_parent_session_turn",
+        "cross_component_parent_invocation",
     ) in edges
     assert (
         "recursive-trace:message:5",
-        "recursive-trace:policy:2",
+        "recursive-trace:message:6",
         EdgeKind.CALL,
-        "cross_component_return_session_turn",
+        "cross_component_return_parent_tool_call",
     ) in edges
+
+
+def test_session_turn_without_invocation_address_is_not_exact() -> None:
+    trace = _trace()
+    calls = trace["calls"]
+    assert isinstance(calls, list)
+    structures = [
+        {
+            "depth": 0,
+            "session_id": "root",
+            "turn": 0,
+            "call_kind": "policy",
+        },
+        {
+            "depth": 1,
+            "session_id": "sub-child",
+            "turn": 0,
+            "call_kind": "policy",
+            "parent_session_id": "root",
+            "parent_turn": 0,
+        },
+        {
+            "depth": 0,
+            "session_id": "root",
+            "turn": 1,
+            "call_kind": "policy",
+        },
+    ]
+    for call, structure in zip(calls, structures, strict=True):
+        assert isinstance(call, dict)
+        call["rlm"] = structure
+
+    result = import_trace(trace)
+
+    assert result.exact_cross_component_links == 0
+    assert result.exactly_parented_recursive_model_calls == 0
+    assert result.cross_component_fallbacks == 1
 
 
 def test_structural_file_report_is_ready_for_representative_raf(
@@ -236,6 +280,13 @@ def test_structural_file_report_is_ready_for_representative_raf(
     for call, structure in zip(calls, structures, strict=True):
         assert isinstance(call, dict)
         call["rlm"] = structure
+    nodes = trace["nodes"]
+    assert isinstance(nodes, list)
+    tool_message = nodes[6]["message"]
+    assert isinstance(tool_message, dict)
+    tool_message["tool_call_id"] = "call_0"
+    structures[1]["parent_tool_call_id"] = "call_0"
+    structures[1]["invocation_id"] = "shard-0"
     path = tmp_path / "traces.jsonl"
     path.write_text(
         json.dumps(

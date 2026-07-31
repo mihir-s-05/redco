@@ -1,0 +1,223 @@
+diff --git a/src/rlm/api.py b/src/rlm/api.py
+index cf6def0..4cc7655 100644
+--- a/src/rlm/api.py
++++ b/src/rlm/api.py
+@@ -1,25 +1,86 @@
+ """Public Python API for running rlm agents."""
+ 
++import json
+ import os
++from pathlib import Path
+ 
+ from rlm.engine import RLMEngine
+ from rlm.session import Session
+ from rlm.types import RLMResult
+ 
+ 
+-def _child_session() -> Session | None:
++def _invocation_id(value: object) -> str:
++    if not isinstance(value, str):
++        raise TypeError("redco_invocation_id must be a string")
++    if not value or len(value) > 128 or not value.isprintable():
++        raise ValueError("redco_invocation_id must be 1-128 printable characters")
++    return value
++
++
++def _child_session(invocation_id: object) -> Session | None:
+     """If inside a parent session (depth > 0), create a child under it."""
+     parent_dir = os.environ.get("RLM_SESSION_DIR")
+     depth = int(os.environ.get("RLM_DEPTH", "0"))
+     if parent_dir and depth > 0:
+-        return Session(Session.child_dir(parent_dir))
++        parent_path = Path(parent_dir)
++        parent_turn, parent_tool_call_id = _latest_parent_tool_call(
++            parent_path / "messages.jsonl"
++        )
++        normalized_invocation_id = _invocation_id(invocation_id)
++        child = Session(
++            Session.child_dir(parent_path),
++            parent_session_id=parent_path.name,
++            parent_turn=parent_turn,
++            parent_tool_call_id=parent_tool_call_id,
++            invocation_id=normalized_invocation_id,
++        )
++        child.write_meta(
++            parent_session_id=parent_path.name,
++            parent_turn=parent_turn,
++            parent_tool_call_id=parent_tool_call_id,
++            invocation_id=normalized_invocation_id,
++        )
++        return child
+     return None
+ 
+ 
++def _latest_parent_tool_call(messages_path: Path) -> tuple[int, str]:
++    """Return the exact parent turn and tool call that spawned this child."""
++    try:
++        lines = messages_path.read_text().splitlines()
++    except FileNotFoundError as error:
++        raise RuntimeError("parent RLM message log is unavailable") from error
++    for line in reversed(lines):
++        entry = json.loads(line)
++        if entry.get("type") != "assistant":
++            continue
++        tool_calls = entry.get("tool_calls")
++        if not isinstance(tool_calls, list):
++            continue
++        ipython_calls = [
++            call
++            for call in tool_calls
++            if isinstance(call, dict) and call.get("name") == "ipython"
++        ]
++        if len(ipython_calls) != 1:
++            continue
++        turn = entry.get("turn")
++        tool_call_id = ipython_calls[0].get("id")
++        if (
++            type(turn) is int
++            and turn >= 0
++            and isinstance(tool_call_id, str)
++            and tool_call_id
++        ):
++            return turn, tool_call_id
++    raise RuntimeError("parent RLM IPython turn is unavailable")
++
++
+ async def run(prompt: str, **kwargs) -> RLMResult:
+     """Run a single rlm agent."""
++    invocation_id = kwargs.pop("redco_invocation_id", None)
+     if "session" not in kwargs:
+-        child = _child_session()
++        child = _child_session(invocation_id)
+         if child:
+             kwargs["session"] = child
+     engine = RLMEngine(**kwargs)
+diff --git a/src/rlm/client.py b/src/rlm/client.py
+index dafeb32..f769eb5 100644
+--- a/src/rlm/client.py
++++ b/src/rlm/client.py
+@@ -65,7 +65,14 @@ def resolve_provider() -> tuple[str | None, str | None, dict[str, str]]:
+     return PI_INFERENCE_BASE_URL, "EMPTY", {}
+ 
+ 
+-def make_client() -> AsyncOpenAI:
++def make_client(
++    *,
++    session_id: str,
++    parent_session_id: str | None = None,
++    parent_turn: int | None = None,
++    parent_tool_call_id: str | None = None,
++    invocation_id: str | None = None,
++) -> AsyncOpenAI:
+     """Create an AsyncOpenAI client from environment variables.
+ 
+     See ``resolve_provider`` for provider precedence. Tags every outbound
+@@ -75,7 +82,19 @@ def make_client() -> AsyncOpenAI:
+     record them in the rollout's trajectory.
+     """
+     base_url, api_key, extra_headers = resolve_provider()
+-    headers = {"X-RLM-Depth": os.environ.get("RLM_DEPTH", "0"), **extra_headers}
++    headers = {
++        "X-RLM-Depth": os.environ.get("RLM_DEPTH", "0"),
++        "X-RLM-Session-ID": session_id,
++        **extra_headers,
++    }
++    if parent_session_id is not None:
++        headers["X-RLM-Parent-Session-ID"] = parent_session_id
++    if parent_turn is not None:
++        headers["X-RLM-Parent-Turn"] = str(parent_turn)
++    if parent_tool_call_id is not None:
++        headers["X-RLM-Parent-Tool-Call-ID"] = parent_tool_call_id
++    if invocation_id is not None:
++        headers["X-RLM-Invocation-ID"] = invocation_id
+     return AsyncOpenAI(
+         base_url=base_url,
+         api_key=api_key,
+diff --git a/src/rlm/engine.py b/src/rlm/engine.py
+index f0c2fe9..2003134 100644
+--- a/src/rlm/engine.py
++++ b/src/rlm/engine.py
+@@ -201,8 +201,15 @@ class RLMEngine:
+         _max_tok = int(os.environ.get("RLM_MAX_TOKENS", "0"))
+         self.max_tokens = _max_tok if _max_tok > 0 else None
+ 
+-        self.client = client or make_client()
+         self.session = session
++        self._ensure_session()
++        self.client = client or make_client(
++            session_id=self.session.dir.name,
++            parent_session_id=self.session.parent_session_id,
++            parent_turn=self.session.parent_turn,
++            parent_tool_call_id=self.session.parent_tool_call_id,
++            invocation_id=self.session.invocation_id,
++        )
+         self._total_usage = TokenUsage()
+         self._last_prompt_tokens = 0
+ 
+@@ -380,6 +387,10 @@ class RLMEngine:
+             request_kwargs = {
+                 "model": self.model,
+                 "messages": messages,
++                "extra_headers": {
++                    "X-RLM-Turn": str(turn),
++                    "X-RLM-Call-Kind": "policy",
++                },
+             }
+             if self._active_tool_schemas:
+                 request_kwargs["tools"] = self._active_tool_schemas
+@@ -420,6 +431,7 @@ class RLMEngine:
+                     parsed_args.append(args)
+                     tool_calls_log.append(
+                         {
++                            "id": tc.id,
+                             "name": tc.function.name,
+                             "args": err if args is None else args,
+                         }
+@@ -608,7 +620,14 @@ class RLMEngine:
+         if self._repl is not None:
+             checkpoint_prompt += REPL_RESTART_NOTE
+         messages.append({"role": "user", "content": checkpoint_prompt})
+-        request_kwargs: dict = {"model": self.model, "messages": messages}
++        request_kwargs: dict = {
++            "model": self.model,
++            "messages": messages,
++            "extra_headers": {
++                "X-RLM-Turn": str(turn),
++                "X-RLM-Call-Kind": "compaction",
++            },
++        }
+         if active_tools:
+             request_kwargs["tools"] = active_tools
+             request_kwargs["tool_choice"] = "none"
+diff --git a/src/rlm/session.py b/src/rlm/session.py
+index 5755902..37d38f7 100644
+--- a/src/rlm/session.py
++++ b/src/rlm/session.py
+@@ -12,7 +12,15 @@ from rlm.types import ChildSessionAggregate, ProgrammaticToolCallStats
+ 
+ 
+ class Session:
+-    def __init__(self, session_dir: Path | None = None):
++    def __init__(
++        self,
++        session_dir: Path | None = None,
++        *,
++        parent_session_id: str | None = None,
++        parent_turn: int | None = None,
++        parent_tool_call_id: str | None = None,
++        invocation_id: str | None = None,
++    ):
+         if session_dir is None:
+             sid = uuid.uuid4().hex[:12]
+             rlm_home = Path(os.environ.get("RLM_HOME") or Path.home() / ".rlm")
+@@ -22,6 +30,10 @@ class Session:
+         # REPL kernel restart in a different cwd, sandbox teardown, etc.).
+         self.dir = Path(session_dir).resolve()
+         self.dir.mkdir(parents=True, exist_ok=True)
++        self.parent_session_id = parent_session_id
++        self.parent_turn = parent_turn
++        self.parent_tool_call_id = parent_tool_call_id
++        self.invocation_id = invocation_id
+         self._msg_file = open(self.dir / "messages.jsonl", "a")
+ 
+     def write_meta(self, **kwargs):

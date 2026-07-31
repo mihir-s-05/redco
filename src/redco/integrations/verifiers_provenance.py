@@ -521,6 +521,8 @@ def import_trace(
             and call.agent_depth > 0
             and call.parent_session_id is not None
             and call.parent_turn_index is not None
+            and call.parent_tool_call_id is not None
+            and call.invocation_id is not None
             for call in calls
         ),
         exact_cross_component_links=exact_links,
@@ -552,24 +554,24 @@ def _add_cross_component_links(
             for call in calls
             if component_by_node[call.node_index] == root
         ]
-        exact_triplet = _exact_structural_triplet(calls, component_calls)
-        if exact_triplet is not None:
-            parent_call, child_return_call, return_call = exact_triplet
+        exact_link = _exact_structural_link(calls, component_calls, nodes)
+        if exact_link is not None:
+            parent_call, child_return_call, parent_tool_node = exact_link
             exact_components += 1
             graph.add_edge(
                 EventEdge(
                     _policy_id(trace_id, parent_call.call_index),
                     _message_id(trace_id, root),
                     EdgeKind.CALL,
-                    via="cross_component_parent_session_turn",
+                    via="cross_component_parent_invocation",
                 )
             )
             graph.add_edge(
                 EventEdge(
                     _message_id(trace_id, child_return_call.node_index),
-                    _policy_id(trace_id, return_call.call_index),
+                    _message_id(trace_id, parent_tool_node),
                     EdgeKind.CALL,
-                    via="cross_component_return_session_turn",
+                    via="cross_component_return_parent_tool_call",
                 )
             )
             continue
@@ -641,13 +643,14 @@ def _add_cross_component_links(
     return exact_components, fallback_components, unresolved_components
 
 
-def _exact_structural_triplet(
+def _exact_structural_link(
     calls: tuple[RecordedPolicyCall, ...],
     component_calls: list[RecordedPolicyCall],
+    nodes: list[dict[str, Any]],
 ) -> tuple[
     RecordedPolicyCall,
     RecordedPolicyCall,
-    RecordedPolicyCall,
+    int,
 ] | None:
     if not component_calls:
         return None
@@ -655,26 +658,31 @@ def _exact_structural_triplet(
     if len(session_ids) != 1 or None in session_ids:
         return None
     parent_pairs = {
-        (call.parent_session_id, call.parent_turn_index)
+        (
+            call.parent_session_id,
+            call.parent_turn_index,
+            call.parent_tool_call_id,
+            call.invocation_id,
+        )
         for call in component_calls
     }
     if len(parent_pairs) != 1:
         return None
-    parent_session_id, parent_turn = next(iter(parent_pairs))
-    if parent_session_id is None or parent_turn is None:
+    parent_session_id, parent_turn, parent_tool_call_id, invocation_id = next(
+        iter(parent_pairs)
+    )
+    if (
+        parent_session_id is None
+        or parent_turn is None
+        or parent_tool_call_id is None
+        or invocation_id is None
+    ):
         return None
     parent_matches = [
         call
         for call in calls
         if call.session_id == parent_session_id
         and call.turn_index == parent_turn
-        and call.call_kind == "policy"
-    ]
-    return_matches = [
-        call
-        for call in calls
-        if call.session_id == parent_session_id
-        and call.turn_index == parent_turn + 1
         and call.call_kind == "policy"
     ]
     child_policy_calls = [
@@ -694,13 +702,19 @@ def _exact_structural_triplet(
         for call in child_policy_calls
         if call.turn_index == last_child_turn
     ]
-    if (
-        len(parent_matches) != 1
-        or len(child_return_matches) != 1
-        or len(return_matches) != 1
-    ):
+    if len(parent_matches) != 1 or len(child_return_matches) != 1:
         return None
-    return parent_matches[0], child_return_matches[0], return_matches[0]
+    parent_tool_nodes = [
+        index
+        for index, node in enumerate(nodes)
+        if node.get("parent") == parent_matches[0].node_index
+        and isinstance(message := node.get("message"), dict)
+        and message.get("role") == "tool"
+        and message.get("tool_call_id") == parent_tool_call_id
+    ]
+    if len(parent_tool_nodes) != 1:
+        return None
+    return parent_matches[0], child_return_matches[0], parent_tool_nodes[0]
 
 
 def _component_roots(nodes: list[dict[str, Any]]) -> list[int]:
