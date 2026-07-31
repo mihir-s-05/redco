@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d0-scaffold-support-v4-3-hardware",
+  "status": "frozen_before_provisioning",
+  "scientific_commit": "7c3b718",
+  "controlling_protocols": [
+    "configs/stage-d/stage-d0-scaffold-support-preregistration-v4.json",
+    "configs/stage-d/stage-d0-scaffold-support-amendment-v4-1.json",
+    "configs/stage-d/stage-d0-scaffold-support-amendment-v4-2.json"
+  ],
+  "adversarial_review": {
+    "reviewed_commit": "7c3b718",
+    "decision": "hard_go",
+    "scope": "pre-provisioning scientific integrity, dependency closure, source overlays, cleanup, timeout escalation, and denominator semantics"
+  },
+  "observed_at_utc": "2026-07-31T04:49:54.5127446Z",
+  "pre_provisioning_state": {
+    "active_pods": 0,
+    "persistent_disks": 0,
+    "wallet_usd": 46.9399
+  },
+  "selected_resource": {
+    "availability_id": "03c728",
+    "cloud_id": "gpu_1x_6000_ada",
+    "gpu_type": "RTX6000Ada 48GB",
+    "gpu_count": 1,
+    "provider": "massedcompute",
+    "location": "US",
+    "security": "datacenter",
+    "stock_status": "Available",
+    "price_usd_per_hour": 0.75,
+    "vcpus": 12,
+    "memory_gb": 72,
+    "ephemeral_disk_gb": 350,
+    "spot_or_preemptible": false
+  },
+  "selection_justification": "The previously cheapest A6000 listing was no longer available. This was the cheapest genuinely available qualifying non-spot 1x48GB resource at the frozen observation time and remains below the 1.00 USD/hour ceiling.",
+  "pod": {
+    "name": "redco-stage-d0-scaffold-support-v4",
+    "image": "ubuntu_22_cuda_12",
+    "persistent_storage": false,
+    "maximum_count": 1,
+    "ssh_key": "C:/Users/mihir/.ssh/id_rsa",
+    "ssh_rule": "Verify noninteractively before sync or model calls; terminate immediately if verification fails."
+  },
+  "unchanged_scientific_fields": "all",
+  "execution_rule": "Provision exactly this resource at most once while it remains available. If the listing changes or creation does not allocate this resource, stop and write a new hardware-only amendment before any alternative."
+}
