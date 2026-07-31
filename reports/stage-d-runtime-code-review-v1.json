@@ -27,7 +27,7 @@
   "critical_findings": [
     {
       "severity": "P0",
-      "finding": "The frozen prompt and SFT generator teach child.answer, but the pinned live RLM returns strings. Existing tests assert textual agreement without executing the demonstration against the real return type.",
+      "finding": "The pinned RLM returns RLMResult. The recovered live cell first unwrapped result.answer to a string, then attempted child.answer on that string; existing tests never executed the demonstrated scaffold against the real return type and therefore missed the generated double-unwrapping failure.",
       "evidence": [
         "configs/stage-d/stage-d0-scaffold-fewshot-v3.txt:22",
         "scripts/build_stage_d_scaffold_sft.py:88",
@@ -61,7 +61,7 @@
     }
   ],
   "required_before_go": [
-    "Version the successor scaffold so its extracted Python executes with actual string RLM results.",
+    "Version the successor scaffold so its extracted Python normalizes exactly once and executes with both actual RLMResult values and defensive string values.",
     "Replace global text substitution with structured child-to-parent-turn provenance or event/state-aware replay.",
     "Replay the exact recovered failing trace and a golden matrix covering retries, duplicates, multiline output, hidden state, and completion-order changes.",
     "Execute the exact generated Linux runner through a blocked first-request barrier using production CLI, dataset, parser, environment, trace, replay, scorer, and retention paths.",
@@ -72,5 +72,5 @@
     "No successor has proven that every precommitted child target maps to its exact consuming root event.",
     "The exact generated successor runner has not executed end to end before its request boundary."
   ],
-  "signed_payload_sha256": "03bc4e42f09a4b6b08e49759bee90157e928851d6ff2196d2ca679498fb0db57"
+  "signed_payload_sha256": "3f1a813e355a3c9402cf16eb109510cb4dcea5d72089fc567ef0de96a577a5c8"
 }
