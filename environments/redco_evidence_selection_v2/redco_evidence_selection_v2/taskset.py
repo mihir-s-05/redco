@@ -135,6 +135,7 @@ class EvidenceSelectionConfig(vf.TasksetConfig):
         "natural",
         "forced_trace_fixture",
         "fewshot_scaffold_v2",
+        "fewshot_fixture_v3",
     ] = "natural"
     policy_checkpoint_id: str = BASE_POLICY_CHECKPOINT
     scaffold_prompt_path: Path | None = None
@@ -167,13 +168,22 @@ class EvidenceSelectionTaskset(
                 raise ValueError(
                     f"{row['example_id']} has invalid reference evidence"
                 )
-            if self.config.prompt_profile == "fewshot_scaffold_v2":
+            if self.config.prompt_profile in (
+                "fewshot_scaffold_v2",
+                "fewshot_fixture_v3",
+            ):
                 system = ALIGNED_SYSTEM_V2
             else:
                 system = SYSTEM
-            if self.config.prompt_profile == "forced_trace_fixture":
+            if self.config.prompt_profile in (
+                "forced_trace_fixture",
+                "fewshot_fixture_v3",
+            ):
                 system += FORCED_TRACE_FIXTURE
-            elif self.config.prompt_profile == "fewshot_scaffold_v2":
+            if self.config.prompt_profile in (
+                "fewshot_scaffold_v2",
+                "fewshot_fixture_v3",
+            ):
                 if (
                     self.config.scaffold_prompt_path is None
                     or self.config.scaffold_prompt_sha256 is None

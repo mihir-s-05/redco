@@ -1,0 +1,136 @@
+{
+  "analysis": "stage-d0-scaffold-support-preregistration-audit-v3",
+  "budget": {
+    "full_envelope_with_reserve_usd": 45.317874,
+    "headroom_usd": 1.622026,
+    "wallet_usd": 46.9399
+  },
+  "checks": {
+    "all_source_hashes_match": true,
+    "checkpoint_retention_is_2_4_6_8": true,
+    "five_of_eight_probability_at_least_095": true,
+    "four_paper_sets_pairwise_disjoint": true,
+    "full_envelope_fits_wallet": true,
+    "partition_manifest_passes": true,
+    "runner_allows_iid_duplicate_branches": true,
+    "runner_has_no_wandb_upload": true,
+    "runner_never_invokes_pip": true,
+    "runner_uses_one_structural_target": true,
+    "runner_uses_three_alternatives": true,
+    "science_is_separately_preregistered": true,
+    "sft_audit_passes": true,
+    "sft_is_fixed_eight_steps": true,
+    "sft_is_nonadaptive": true,
+    "status_is_frozen": true,
+    "support_blocks_cover_all_answer_types": true,
+    "support_wilson_lower_exceeds_0808": true,
+    "three_future_arms_required": true
+  },
+  "decision": "live_support_gate_ready_for_final_adversarial_review",
+  "passes": true,
+  "power": {
+    "probability_at_least_5_of_8_at_p_0808": 0.9507664085815043,
+    "wilson_lower_58_of_64": 0.810171204003544
+  },
+  "protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v3.json",
+  "protocol_sha256": "103c4800259d0a9abf11377c9bf14e9ac0d571eb87d9179f9fa6be3c9fea2ce9",
+  "schema_version": 1,
+  "signed_payload_sha256": "938def7ae97558744a788d4e2446b86c789280816de924b964f4292f494b989c",
+  "source_hashes": {
+    "configs/stage-d/stage-d0-scaffold-fewshot-v2.txt": {
+      "expected": "b0db1850aecc8f6f65f530de4ce2ce4ecf6c15a75daf20596564ddf17d7540e2",
+      "observed": "b0db1850aecc8f6f65f530de4ce2ce4ecf6c15a75daf20596564ddf17d7540e2",
+      "passes": true
+    },
+    "configs/stage-d/stage-d0-scaffold-inference-base-v3.toml": {
+      "expected": "71b535c5c875cfe6a86c1ccc8b60449de94f4d3e4c3680e6e665e94304698d48",
+      "observed": "71b535c5c875cfe6a86c1ccc8b60449de94f4d3e4c3680e6e665e94304698d48",
+      "passes": true
+    },
+    "configs/stage-d/stage-d0-scaffold-inference-sft-v3.toml": {
+      "expected": "8a45230b92d49a9dda5872f0f93020d8880a579da7d9bbd59d6059555f5ca3b8",
+      "observed": "8a45230b92d49a9dda5872f0f93020d8880a579da7d9bbd59d6059555f5ca3b8",
+      "passes": true
+    },
+    "configs/stage-d/stage-d0-scaffold-sft-v2.toml": {
+      "expected": "9f8e7496713c9dc9d7c795335e6abe467387f2acf7907fe4790ebe75b3c7a3fc",
+      "observed": "9f8e7496713c9dc9d7c795335e6abe467387f2acf7907fe4790ebe75b3c7a3fc",
+      "passes": true
+    },
+    "datasets/stage-d/evidence-selection-fixture-v1.jsonl": {
+      "expected": "06a22dfea8acc8d7e1cf36f00091610c49cae7cdb7f25ac7d647dc2fcb344783",
+      "observed": "06a22dfea8acc8d7e1cf36f00091610c49cae7cdb7f25ac7d647dc2fcb344783",
+      "passes": true
+    },
+    "datasets/stage-d/qasper-scaffold-successor-v2.jsonl": {
+      "expected": "fbe3edb17aeaafb0e4326d5aaf83d898cfacb1490c5ee24b14468bffd0eaed80",
+      "observed": "fbe3edb17aeaafb0e4326d5aaf83d898cfacb1490c5ee24b14468bffd0eaed80",
+      "passes": true
+    },
+    "datasets/stage-d/scaffold-sft-v2.jsonl": {
+      "expected": "d3ab59cdc9f622e501cc0921407c1929e0d9f5d08230cda7e9cfe843638e388f",
+      "observed": "d3ab59cdc9f622e501cc0921407c1929e0d9f5d08230cda7e9cfe843638e388f",
+      "passes": true
+    },
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/run_feasibility.py": {
+      "expected": "70794cbe3f8f076d92b894d6b23a1f2d74f121af2c32d8890687edb7759e1b19",
+      "observed": "70794cbe3f8f076d92b894d6b23a1f2d74f121af2c32d8890687edb7759e1b19",
+      "passes": true
+    },
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/taskset.py": {
+      "expected": "7705077fb78dbbfc6b28d50cda3c7dce7df3bc12b2a1f25e1891aa05a2141457",
+      "observed": "7705077fb78dbbfc6b28d50cda3c7dce7df3bc12b2a1f25e1891aa05a2141457",
+      "passes": true
+    },
+    "scripts/audit_stage_d_scaffold_support.py": {
+      "expected": "881a66535c80eacf00d69e76bc3bba70495acd81da50630a520e12b684d2f477",
+      "observed": "881a66535c80eacf00d69e76bc3bba70495acd81da50630a520e12b684d2f477",
+      "passes": true
+    },
+    "scripts/audit_stage_d_target_support.py": {
+      "expected": "8cceeeb8ea33d67b9020a8e2e3d28ed29346cab186711d5d78ae2da1a4cbadb6",
+      "observed": "8cceeeb8ea33d67b9020a8e2e3d28ed29346cab186711d5d78ae2da1a4cbadb6",
+      "passes": true
+    },
+    "scripts/merge_stage_c_warmstart.py": {
+      "expected": "06046f345d0ac29e0919d43fce50c2a6ae20a29d03be215785323413e28d0416",
+      "observed": "06046f345d0ac29e0919d43fce50c2a6ae20a29d03be215785323413e28d0416",
+      "passes": true
+    },
+    "scripts/run_stage_d0_scaffold_support_v3.sh": {
+      "expected": "880e3dd70c4293c12bc2c9bd5bee2ae01205103cd7b708850161157ccbf55aab",
+      "observed": "880e3dd70c4293c12bc2c9bd5bee2ae01205103cd7b708850161157ccbf55aab",
+      "passes": true
+    },
+    "scripts/score_stage_c_policies_vllm.py": {
+      "expected": "f997e502151fd69b2c4333520008ce5fc57dc540d6d4e896a904e4f185f0b772",
+      "observed": "f997e502151fd69b2c4333520008ce5fc57dc540d6d4e896a904e4f185f0b772",
+      "passes": true
+    },
+    "scripts/score_stage_d_replay_fixture.py": {
+      "expected": "1240c2ce0c4e9563f39e7b26fcae4ba218062f73d35c8753494eeb3e7e91b76c",
+      "observed": "1240c2ce0c4e9563f39e7b26fcae4ba218062f73d35c8753494eeb3e7e91b76c",
+      "passes": true
+    },
+    "scripts/split_stage_d_traces.py": {
+      "expected": "4f9a5651d4f606d48024310dbac523efb93118da66ef5c981f0f0816a0b05d67",
+      "observed": "4f9a5651d4f606d48024310dbac523efb93118da66ef5c981f0f0816a0b05d67",
+      "passes": true
+    },
+    "src/redco/analysis/empirical_branch_replay.py": {
+      "expected": "c42d0f767aefc50de58fdd3cdbffa11f22743a7de8372bf4924a65b64a87461b",
+      "observed": "c42d0f767aefc50de58fdd3cdbffa11f22743a7de8372bf4924a65b64a87461b",
+      "passes": true
+    },
+    "src/redco/analysis/stage_d_scaffold_support.py": {
+      "expected": "dd3944c232eb33400f9828044fe251c51d5730ce3d0940e12e96f5fa1985fca6",
+      "observed": "dd3944c232eb33400f9828044fe251c51d5730ce3d0940e12e96f5fa1985fca6",
+      "passes": true
+    },
+    "src/redco/analysis/stage_d_target_eligibility.py": {
+      "expected": "c6d09a6d74c9917a92680cb9a78fa3a401f8fa30fe1ce8cdf484dc0c8299f077",
+      "observed": "c6d09a6d74c9917a92680cb9a78fa3a401f8fa30fe1ce8cdf484dc0c8299f077",
+      "passes": true
+    }
+  }
+}

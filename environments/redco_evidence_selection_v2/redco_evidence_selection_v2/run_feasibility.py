@@ -212,12 +212,18 @@ def parse_args() -> argparse.Namespace:
             "power_audit",
             "science_train",
             "science_eval",
+            "audit",
         ),
         default="train",
     )
     parser.add_argument(
         "--prompt-profile",
-        choices=("natural", "forced_trace_fixture", "fewshot_scaffold_v2"),
+        choices=(
+            "natural",
+            "forced_trace_fixture",
+            "fewshot_scaffold_v2",
+            "fewshot_fixture_v3",
+        ),
         default="natural",
     )
     parser.add_argument("--scaffold-prompt", type=Path)

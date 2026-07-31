@@ -182,6 +182,18 @@ def test_prompt_profiles_separate_science_from_trace_fixture(
             ).hexdigest(),
         )
     ).load()[0]
+    scaffold_fixture = EvidenceSelectionTaskset(
+        EvidenceSelectionConfig(
+            dataset_path=dataset,
+            dataset_sha256=digest,
+            split="train",
+            prompt_profile="fewshot_fixture_v3",
+            scaffold_prompt_path=scaffold_path,
+            scaffold_prompt_sha256=hashlib.sha256(
+                scaffold_path.read_bytes()
+            ).hexdigest(),
+        )
+    ).load()[0]
 
     assert "call exactly two `rlm(...)` children" not in natural.data.prompt
     assert "minimum child" not in natural.data.prompt.lower()
@@ -191,6 +203,11 @@ def test_prompt_profiles_separate_science_from_trace_fixture(
     assert "await asyncio.gather" in scaffold.data.prompt
     assert "Do not wrap the list in `FINAL(...)`" in scaffold.data.prompt
     assert "Do not wrap the list in FINAL(...)" in scaffold.data.prompt
+    assert "await asyncio.gather" in scaffold_fixture.data.prompt
+    assert (
+        "call exactly two `rlm(...)` children"
+        in scaffold_fixture.data.prompt
+    )
 
 
 def test_episode_seed_uses_task_and_replicate_address() -> None:
