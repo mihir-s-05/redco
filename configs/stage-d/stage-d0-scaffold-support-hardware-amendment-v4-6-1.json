@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d0-scaffold-support-v4-6-1-hardware",
+  "status": "frozen_before_provisioning",
+  "scientific_commit": "70661402b5cc8009fcb8848e0f5f9093d9464ff4",
+  "controlling_protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v4-6.json",
+  "controlling_protocol_sha256": "320c119ad7348f9197ae107416a8aecfedfceb538eecadb4ae005fd791f366cf",
+  "controlling_audit": "reports/stage-d0-scaffold-support-preregistration-audit-v4-6.json",
+  "controlling_audit_sha256": "5465714151ed210fdc2c7e4918bbfd95b83f655ee0c709df7ec8296bbc5b3f02",
+  "adversarial_review": {
+    "decision": "go",
+    "scope": "exact retained-adapter continuation, root-health validation, Prime inference-source pinning, no-repeat rules, budget, timeout, and cleanup"
+  },
+  "observed_at_utc": "2026-07-31T06:15:29.6642480Z",
+  "pre_provisioning_state": {
+    "active_pods": 0,
+    "persistent_disks": 0,
+    "wallet_usd": 46.3976
+  },
+  "selected_resource": {
+    "availability_id": "03c728",
+    "cloud_id": "gpu_1x_6000_ada",
+    "gpu_type": "RTX6000Ada 48GB",
+    "gpu_count": 1,
+    "provider": "massedcompute",
+    "location": "US",
+    "security": "datacenter",
+    "stock_status": "Available",
+    "price_usd_per_hour": 0.75,
+    "vcpus": 12,
+    "memory_gb": 72,
+    "ephemeral_disk_gb": 350,
+    "spot_or_preemptible": false
+  },
+  "selection_justification": "This is the cheapest genuinely available qualifying non-spot 1x48GB resource, below the frozen 1.00 USD/hour ceiling. The next qualifying listings were L40S at 0.82 USD/hour and L40 at 0.86 USD/hour.",
+  "pod": {
+    "name": "redco-stage-d0-scaffold-support-v4-6",
+    "image": "ubuntu_22_cuda_12",
+    "persistent_storage": false,
+    "maximum_count": 1,
+    "ssh_key": "C:/Users/mihir/.ssh/id_rsa",
+    "ssh_rule": "Verify noninteractively before sync or model calls; terminate immediately if verification fails."
+  },
+  "unchanged_scientific_fields": "all",
+  "execution_rule": "Provision exactly this resource at most once while it remains available. If the listing changes or creation does not allocate this resource, stop and freeze a new hardware-only amendment before any alternative."
+}
