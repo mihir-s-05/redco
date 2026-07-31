@@ -1,0 +1,206 @@
+{
+  "checks": {
+    "all_shards_exactly_2000_chars": true,
+    "both_orderings_present": true,
+    "each_shard_alone_insufficient": true,
+    "eight_fresh_fixture_ids": true,
+    "one_reference_per_shard": true,
+    "union_sufficient": true
+  },
+  "dataset": "datasets/stage-d/evidence-selection-complementary-fixtures-v1.jsonl",
+  "dataset_sha256": "d5712f21e74d935707dae66832c916cb2bb3722c1c3c9ef47b551c7f949fd5fa",
+  "fixtures": 8,
+  "generator": "scripts/build_stage_d_complementary_fixtures_v1.py",
+  "partition_contract": {
+    "characters_per_shard": 2000,
+    "model_visible_reference_fields": false,
+    "ordering_forbidden_inputs": [
+      "answer text",
+      "reference field",
+      "reward",
+      "model output",
+      "relevance score"
+    ],
+    "ordering_input": "public fixture_id only",
+    "shards_per_paper": 2
+  },
+  "rows": [
+    {
+      "each_shard_alone_insufficient": true,
+      "fixture_id": "complementary-000-adaptive-cache",
+      "paper_chars": 4000,
+      "reference_positions": [
+        900,
+        2900
+      ],
+      "references_per_shard": [
+        1,
+        1
+      ],
+      "shard_chars": [
+        2000,
+        2000
+      ],
+      "shard_order": [
+        0,
+        1
+      ],
+      "union_sufficient": true
+    },
+    {
+      "each_shard_alone_insufficient": true,
+      "fixture_id": "complementary-001-branch-allocation",
+      "paper_chars": 4000,
+      "reference_positions": [
+        900,
+        2900
+      ],
+      "references_per_shard": [
+        1,
+        1
+      ],
+      "shard_chars": [
+        2000,
+        2000
+      ],
+      "shard_order": [
+        1,
+        0
+      ],
+      "union_sufficient": true
+    },
+    {
+      "each_shard_alone_insufficient": true,
+      "fixture_id": "complementary-002-typed-replay",
+      "paper_chars": 4000,
+      "reference_positions": [
+        900,
+        2900
+      ],
+      "references_per_shard": [
+        1,
+        1
+      ],
+      "shard_chars": [
+        2000,
+        2000
+      ],
+      "shard_order": [
+        1,
+        0
+      ],
+      "union_sufficient": true
+    },
+    {
+      "each_shard_alone_insufficient": true,
+      "fixture_id": "complementary-003-retrieval-index",
+      "paper_chars": 4000,
+      "reference_positions": [
+        900,
+        2900
+      ],
+      "references_per_shard": [
+        1,
+        1
+      ],
+      "shard_chars": [
+        2000,
+        2000
+      ],
+      "shard_order": [
+        1,
+        0
+      ],
+      "union_sufficient": true
+    },
+    {
+      "each_shard_alone_insufficient": true,
+      "fixture_id": "complementary-004-batch-scheduler",
+      "paper_chars": 4000,
+      "reference_positions": [
+        900,
+        2900
+      ],
+      "references_per_shard": [
+        1,
+        1
+      ],
+      "shard_chars": [
+        2000,
+        2000
+      ],
+      "shard_order": [
+        0,
+        1
+      ],
+      "union_sufficient": true
+    },
+    {
+      "each_shard_alone_insufficient": true,
+      "fixture_id": "complementary-005-evidence-filter",
+      "paper_chars": 4000,
+      "reference_positions": [
+        900,
+        2900
+      ],
+      "references_per_shard": [
+        1,
+        1
+      ],
+      "shard_chars": [
+        2000,
+        2000
+      ],
+      "shard_order": [
+        1,
+        0
+      ],
+      "union_sufficient": true
+    },
+    {
+      "each_shard_alone_insufficient": true,
+      "fixture_id": "complementary-006-checkpoint-codec",
+      "paper_chars": 4000,
+      "reference_positions": [
+        900,
+        2900
+      ],
+      "references_per_shard": [
+        1,
+        1
+      ],
+      "shard_chars": [
+        2000,
+        2000
+      ],
+      "shard_order": [
+        1,
+        0
+      ],
+      "union_sufficient": true
+    },
+    {
+      "each_shard_alone_insufficient": true,
+      "fixture_id": "complementary-007-token-router",
+      "paper_chars": 4000,
+      "reference_positions": [
+        900,
+        2900
+      ],
+      "references_per_shard": [
+        1,
+        1
+      ],
+      "shard_chars": [
+        2000,
+        2000
+      ],
+      "shard_order": [
+        0,
+        1
+      ],
+      "union_sufficient": true
+    }
+  ],
+  "schema_version": 1
+}

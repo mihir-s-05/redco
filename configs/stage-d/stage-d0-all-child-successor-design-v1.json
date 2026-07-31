@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "status": "cpu_ready_not_live_authorized",
+  "objective": "Define a fresh Stage D support successor that evaluates every pre-action depth-one child under a deterministic two-half paper scaffold without reinterpreting or rerunning the terminal v4.10 fixture.",
+  "history": {
+    "v4_10_terminal_report": "reports/stage-d0-scaffold-support-v4-10-terminal-2026-07-31.json",
+    "v4_10_terminal_commit": "11b2b07",
+    "retrospective_trace_diagnostic": "reports/stage-d0-scaffold-support-v4-10-trace-diagnostic.json",
+    "v4_10_disposition": "failed and terminal under its exact frozen first-native-child and exactly-two-root gate",
+    "retired_power_diagnostic": "The old fixed 0:2000 and 2000:4000 windows contained any exact reference in only 12 of 64 old power papers. All old 120 QASPER rows are now development or retired diagnostics and cannot count in successor support or science."
+  },
+  "scientific_scope": {
+    "can_establish_after_a_separate_passing_campaign": [
+      "support and later credit comparisons under a fixed two-midpoint-shard RLM scaffold",
+      "all-child fixed-state branch replay with nested target accounting",
+      "local versus branch-global versus broadcast behavior under a shared scaffold"
+    ],
+    "cannot_establish": [
+      "unconstrained natural tool selection",
+      "learned evidence retrieval",
+      "a reinterpretation of v4.10 as passing",
+      "any learning or reward claim from this CPU design"
+    ]
+  },
+  "shared_midpoint_scaffold": {
+    "prompt": "configs/stage-d/stage-d0-scaffold-fewshot-v3.txt",
+    "literal_rule": "midpoint = len(paper_text) // 2; excerpts = [paper_text[:midpoint], paper_text[midpoint:]]",
+    "order": "document order, shard zero then shard one",
+    "inputs": [
+      "paper text",
+      "paper length",
+      "question text only in the child prompts"
+    ],
+    "forbidden_inputs": [
+      "reference evidence",
+      "answer annotation or type",
+      "reward",
+      "model output",
+      "split identity",
+      "gold-derived offsets"
+    ],
+    "no_overlap_or_gap": true,
+    "no_adaptive_offset_or_filter": true,
+    "matches_frozen_sft_code": true,
+    "shared_byte_identically_across_future_arms": true
+  },
+  "runtime_capacity": {
+    "config": "configs/stage-d/stage-d0-scaffold-inference-sft-v5-midpoint-eager.toml",
+    "max_model_len": 8192,
+    "maximum_child_completion_tokens": 768,
+    "reference_independent_audit": "reports/stage-d0-midpoint-context-audit-v1.json",
+    "maximum_conservative_prompt_plus_completion_tokens": 7898,
+    "maximum_conservative_returning_root_plus_completion_tokens": 6621,
+    "fresh_papers_checked": 112,
+    "failure_rule": "Any fresh row or worst-case returning-root bound that does not fit the frozen context is an ordinary design failure; never trim, shift, overlap, or exclude it."
+  },
+  "target_contract": {
+    "selector": "all-depth-one-precommitted-v1",
+    "candidate_set_time": "after the recorded rollout and before any branch alternative",
+    "enforcement": "The signed precommit contains the source-trace hash and complete candidate-set hash; branch replay requires and canonically recomputes it before the first alternative. Replay and scorer artifacts are cryptographically chained back to it.",
+    "candidate_definition": "every depth-one policy call with structural address, prompt tokens, checkpoint, decoding hash, seed, parent session and parent turn",
+    "selector_forbidden_inputs": [
+      "child action tokens or text",
+      "behavior logprobs",
+      "reference evidence",
+      "reward",
+      "branch alternatives",
+      "downstream scores",
+      "native call order as a subset selector"
+    ],
+    "restorability": "evaluated after precommit as eligibility, never used to choose the candidate set",
+    "branching": {
+      "K_including_regenerated_original": 4,
+      "alternatives_per_target": 3,
+      "CRN": "one downstream continuation seed per target shared across regenerated original and alternatives",
+      "minimum_F1_range": 0.05,
+      "flat_groups": "retained and reported; never filtered"
+    },
+    "outer_weighting": "A paper has DecisionUnitWeight one; m precommitted child targets each receive immutable outer weight 1/m in the precommit, target reports, and aggregate. No post-outcome renormalization is allowed.",
+    "inferential_unit": "unique paper, never child target"
+  },
+  "variable_topology_eligibility": {
+    "root_policy_calls": "at least two; self-correction calls are allowed and cost-accounted",
+    "depth_one_children": "at least two and at most four",
+    "total_policy_calls": "at most eight",
+    "maximum_agent_depth": 1,
+    "recorded_completion_tokens": "at most 4096",
+    "return_path": "at least one exact downstream root descendant after every counted target",
+    "exact_requirements": [
+      "finite behavior logprobs aligned to action tokens",
+      "structural event address and exact prefix capsule",
+      "exact cached recorded replay",
+      "exact regenerated-original full and sliced replay",
+      "three exact alternative full and sliced replays",
+      "common downstream seed and three unique action seeds",
+      "parseable verbatim recorded, regenerated, and alternative outputs"
+    ]
+  },
+  "fresh_data": {
+    "immutable_old_snapshot": "datasets/stage-d/qasper-deterministic-v4.jsonl",
+    "old_snapshot_sha256": "88fa2c114d2f251b8ce0400023980fe652e4733d14b0357f5517f517d5775d71",
+    "old_120_disposition": "development or retired diagnostic quarantine",
+    "extension": "datasets/stage-d/qasper-successor-extension-v1.jsonl",
+    "extension_sha256": "8a1b55482d3c5f151741f42ba645b1cad2a0d20e2a445f69432c4e31c0c744b8",
+    "extension_manifest": "datasets/stage-d/qasper-successor-extension-manifest-v1.json",
+    "construction": "Pinned QASPER source order after seeding forbidden paper IDs and reference spans from all old 120 rows.",
+    "partitions": {
+      "successor_support": 64,
+      "successor_science_train": 16,
+      "successor_science_eval_final_only": 32
+    },
+    "fresh_reference_location_or_midpoint_coverage_inspected": false,
+    "final_eval_prohibitions": [
+      "checkpoint or adapter selection",
+      "support decision",
+      "threshold tuning",
+      "prompt or scaffold tuning"
+    ]
+  },
+  "fresh_fixture_battery": {
+    "dataset": "datasets/stage-d/evidence-selection-complementary-fixtures-v1.jsonl",
+    "manifest": "datasets/stage-d/evidence-selection-complementary-fixtures-manifest-v1.json",
+    "fixtures": 8,
+    "purpose": "development and integration only",
+    "properties": [
+      "exactly two 2000-character shards",
+      "one required reference per shard",
+      "each shard alone insufficient and union sufficient",
+      "shard order depends only on public fixture ID",
+      "fresh IDs and seeds required for any live use"
+    ],
+    "cannot_count_in_confirmatory_support": true
+  },
+  "confirmatory_support_rule": {
+    "papers": 64,
+    "canonical_order": true,
+    "paper_success": "two to four precommitted child targets, every precommitted target exact-eligible, exact rational target weights summing to one, and at least one K=4 reward-informative target",
+    "required_paper_successes": 58,
+    "target_counts_are_nested_diagnostics": true,
+    "midpoint_crossing_reference": "ordinary support negative; no paper exclusion or boundary change",
+    "early_failure": "allowed only when successes plus unobserved remaining papers is less than 58",
+    "early_success": "forbidden",
+    "science_on_failure": "forbidden",
+    "science_on_pass": "requires a separate frozen and adversarially audited preregistration"
+  },
+  "repair_and_stop": {
+    "before_freeze_or_model_output": "CPU development failures may be fixed freely.",
+    "after_freeze_before_affected_request": "A demonstrated outcome-independent environment failure permits a separately committed bounded repair with all scientific fields unchanged.",
+    "after_any_address_output": "Never reuse that address. An infrastructure interruption may continue only never-observed addresses after artifact recovery and an explicit amendment.",
+    "post_output_fixture_selector_parse_or_support_failure": "terminal design/support failure for the confirmatory successor, not an environment repair",
+    "post_support": "no midpoint, data, selector, K, threshold, or reward tuning",
+    "science_campaigns": "one confirmatory campaign; no arm retry"
+  },
+  "authorization": {
+    "cpu_work": true,
+    "live_fixture_requests": false,
+    "live_support_requests": false,
+    "scientific_training_requests": false,
+    "next_required_action": "freeze a costed live preregistration with fresh fixture/support seeds and obtain explicit user authorization"
+  },
+  "source_sha256": {
+    "configs/stage-d/stage-d0-scaffold-fewshot-v3.txt": "1d67c4bf6dc01efada3721b6026128bb56eb49704b6c4789e4057af0b1e1fea7",
+    "configs/stage-d/stage-d0-scaffold-inference-sft-v5-midpoint-eager.toml": "95f4af5d6667a955f6b087a03f836085015b21aef80f6f4e5a91dfa598cfe555",
+    "datasets/stage-d/evidence-selection-complementary-fixtures-v1.jsonl": "d5712f21e74d935707dae66832c916cb2bb3722c1c3c9ef47b551c7f949fd5fa",
+    "datasets/stage-d/evidence-selection-complementary-fixtures-manifest-v1.json": "fbeb3840223cd6ac28ec07132275c5acba0daadbdac419eac1ec34418af9d39b",
+    "datasets/stage-d/qasper-successor-extension-v1.jsonl": "8a1b55482d3c5f151741f42ba645b1cad2a0d20e2a445f69432c4e31c0c744b8",
+    "datasets/stage-d/qasper-successor-extension-manifest-v1.json": "6960fcd92e4c7806cefa70da00dd1d3b65ba69fda1d0c0d1938a5205b4dfda69",
+    "reports/stage-d0-scaffold-support-v4-10-trace-diagnostic.json": "e1b9cccf64129477bdf7023b3cc181c18f15990a79af0261ce7f88479aef0a07",
+    "reports/stage-d0-midpoint-context-audit-v1.json": "8a3ed341b5cc17cbcdf8382db5e92a4fb3727df3ffb8450390bf3f903135c63c",
+    "src/redco/analysis/stage_d_all_child_support.py": "15c2be1501943569966d2c9732e0154ba209f16e4c42eaa158b68be9c6a2f293",
+    "src/redco/analysis/stage_d_all_child_branch_group.py": "23e8a5c33f7110516829d0224c4b32d0b52b0d7427d598f715fa39db3fb77dd0",
+    "src/redco/analysis/empirical_branch_replay.py": "c21a3ebaca6b37edae1145ba731db9043e7319d9180def28f39e79a27e5b5dc5",
+    "scripts/build_stage_d_complementary_fixtures_v1.py": "b18d5cab9187fad0cd28fccbf814481c223fb0a84a05fc68ca4ceaca2d8a0de2",
+    "scripts/build_stage_d_qasper_extension_v1.py": "31feb3c52de04440034e11f20e636555e656edca0b434c3580261e406a90614c",
+    "scripts/audit_stage_d_midpoint_context_v1.py": "745473440208b5428a008a014eb84ece6d9828f7a10a1029d4a1839129e6c96f",
+    "scripts/audit_stage_d_all_child_successor_design_v1.py": "a694c0b9402fa8b7d42e1947c037ff055b464a85df0034cc94ffb7109c5aa8b2",
+    "scripts/run_stage_d_all_child_branch_group.py": "f67a536df901371be7efc6f0ca09f2c78329aa8a973bc0989968f8cf64f69173",
+    "scripts/score_stage_d_all_child_replay.py": "1365dcb6b0c0d64e9cd73eefac206e8008b761843ac7fc09e9e93067121adfa2",
+    "scripts/audit_stage_d_all_child_support.py": "3d796a1394c2ca0ceb07730b243571c8a180bf0ff8b11afa57920d19efbc779a",
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/scoring.py": "650e7e7cbec59a2ccc81f133d0bbfb8f5edb72fc6d4579b8e6d136c3dce1bb8e",
+    "tests/test_stage_d_all_child_support.py": "0e658402e1300e48009d3879a97bd326266708f8bc2f7beeea245a76cbee242a"
+  }
+}

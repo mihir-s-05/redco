@@ -1,0 +1,2402 @@
+{
+  "analysis": "stage-d-midpoint-context-audit",
+  "checks": {
+    "all_conservative_context_totals_fit_8192": true,
+    "all_papers_unique": true,
+    "both_shards_nonempty_everywhere": true,
+    "exact_midpoint_lines_match_frozen_sft": true,
+    "fresh_reference_fields_never_used_by_audit": true,
+    "midpoint_union_exact_everywhere": true,
+    "recorded_overhead_bound_not_understated": true,
+    "worst_case_returning_root_fits_8192": true
+  },
+  "conservative_final_root_prompt_plus_completion_tokens": 6621,
+  "dataset": {
+    "papers": 112,
+    "path": "datasets/stage-d/qasper-successor-extension-v1.jsonl",
+    "sha256": "8a1b55482d3c5f151741f42ba645b1cad2a0d20e2a445f69432c4e31c0c744b8"
+  },
+  "frozen_sft_dataset": {
+    "path": "datasets/stage-d/scaffold-sft-v2.jsonl",
+    "sha256": "d3ab59cdc9f622e501cc0921407c1929e0d9f5d08230cda7e9cfe843638e388f"
+  },
+  "maximum_conservative_tokens": 7898,
+  "model": {
+    "conservative_recorded_overhead_tokens": 955,
+    "maximum_child_completion_tokens": 768,
+    "maximum_eligible_children": 4,
+    "maximum_model_length": 8192,
+    "maximum_root_completion_tokens": 768,
+    "repo": "Qwen/Qwen3-4B-Instruct-2507",
+    "revision": "cdbee75f17c01a7cc42f958dc650907174af0554"
+  },
+  "records": [
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4544,
+        4730
+      ],
+      "example_id": "qasper-71f2b368228a748fd348f1abf540236568a61b07",
+      "fits_8192": true,
+      "midpoint": 12762,
+      "paper_characters": 25525,
+      "paper_id": "1911.03894",
+      "prompt_tokens_without_system": [
+        2821,
+        3007
+      ],
+      "shard_characters": [
+        12762,
+        12763
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4860,
+        5050
+      ],
+      "example_id": "qasper-bf25a202ac713a34e09bf599b3601058d9cace46",
+      "fits_8192": true,
+      "midpoint": 15597,
+      "paper_characters": 31195,
+      "paper_id": "2001.09899",
+      "prompt_tokens_without_system": [
+        3137,
+        3327
+      ],
+      "shard_characters": [
+        15597,
+        15598
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5100,
+        5396
+      ],
+      "example_id": "qasper-fa3663567c48c27703e09c42930e51bacfa54905",
+      "fits_8192": true,
+      "midpoint": 15849,
+      "paper_characters": 31698,
+      "paper_id": "1710.01492",
+      "prompt_tokens_without_system": [
+        3377,
+        3673
+      ],
+      "shard_characters": [
+        15849,
+        15849
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3446,
+        3478
+      ],
+      "example_id": "qasper-a3d83c2a1b98060d609e7ff63e00112d36ce2607",
+      "fits_8192": true,
+      "midpoint": 8265,
+      "paper_characters": 16531,
+      "paper_id": "1912.01673",
+      "prompt_tokens_without_system": [
+        1723,
+        1755
+      ],
+      "shard_characters": [
+        8265,
+        8266
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4814,
+        4900
+      ],
+      "example_id": "qasper-48cc41c372d44b69a477998be449f8b81384786b",
+      "fits_8192": true,
+      "midpoint": 14823,
+      "paper_characters": 29647,
+      "paper_id": "1909.12231",
+      "prompt_tokens_without_system": [
+        3091,
+        3177
+      ],
+      "shard_characters": [
+        14823,
+        14824
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3603,
+        3745
+      ],
+      "example_id": "qasper-0619fc797730a3e59ac146a5a4575c81517cc618",
+      "fits_8192": true,
+      "midpoint": 9495,
+      "paper_characters": 18990,
+      "paper_id": "1706.08032",
+      "prompt_tokens_without_system": [
+        1880,
+        2022
+      ],
+      "shard_characters": [
+        9495,
+        9495
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4980,
+        5042
+      ],
+      "example_id": "qasper-69a7a6675c59a4c5fb70006523b9fe0f01ca415c",
+      "fits_8192": true,
+      "midpoint": 16039,
+      "paper_characters": 32078,
+      "paper_id": "1811.01399",
+      "prompt_tokens_without_system": [
+        3257,
+        3319
+      ],
+      "shard_characters": [
+        16039,
+        16039
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3814,
+        3821
+      ],
+      "example_id": "qasper-c20b012ad31da46642c553ce462bc0aad56912db",
+      "fits_8192": true,
+      "midpoint": 8671,
+      "paper_characters": 17342,
+      "paper_id": "1909.00124",
+      "prompt_tokens_without_system": [
+        2091,
+        2098
+      ],
+      "shard_characters": [
+        8671,
+        8671
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5305,
+        5516
+      ],
+      "example_id": "qasper-98ba7a7aae388b1a77dd6cab890977251d906359",
+      "fits_8192": true,
+      "midpoint": 16087,
+      "paper_characters": 32175,
+      "paper_id": "1909.00088",
+      "prompt_tokens_without_system": [
+        3582,
+        3793
+      ],
+      "shard_characters": [
+        16087,
+        16088
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3480,
+        3789
+      ],
+      "example_id": "qasper-529dabe7b4a8a01b20ee099701834b60fb0c43b0",
+      "fits_8192": true,
+      "midpoint": 8680,
+      "paper_characters": 17360,
+      "paper_id": "1911.01799",
+      "prompt_tokens_without_system": [
+        1757,
+        2066
+      ],
+      "shard_characters": [
+        8680,
+        8680
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4149,
+        4173
+      ],
+      "example_id": "qasper-df8cc1f395486a12db98df805248eb37c087458b",
+      "fits_8192": true,
+      "midpoint": 11921,
+      "paper_characters": 23842,
+      "paper_id": "1812.06705",
+      "prompt_tokens_without_system": [
+        2426,
+        2450
+      ],
+      "shard_characters": [
+        11921,
+        11921
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5284,
+        5172
+      ],
+      "example_id": "qasper-ca4b66ffa4581f9491442dcec78ca556253c8146",
+      "fits_8192": true,
+      "midpoint": 16486,
+      "paper_characters": 32972,
+      "paper_id": "1905.08949",
+      "prompt_tokens_without_system": [
+        3561,
+        3449
+      ],
+      "shard_characters": [
+        16486,
+        16486
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4561,
+        4533
+      ],
+      "example_id": "qasper-a999761aa976458bbc7b4f330764796446d030ff",
+      "fits_8192": true,
+      "midpoint": 12341,
+      "paper_characters": 24682,
+      "paper_id": "1909.00170",
+      "prompt_tokens_without_system": [
+        2838,
+        2810
+      ],
+      "shard_characters": [
+        12341,
+        12341
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4384,
+        5413
+      ],
+      "example_id": "qasper-6b55b558ed581759425ede5d3a6fcdf44b8082ac",
+      "fits_8192": true,
+      "midpoint": 13516,
+      "paper_characters": 27032,
+      "paper_id": "1701.03051",
+      "prompt_tokens_without_system": [
+        2661,
+        3690
+      ],
+      "shard_characters": [
+        13516,
+        13516
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5615,
+        5363
+      ],
+      "example_id": "qasper-129c03acb0963ede3915415953317556a55f34ee",
+      "fits_8192": true,
+      "midpoint": 16287,
+      "paper_characters": 32575,
+      "paper_id": "1603.01417",
+      "prompt_tokens_without_system": [
+        3892,
+        3640
+      ],
+      "shard_characters": [
+        16287,
+        16288
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4887,
+        4723
+      ],
+      "example_id": "qasper-9213159f874b3bdd9b4de956a88c703aac988411",
+      "fits_8192": true,
+      "midpoint": 14783,
+      "paper_characters": 29567,
+      "paper_id": "1911.03385",
+      "prompt_tokens_without_system": [
+        3164,
+        3000
+      ],
+      "shard_characters": [
+        14783,
+        14784
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5534,
+        5693
+      ],
+      "example_id": "qasper-97dac7092cf8082a6238aaa35f4b185343b914af",
+      "fits_8192": true,
+      "midpoint": 18351,
+      "paper_characters": 36702,
+      "paper_id": "1902.06843",
+      "prompt_tokens_without_system": [
+        3811,
+        3970
+      ],
+      "shard_characters": [
+        18351,
+        18351
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5523,
+        5233
+      ],
+      "example_id": "qasper-9f6e877e3bde771595e8aee10c2656a0e7b9aeb2",
+      "fits_8192": true,
+      "midpoint": 14239,
+      "paper_characters": 28479,
+      "paper_id": "1905.06512",
+      "prompt_tokens_without_system": [
+        3800,
+        3510
+      ],
+      "shard_characters": [
+        14239,
+        14240
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3848,
+        4028
+      ],
+      "example_id": "qasper-589be705a5cc73a23f30decba23ce58ec39d313b",
+      "fits_8192": true,
+      "midpoint": 10050,
+      "paper_characters": 20101,
+      "paper_id": "2001.06286",
+      "prompt_tokens_without_system": [
+        2125,
+        2305
+      ],
+      "shard_characters": [
+        10050,
+        10051
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4953,
+        4869
+      ],
+      "example_id": "qasper-d79d897f94e666d5a6fcda3b0c7e807c8fad109e",
+      "fits_8192": true,
+      "midpoint": 15889,
+      "paper_characters": 31779,
+      "paper_id": "1910.02789",
+      "prompt_tokens_without_system": [
+        3230,
+        3146
+      ],
+      "shard_characters": [
+        15889,
+        15890
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4097,
+        4098
+      ],
+      "example_id": "qasper-31ee92e521be110b6a5a8d08cc9e6f90a3a97aae",
+      "fits_8192": true,
+      "midpoint": 11587,
+      "paper_characters": 23174,
+      "paper_id": "2001.07209",
+      "prompt_tokens_without_system": [
+        2374,
+        2375
+      ],
+      "shard_characters": [
+        11587,
+        11587
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4621,
+        4521
+      ],
+      "example_id": "qasper-c180f44667505ec03214d44f4970c0db487a8bae",
+      "fits_8192": true,
+      "midpoint": 14906,
+      "paper_characters": 29812,
+      "paper_id": "2001.10161",
+      "prompt_tokens_without_system": [
+        2898,
+        2798
+      ],
+      "shard_characters": [
+        14906,
+        14906
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4522,
+        4507
+      ],
+      "example_id": "qasper-6b9310b577c6232e3614a1612cbbbb17067b3886",
+      "fits_8192": true,
+      "midpoint": 13386,
+      "paper_characters": 26773,
+      "paper_id": "1909.00279",
+      "prompt_tokens_without_system": [
+        2799,
+        2784
+      ],
+      "shard_characters": [
+        13386,
+        13387
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5255,
+        5007
+      ],
+      "example_id": "qasper-ee31c8a94e07b3207ca28caef3fbaf9a38d94964",
+      "fits_8192": true,
+      "midpoint": 14828,
+      "paper_characters": 29656,
+      "paper_id": "1909.06762",
+      "prompt_tokens_without_system": [
+        3532,
+        3284
+      ],
+      "shard_characters": [
+        14828,
+        14828
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3867,
+        3898
+      ],
+      "example_id": "qasper-6472f9d0a385be81e0970be91795b1b97aa5a9cf",
+      "fits_8192": true,
+      "midpoint": 10634,
+      "paper_characters": 21268,
+      "paper_id": "1812.07023",
+      "prompt_tokens_without_system": [
+        2144,
+        2175
+      ],
+      "shard_characters": [
+        10634,
+        10634
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3670,
+        3664
+      ],
+      "example_id": "qasper-17de58c17580350c9da9c2f3612784b432154d11",
+      "fits_8192": true,
+      "midpoint": 9575,
+      "paper_characters": 19151,
+      "paper_id": "1610.04377",
+      "prompt_tokens_without_system": [
+        1947,
+        1941
+      ],
+      "shard_characters": [
+        9575,
+        9576
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4811,
+        4694
+      ],
+      "example_id": "qasper-c0a11ba0f6bbb4c69b5a0d4ae9d18e86a4a8f354",
+      "fits_8192": true,
+      "midpoint": 13991,
+      "paper_characters": 27982,
+      "paper_id": "1906.06448",
+      "prompt_tokens_without_system": [
+        3088,
+        2971
+      ],
+      "shard_characters": [
+        13991,
+        13991
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3941,
+        4039
+      ],
+      "example_id": "qasper-5937ebbf04f62d41b48cbc6b5c38fc309e5c2328",
+      "fits_8192": true,
+      "midpoint": 10251,
+      "paper_characters": 20503,
+      "paper_id": "1912.00819",
+      "prompt_tokens_without_system": [
+        2218,
+        2316
+      ],
+      "shard_characters": [
+        10251,
+        10252
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3917,
+        4225
+      ],
+      "example_id": "qasper-9ef182b61461d0d8b6feb1d6174796ccde290a15",
+      "fits_8192": true,
+      "midpoint": 10767,
+      "paper_characters": 21535,
+      "paper_id": "1907.00758",
+      "prompt_tokens_without_system": [
+        2194,
+        2502
+      ],
+      "shard_characters": [
+        10767,
+        10768
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        6783,
+        7247
+      ],
+      "example_id": "qasper-3bf429633ecbbfec3d7ffbcfa61fa90440cc918b",
+      "fits_8192": true,
+      "midpoint": 26058,
+      "paper_characters": 52116,
+      "paper_id": "1710.06536",
+      "prompt_tokens_without_system": [
+        5060,
+        5524
+      ],
+      "shard_characters": [
+        26058,
+        26058
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3507,
+        3604
+      ],
+      "example_id": "qasper-ad67ca844c63bf8ac9fdd0fa5f58c5a438f16211",
+      "fits_8192": true,
+      "midpoint": 8275,
+      "paper_characters": 16550,
+      "paper_id": "1904.05862",
+      "prompt_tokens_without_system": [
+        1784,
+        1881
+      ],
+      "shard_characters": [
+        8275,
+        8275
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4896,
+        4539
+      ],
+      "example_id": "qasper-a43c400ae37a8705ff2effb4828f4b0b177a74c4",
+      "fits_8192": true,
+      "midpoint": 12444,
+      "paper_characters": 24889,
+      "paper_id": "1708.09157",
+      "prompt_tokens_without_system": [
+        3173,
+        2816
+      ],
+      "shard_characters": [
+        12444,
+        12445
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5117,
+        5237
+      ],
+      "example_id": "qasper-f6496b8d09911cdf3a9b72aec0b0be6232a6dba1",
+      "fits_8192": true,
+      "midpoint": 14960,
+      "paper_characters": 29921,
+      "paper_id": "1911.00069",
+      "prompt_tokens_without_system": [
+        3394,
+        3514
+      ],
+      "shard_characters": [
+        14960,
+        14961
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        2801,
+        2724
+      ],
+      "example_id": "qasper-a130aa735de3b65c71f27018f20d3c068bafb826",
+      "fits_8192": true,
+      "midpoint": 4733,
+      "paper_characters": 9466,
+      "paper_id": "1910.04887",
+      "prompt_tokens_without_system": [
+        1078,
+        1001
+      ],
+      "shard_characters": [
+        4733,
+        4733
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4877,
+        5009
+      ],
+      "example_id": "qasper-aa800b424db77e634e82680f804894bfa37f2a34",
+      "fits_8192": true,
+      "midpoint": 16133,
+      "paper_characters": 32267,
+      "paper_id": "1810.00663",
+      "prompt_tokens_without_system": [
+        3154,
+        3286
+      ],
+      "shard_characters": [
+        16133,
+        16134
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4263,
+        4436
+      ],
+      "example_id": "qasper-c82e945b43b2e61c8ea567727e239662309e9508",
+      "fits_8192": true,
+      "midpoint": 13000,
+      "paper_characters": 26001,
+      "paper_id": "1809.05752",
+      "prompt_tokens_without_system": [
+        2540,
+        2713
+      ],
+      "shard_characters": [
+        13000,
+        13001
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3511,
+        3640
+      ],
+      "example_id": "qasper-57388bf2693d71eb966d42fa58ab66d7f595e55f",
+      "fits_8192": true,
+      "midpoint": 8894,
+      "paper_characters": 17789,
+      "paper_id": "2001.01589",
+      "prompt_tokens_without_system": [
+        1788,
+        1917
+      ],
+      "shard_characters": [
+        8894,
+        8895
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3592,
+        3718
+      ],
+      "example_id": "qasper-fa5357c56ea80a21a7ca88a80f21711c5431042c",
+      "fits_8192": true,
+      "midpoint": 8577,
+      "paper_characters": 17155,
+      "paper_id": "1910.10324",
+      "prompt_tokens_without_system": [
+        1869,
+        1995
+      ],
+      "shard_characters": [
+        8577,
+        8578
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4990,
+        5026
+      ],
+      "example_id": "qasper-fc29bb14f251f18862c100e0d3cd1396e8f2c3a1",
+      "fits_8192": true,
+      "midpoint": 14978,
+      "paper_characters": 29957,
+      "paper_id": "1910.05456",
+      "prompt_tokens_without_system": [
+        3267,
+        3303
+      ],
+      "shard_characters": [
+        14978,
+        14979
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        2593,
+        2560
+      ],
+      "example_id": "qasper-b72264a73eea36c828e7de778a8b4599a5d02b39",
+      "fits_8192": true,
+      "midpoint": 4344,
+      "paper_characters": 8689,
+      "paper_id": "1910.05154",
+      "prompt_tokens_without_system": [
+        870,
+        837
+      ],
+      "shard_characters": [
+        4344,
+        4345
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4039,
+        4521
+      ],
+      "example_id": "qasper-26b5c090f72f6d51e5d9af2e470d06b2d7fc4a98",
+      "fits_8192": true,
+      "midpoint": 11920,
+      "paper_characters": 23841,
+      "paper_id": "1806.00722",
+      "prompt_tokens_without_system": [
+        2316,
+        2798
+      ],
+      "shard_characters": [
+        11920,
+        11921
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        7633,
+        7898
+      ],
+      "example_id": "qasper-62736ad71c76a20aee8e003c462869bab4ab4b1e",
+      "fits_8192": true,
+      "midpoint": 25670,
+      "paper_characters": 51340,
+      "paper_id": "2003.03612",
+      "prompt_tokens_without_system": [
+        5910,
+        6175
+      ],
+      "shard_characters": [
+        25670,
+        25670
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        2841,
+        2891
+      ],
+      "example_id": "qasper-508580af51483b5fb0df2630e8ea726ff08d537b",
+      "fits_8192": true,
+      "midpoint": 5874,
+      "paper_characters": 11749,
+      "paper_id": "1904.08386",
+      "prompt_tokens_without_system": [
+        1118,
+        1168
+      ],
+      "shard_characters": [
+        5874,
+        5875
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5368,
+        5119
+      ],
+      "example_id": "qasper-72ceeb58e783e3981055c70a3483ea706511fac3",
+      "fits_8192": true,
+      "midpoint": 14701,
+      "paper_characters": 29402,
+      "paper_id": "1909.00754",
+      "prompt_tokens_without_system": [
+        3645,
+        3396
+      ],
+      "shard_characters": [
+        14701,
+        14701
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3721,
+        3801
+      ],
+      "example_id": "qasper-f258ada8577bb71873581820a94695f4a2c223b3",
+      "fits_8192": true,
+      "midpoint": 9815,
+      "paper_characters": 19631,
+      "paper_id": "1906.00180",
+      "prompt_tokens_without_system": [
+        1998,
+        2078
+      ],
+      "shard_characters": [
+        9815,
+        9816
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4010,
+        4070
+      ],
+      "example_id": "qasper-05bb75a1e1202850efa9191d6901de0a34744af0",
+      "fits_8192": true,
+      "midpoint": 10182,
+      "paper_characters": 20365,
+      "paper_id": "1806.02847",
+      "prompt_tokens_without_system": [
+        2287,
+        2347
+      ],
+      "shard_characters": [
+        10182,
+        10183
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4215,
+        4003
+      ],
+      "example_id": "qasper-f7817b949605fb04b1e4fec9dd9ca8804fb92ae9",
+      "fits_8192": true,
+      "midpoint": 11327,
+      "paper_characters": 22654,
+      "paper_id": "1906.04571",
+      "prompt_tokens_without_system": [
+        2492,
+        2280
+      ],
+      "shard_characters": [
+        11327,
+        11327
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5033,
+        4904
+      ],
+      "example_id": "qasper-a1e07c7563ad038ee2a7de5093ea08efdd6077d4",
+      "fits_8192": true,
+      "midpoint": 16109,
+      "paper_characters": 32218,
+      "paper_id": "1909.04625",
+      "prompt_tokens_without_system": [
+        3310,
+        3181
+      ],
+      "shard_characters": [
+        16109,
+        16109
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3723,
+        3746
+      ],
+      "example_id": "qasper-c5171daf82107fce0f285fa18f19e91fbd1215c5",
+      "fits_8192": true,
+      "midpoint": 10206,
+      "paper_characters": 20412,
+      "paper_id": "1809.07629",
+      "prompt_tokens_without_system": [
+        2000,
+        2023
+      ],
+      "shard_characters": [
+        10206,
+        10206
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5092,
+        5030
+      ],
+      "example_id": "qasper-bb570d4a1b814f508a07e74baac735bf6ca0f040",
+      "fits_8192": true,
+      "midpoint": 13110,
+      "paper_characters": 26220,
+      "paper_id": "1807.05154",
+      "prompt_tokens_without_system": [
+        3369,
+        3307
+      ],
+      "shard_characters": [
+        13110,
+        13110
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3362,
+        3335
+      ],
+      "example_id": "qasper-a1885f807753cff7a59f69b5cf6d0fdef8484057",
+      "fits_8192": true,
+      "midpoint": 7553,
+      "paper_characters": 15106,
+      "paper_id": "2002.11402",
+      "prompt_tokens_without_system": [
+        1639,
+        1612
+      ],
+      "shard_characters": [
+        7553,
+        7553
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        2958,
+        2971
+      ],
+      "example_id": "qasper-c2553166463b7b5ae4d9786f0446eb06a90af458",
+      "fits_8192": true,
+      "midpoint": 5784,
+      "paper_characters": 11568,
+      "paper_id": "1804.09301",
+      "prompt_tokens_without_system": [
+        1235,
+        1248
+      ],
+      "shard_characters": [
+        5784,
+        5784
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4862,
+        4678
+      ],
+      "example_id": "qasper-cc9f0ac8ead575a9b485a51ddc06b9ecb2e2a44d",
+      "fits_8192": true,
+      "midpoint": 13506,
+      "paper_characters": 27012,
+      "paper_id": "2002.00652",
+      "prompt_tokens_without_system": [
+        3139,
+        2955
+      ],
+      "shard_characters": [
+        13506,
+        13506
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4808,
+        4844
+      ],
+      "example_id": "qasper-1763a029daca7cab10f18634aba02a6bd1b6faa7",
+      "fits_8192": true,
+      "midpoint": 14010,
+      "paper_characters": 28020,
+      "paper_id": "1909.00324",
+      "prompt_tokens_without_system": [
+        3085,
+        3121
+      ],
+      "shard_characters": [
+        14010,
+        14010
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5528,
+        5633
+      ],
+      "example_id": "qasper-fc8bc6a3c837a9d1c869b7ee90cf4e3c39bcd102",
+      "fits_8192": true,
+      "midpoint": 14131,
+      "paper_characters": 28262,
+      "paper_id": "1905.06566",
+      "prompt_tokens_without_system": [
+        3805,
+        3910
+      ],
+      "shard_characters": [
+        14131,
+        14131
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5195,
+        5143
+      ],
+      "example_id": "qasper-269b05b74d5215b09c16e95a91ae50caedd9e2aa",
+      "fits_8192": true,
+      "midpoint": 15493,
+      "paper_characters": 30986,
+      "paper_id": "2003.04032",
+      "prompt_tokens_without_system": [
+        3472,
+        3420
+      ],
+      "shard_characters": [
+        15493,
+        15493
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4479,
+        4553
+      ],
+      "example_id": "qasper-ca26cfcc755f9d0641db0e4d88b4109b903dbb26",
+      "fits_8192": true,
+      "midpoint": 13353,
+      "paper_characters": 26707,
+      "paper_id": "2004.03034",
+      "prompt_tokens_without_system": [
+        2756,
+        2830
+      ],
+      "shard_characters": [
+        13353,
+        13354
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5976,
+        6037
+      ],
+      "example_id": "qasper-07c59824f5e7c5399d15491da3543905cfa5f751",
+      "fits_8192": true,
+      "midpoint": 21131,
+      "paper_characters": 42262,
+      "paper_id": "1910.12618",
+      "prompt_tokens_without_system": [
+        4253,
+        4314
+      ],
+      "shard_characters": [
+        21131,
+        21131
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4582,
+        4754
+      ],
+      "example_id": "qasper-3e839783d8a4f2fe50ece4a9b476546f0842b193",
+      "fits_8192": true,
+      "midpoint": 14506,
+      "paper_characters": 29012,
+      "paper_id": "1911.12569",
+      "prompt_tokens_without_system": [
+        2859,
+        3031
+      ],
+      "shard_characters": [
+        14506,
+        14506
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4513,
+        4610
+      ],
+      "example_id": "qasper-0ee20a3a343e1e251b74a804e9aa1393d17b46d6",
+      "fits_8192": true,
+      "midpoint": 13731,
+      "paper_characters": 27462,
+      "paper_id": "1910.01363",
+      "prompt_tokens_without_system": [
+        2790,
+        2887
+      ],
+      "shard_characters": [
+        13731,
+        13731
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        2296,
+        2371
+      ],
+      "example_id": "qasper-c6e63e3b807474e29bfe32542321d015009e7148",
+      "fits_8192": true,
+      "midpoint": 2808,
+      "paper_characters": 5617,
+      "paper_id": "1901.04899",
+      "prompt_tokens_without_system": [
+        573,
+        648
+      ],
+      "shard_characters": [
+        2808,
+        2809
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        2764,
+        2955
+      ],
+      "example_id": "qasper-5f7850254b723adf891930c6faced1058b99bd57",
+      "fits_8192": true,
+      "midpoint": 5056,
+      "paper_characters": 10112,
+      "paper_id": "1606.05320",
+      "prompt_tokens_without_system": [
+        1041,
+        1232
+      ],
+      "shard_characters": [
+        5056,
+        5056
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3386,
+        3465
+      ],
+      "example_id": "qasper-50690b72dc61748e0159739a9a0243814d37f360",
+      "fits_8192": true,
+      "midpoint": 8295,
+      "paper_characters": 16591,
+      "paper_id": "1809.10644",
+      "prompt_tokens_without_system": [
+        1663,
+        1742
+      ],
+      "shard_characters": [
+        8295,
+        8296
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4527,
+        4644
+      ],
+      "example_id": "qasper-102a0439739428aac80ac11795e73ce751b93ea1",
+      "fits_8192": true,
+      "midpoint": 13830,
+      "paper_characters": 27660,
+      "paper_id": "1606.02006",
+      "prompt_tokens_without_system": [
+        2804,
+        2921
+      ],
+      "shard_characters": [
+        13830,
+        13830
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3325,
+        3329
+      ],
+      "example_id": "qasper-04f72eddb1fc73dd11135a80ca1cf31e9db75578",
+      "fits_8192": true,
+      "midpoint": 7924,
+      "paper_characters": 15849,
+      "paper_id": "1911.03243",
+      "prompt_tokens_without_system": [
+        1602,
+        1606
+      ],
+      "shard_characters": [
+        7924,
+        7925
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4018,
+        3978
+      ],
+      "example_id": "qasper-545ff2f76913866304bfacdb4cc10d31dbbd2f37",
+      "fits_8192": true,
+      "midpoint": 10829,
+      "paper_characters": 21658,
+      "paper_id": "1809.04686",
+      "prompt_tokens_without_system": [
+        2295,
+        2255
+      ],
+      "shard_characters": [
+        10829,
+        10829
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        6158,
+        6420
+      ],
+      "example_id": "qasper-cf93a209c8001ffb4ef505d306b6ced5936c6b63",
+      "fits_8192": true,
+      "midpoint": 21578,
+      "paper_characters": 43156,
+      "paper_id": "1703.09684",
+      "prompt_tokens_without_system": [
+        4435,
+        4697
+      ],
+      "shard_characters": [
+        21578,
+        21578
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3148,
+        3263
+      ],
+      "example_id": "qasper-fb5ce11bfd74e9d7c322444b006a27f2ff32a0cf",
+      "fits_8192": true,
+      "midpoint": 7274,
+      "paper_characters": 14548,
+      "paper_id": "1911.11744",
+      "prompt_tokens_without_system": [
+        1425,
+        1540
+      ],
+      "shard_characters": [
+        7274,
+        7274
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4214,
+        4194
+      ],
+      "example_id": "qasper-b367b823c5db4543ac421d0057b02f62ea16bf9f",
+      "fits_8192": true,
+      "midpoint": 11103,
+      "paper_characters": 22207,
+      "paper_id": "1910.03467",
+      "prompt_tokens_without_system": [
+        2491,
+        2471
+      ],
+      "shard_characters": [
+        11103,
+        11104
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5690,
+        5928
+      ],
+      "example_id": "qasper-6adec34d86095643e6b89cda5c7cd94f64381acc",
+      "fits_8192": true,
+      "midpoint": 19231,
+      "paper_characters": 38463,
+      "paper_id": "1911.00523",
+      "prompt_tokens_without_system": [
+        3967,
+        4205
+      ],
+      "shard_characters": [
+        19231,
+        19232
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5188,
+        5366
+      ],
+      "example_id": "qasper-2b78052314cb730824836ea69bc968df7964b4e4",
+      "fits_8192": true,
+      "midpoint": 16193,
+      "paper_characters": 32386,
+      "paper_id": "1803.03664",
+      "prompt_tokens_without_system": [
+        3465,
+        3643
+      ],
+      "shard_characters": [
+        16193,
+        16193
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4067,
+        4254
+      ],
+      "example_id": "qasper-11d2f0d913d6e5f5695f8febe2b03c6c125b667c",
+      "fits_8192": true,
+      "midpoint": 11436,
+      "paper_characters": 22872,
+      "paper_id": "1910.11949",
+      "prompt_tokens_without_system": [
+        2344,
+        2531
+      ],
+      "shard_characters": [
+        11436,
+        11436
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5114,
+        5269
+      ],
+      "example_id": "qasper-76377e5bb7d0a374b0aefc54697ac9cd89d2eba8",
+      "fits_8192": true,
+      "midpoint": 16359,
+      "paper_characters": 32719,
+      "paper_id": "1902.09087",
+      "prompt_tokens_without_system": [
+        3391,
+        3546
+      ],
+      "shard_characters": [
+        16359,
+        16360
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3727,
+        3646
+      ],
+      "example_id": "qasper-abad9beb7295d809d7e5e1407cbf673c9ffffd19",
+      "fits_8192": true,
+      "midpoint": 9739,
+      "paper_characters": 19478,
+      "paper_id": "1907.01413",
+      "prompt_tokens_without_system": [
+        2004,
+        1923
+      ],
+      "shard_characters": [
+        9739,
+        9739
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4424,
+        4591
+      ],
+      "example_id": "qasper-c034f38a570d40360c3551a6469486044585c63c",
+      "fits_8192": true,
+      "midpoint": 12659,
+      "paper_characters": 25318,
+      "paper_id": "1908.07816",
+      "prompt_tokens_without_system": [
+        2701,
+        2868
+      ],
+      "shard_characters": [
+        12659,
+        12659
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4606,
+        4621
+      ],
+      "example_id": "qasper-b5d6357d3a9e3d5fdf9b344ae96cddd11a407875",
+      "fits_8192": true,
+      "midpoint": 13709,
+      "paper_characters": 27418,
+      "paper_id": "1808.09409",
+      "prompt_tokens_without_system": [
+        2883,
+        2898
+      ],
+      "shard_characters": [
+        13709,
+        13709
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4272,
+        4579
+      ],
+      "example_id": "qasper-17f5f4a5d943c91d46552fb75940b67a72144697",
+      "fits_8192": true,
+      "midpoint": 13356,
+      "paper_characters": 26712,
+      "paper_id": "1808.00265",
+      "prompt_tokens_without_system": [
+        2549,
+        2856
+      ],
+      "shard_characters": [
+        13356,
+        13356
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3898,
+        4048
+      ],
+      "example_id": "qasper-b69897deb5fb80bf2adb44f9cbf6280d747271b3",
+      "fits_8192": true,
+      "midpoint": 10619,
+      "paper_characters": 21239,
+      "paper_id": "1810.09774",
+      "prompt_tokens_without_system": [
+        2175,
+        2325
+      ],
+      "shard_characters": [
+        10619,
+        10620
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3186,
+        3336
+      ],
+      "example_id": "qasper-284ea817fd79bc10b7a82c88d353e8f8a9d7e93c",
+      "fits_8192": true,
+      "midpoint": 7030,
+      "paper_characters": 14060,
+      "paper_id": "1910.05608",
+      "prompt_tokens_without_system": [
+        1463,
+        1613
+      ],
+      "shard_characters": [
+        7030,
+        7030
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3970,
+        4168
+      ],
+      "example_id": "qasper-f52ec4d68de91dba66668f0affc198706949ff90",
+      "fits_8192": true,
+      "midpoint": 10266,
+      "paper_characters": 20533,
+      "paper_id": "1906.07668",
+      "prompt_tokens_without_system": [
+        2247,
+        2445
+      ],
+      "shard_characters": [
+        10266,
+        10267
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3405,
+        3430
+      ],
+      "example_id": "qasper-c5abe97625b9e1c8de8208e15d59c704a597b88c",
+      "fits_8192": true,
+      "midpoint": 8231,
+      "paper_characters": 16462,
+      "paper_id": "2002.08795",
+      "prompt_tokens_without_system": [
+        1682,
+        1707
+      ],
+      "shard_characters": [
+        8231,
+        8231
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5960,
+        6281
+      ],
+      "example_id": "qasper-286078813136943dfafb5155ee15d2429e7601d9",
+      "fits_8192": true,
+      "midpoint": 19235,
+      "paper_characters": 38470,
+      "paper_id": "1802.06024",
+      "prompt_tokens_without_system": [
+        4237,
+        4558
+      ],
+      "shard_characters": [
+        19235,
+        19235
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5092,
+        5327
+      ],
+      "example_id": "qasper-6aa2a1e2e3666f2b2a1f282d4cbdd1ca325eb9de",
+      "fits_8192": true,
+      "midpoint": 17171,
+      "paper_characters": 34343,
+      "paper_id": "1809.00530",
+      "prompt_tokens_without_system": [
+        3369,
+        3604
+      ],
+      "shard_characters": [
+        17171,
+        17172
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4340,
+        4320
+      ],
+      "example_id": "qasper-0ba3ea93eef5660a79ea3c26c6a270eac32dfa4c",
+      "fits_8192": true,
+      "midpoint": 12522,
+      "paper_characters": 25045,
+      "paper_id": "1710.07960",
+      "prompt_tokens_without_system": [
+        2617,
+        2597
+      ],
+      "shard_characters": [
+        12522,
+        12523
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4093,
+        4272
+      ],
+      "example_id": "qasper-2ccc26e11df4eb26fcccdd1f446dc749aff5d572",
+      "fits_8192": true,
+      "midpoint": 12574,
+      "paper_characters": 25148,
+      "paper_id": "1912.03804",
+      "prompt_tokens_without_system": [
+        2370,
+        2549
+      ],
+      "shard_characters": [
+        12574,
+        12574
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4078,
+        4169
+      ],
+      "example_id": "qasper-50e80cfa84200717921840fddcf3b051a9216ad8",
+      "fits_8192": true,
+      "midpoint": 12255,
+      "paper_characters": 24510,
+      "paper_id": "1912.08960",
+      "prompt_tokens_without_system": [
+        2355,
+        2446
+      ],
+      "shard_characters": [
+        12255,
+        12255
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3013,
+        3031
+      ],
+      "example_id": "qasper-23e16c1173b7def2c5cb56053b57047c9971e3bb",
+      "fits_8192": true,
+      "midpoint": 6265,
+      "paper_characters": 12530,
+      "paper_id": "2002.11910",
+      "prompt_tokens_without_system": [
+        1290,
+        1308
+      ],
+      "shard_characters": [
+        6265,
+        6265
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3583,
+        3451
+      ],
+      "example_id": "qasper-37be0d479480211291e068d0d3823ad0c13321d3",
+      "fits_8192": true,
+      "midpoint": 8676,
+      "paper_characters": 17352,
+      "paper_id": "1909.09587",
+      "prompt_tokens_without_system": [
+        1860,
+        1728
+      ],
+      "shard_characters": [
+        8676,
+        8676
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4504,
+        4677
+      ],
+      "example_id": "qasper-7cd22ca9e107d2b13a7cc94252aaa9007976b338",
+      "fits_8192": true,
+      "midpoint": 13407,
+      "paper_characters": 26815,
+      "paper_id": "1802.07862",
+      "prompt_tokens_without_system": [
+        2781,
+        2954
+      ],
+      "shard_characters": [
+        13407,
+        13408
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5085,
+        5459
+      ],
+      "example_id": "qasper-193ee49ae0f8827a6e67388a10da59e137e7769f",
+      "fits_8192": true,
+      "midpoint": 15380,
+      "paper_characters": 30761,
+      "paper_id": "2004.01853",
+      "prompt_tokens_without_system": [
+        3362,
+        3736
+      ],
+      "shard_characters": [
+        15380,
+        15381
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3990,
+        4018
+      ],
+      "example_id": "qasper-beac555c4aea76c88f19db7cc901fa638765c250",
+      "fits_8192": true,
+      "midpoint": 11270,
+      "paper_characters": 22541,
+      "paper_id": "1710.03348",
+      "prompt_tokens_without_system": [
+        2267,
+        2295
+      ],
+      "shard_characters": [
+        11270,
+        11271
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        2880,
+        3007
+      ],
+      "example_id": "qasper-f94b53db307685d572aefad52cd55f53d23769c2",
+      "fits_8192": true,
+      "midpoint": 5898,
+      "paper_characters": 11797,
+      "paper_id": "1612.03226",
+      "prompt_tokens_without_system": [
+        1157,
+        1284
+      ],
+      "shard_characters": [
+        5898,
+        5899
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5647,
+        6168
+      ],
+      "example_id": "qasper-0ad4359e3e7e5e5f261c2668fe84c12bc762b3b8",
+      "fits_8192": true,
+      "midpoint": 16684,
+      "paper_characters": 33369,
+      "paper_id": "1809.02286",
+      "prompt_tokens_without_system": [
+        3924,
+        4445
+      ],
+      "shard_characters": [
+        16684,
+        16685
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4443,
+        4501
+      ],
+      "example_id": "qasper-4cbe5a36b492b99f9f9fea8081fe4ba10a7a0e94",
+      "fits_8192": true,
+      "midpoint": 13822,
+      "paper_characters": 27644,
+      "paper_id": "1809.01202",
+      "prompt_tokens_without_system": [
+        2720,
+        2778
+      ],
+      "shard_characters": [
+        13822,
+        13822
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3378,
+        3469
+      ],
+      "example_id": "qasper-2c7e94a65f5f532aa31d3e538dcab0468a43b264",
+      "fits_8192": true,
+      "midpoint": 7927,
+      "paper_characters": 15854,
+      "paper_id": "1909.02027",
+      "prompt_tokens_without_system": [
+        1655,
+        1746
+      ],
+      "shard_characters": [
+        7927,
+        7927
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4661,
+        4822
+      ],
+      "example_id": "qasper-23b2901264bda91045258b5d4120879ae292e950",
+      "fits_8192": true,
+      "midpoint": 12628,
+      "paper_characters": 25257,
+      "paper_id": "1911.02855",
+      "prompt_tokens_without_system": [
+        2938,
+        3099
+      ],
+      "shard_characters": [
+        12628,
+        12629
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4403,
+        4393
+      ],
+      "example_id": "qasper-28067da818e3f61f8b5152c0d42a531bf0f987d4",
+      "fits_8192": true,
+      "midpoint": 12724,
+      "paper_characters": 25449,
+      "paper_id": "1906.01081",
+      "prompt_tokens_without_system": [
+        2680,
+        2670
+      ],
+      "shard_characters": [
+        12724,
+        12725
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4080,
+        4282
+      ],
+      "example_id": "qasper-2f901dab6b757e12763b23ae8b37ae2e517a2271",
+      "fits_8192": true,
+      "midpoint": 12132,
+      "paper_characters": 24265,
+      "paper_id": "1611.01576",
+      "prompt_tokens_without_system": [
+        2357,
+        2559
+      ],
+      "shard_characters": [
+        12132,
+        12133
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        2984,
+        3049
+      ],
+      "example_id": "qasper-b1cf5739467ba90059add58d11b73d075a11ec86",
+      "fits_8192": true,
+      "midpoint": 6249,
+      "paper_characters": 12498,
+      "paper_id": "1904.09535",
+      "prompt_tokens_without_system": [
+        1261,
+        1326
+      ],
+      "shard_characters": [
+        6249,
+        6249
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3268,
+        3182
+      ],
+      "example_id": "qasper-dc1cec824507fc85ac1ba87882fe1e422ff6cffb",
+      "fits_8192": true,
+      "midpoint": 7246,
+      "paper_characters": 14492,
+      "paper_id": "1911.03059",
+      "prompt_tokens_without_system": [
+        1545,
+        1459
+      ],
+      "shard_characters": [
+        7246,
+        7246
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3310,
+        3442
+      ],
+      "example_id": "qasper-8ce11515634236165cdb06ba80b9a36a8b9099a2",
+      "fits_8192": true,
+      "midpoint": 7748,
+      "paper_characters": 15496,
+      "paper_id": "1706.08198",
+      "prompt_tokens_without_system": [
+        1587,
+        1719
+      ],
+      "shard_characters": [
+        7748,
+        7748
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4565,
+        4858
+      ],
+      "example_id": "qasper-de5b6c25e35b3a6c5e40e350fc5e52c160b33490",
+      "fits_8192": true,
+      "midpoint": 14702,
+      "paper_characters": 29405,
+      "paper_id": "1909.08089",
+      "prompt_tokens_without_system": [
+        2842,
+        3135
+      ],
+      "shard_characters": [
+        14702,
+        14703
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4009,
+        3939
+      ],
+      "example_id": "qasper-6bfba3ddca5101ed15256fca75fcdc95a53cece7",
+      "fits_8192": true,
+      "midpoint": 10318,
+      "paper_characters": 20636,
+      "paper_id": "1910.09982",
+      "prompt_tokens_without_system": [
+        2286,
+        2216
+      ],
+      "shard_characters": [
+        10318,
+        10318
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4686,
+        4710
+      ],
+      "example_id": "qasper-88e62ea7a4d1d2921624b8480b5c6b50cfa5ad42",
+      "fits_8192": true,
+      "midpoint": 14387,
+      "paper_characters": 28775,
+      "paper_id": "1609.00559",
+      "prompt_tokens_without_system": [
+        2963,
+        2987
+      ],
+      "shard_characters": [
+        14387,
+        14388
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4489,
+        4486
+      ],
+      "example_id": "qasper-784ce5a983c5f2cc95a2c60ce66f2a8a50f3636f",
+      "fits_8192": true,
+      "midpoint": 12179,
+      "paper_characters": 24358,
+      "paper_id": "1604.00727",
+      "prompt_tokens_without_system": [
+        2766,
+        2763
+      ],
+      "shard_characters": [
+        12179,
+        12179
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        5253,
+        5506
+      ],
+      "example_id": "qasper-0ee73909ac638903da4a0e5565c8571fc794ab96",
+      "fits_8192": true,
+      "midpoint": 17685,
+      "paper_characters": 35370,
+      "paper_id": "1612.02482",
+      "prompt_tokens_without_system": [
+        3530,
+        3783
+      ],
+      "shard_characters": [
+        17685,
+        17685
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4960,
+        4704
+      ],
+      "example_id": "qasper-1f07e837574519f2b696f3d6fa3230af0b931e5d",
+      "fits_8192": true,
+      "midpoint": 13633,
+      "paper_characters": 27267,
+      "paper_id": "1608.01084",
+      "prompt_tokens_without_system": [
+        3237,
+        2981
+      ],
+      "shard_characters": [
+        13633,
+        13634
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3374,
+        3455
+      ],
+      "example_id": "qasper-5a65ad10ff954d0f27bb3ccd9027e3d8f7f6bb76",
+      "fits_8192": true,
+      "midpoint": 7812,
+      "paper_characters": 15625,
+      "paper_id": "1904.10503",
+      "prompt_tokens_without_system": [
+        1651,
+        1732
+      ],
+      "shard_characters": [
+        7812,
+        7813
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3867,
+        3973
+      ],
+      "example_id": "qasper-5cc2daca2a84ddccba9cdd9449e51bb3f64b3dde",
+      "fits_8192": true,
+      "midpoint": 10530,
+      "paper_characters": 21061,
+      "paper_id": "1912.01772",
+      "prompt_tokens_without_system": [
+        2144,
+        2250
+      ],
+      "shard_characters": [
+        10530,
+        10531
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        4969,
+        5039
+      ],
+      "example_id": "qasper-6a633811019e9323dc8549ad540550d27aa6d972",
+      "fits_8192": true,
+      "midpoint": 16581,
+      "paper_characters": 33162,
+      "paper_id": "1603.01987",
+      "prompt_tokens_without_system": [
+        3246,
+        3316
+      ],
+      "shard_characters": [
+        16581,
+        16581
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        3541,
+        3666
+      ],
+      "example_id": "qasper-6b9b9e5d154cb963f6d921093539490daa5ebbae",
+      "fits_8192": true,
+      "midpoint": 7581,
+      "paper_characters": 15162,
+      "paper_id": "1908.06941",
+      "prompt_tokens_without_system": [
+        1818,
+        1943
+      ],
+      "shard_characters": [
+        7581,
+        7581
+      ],
+      "union_exact": true
+    },
+    {
+      "both_shards_nonempty": true,
+      "conservative_prompt_plus_completion_tokens": [
+        2810,
+        2906
+      ],
+      "example_id": "qasper-8acab64ba72831633e8cc174d5469afecccf3ae9",
+      "fits_8192": true,
+      "midpoint": 5078,
+      "paper_characters": 10156,
+      "paper_id": "1702.03856",
+      "prompt_tokens_without_system": [
+        1087,
+        1183
+      ],
+      "shard_characters": [
+        5078,
+        5078
+      ],
+      "union_exact": true
+    }
+  ],
+  "retired_trace": {
+    "observed_child_completion_tokens": 103,
+    "observed_empty_child_prompt_tokens": 955,
+    "observed_final_root_prompt_tokens": 2372,
+    "path": "runs/stage-d0/scaffold-support-v4-10/selected-fixture/traces.jsonl",
+    "sha256": "a665f41fc1c476c61ff6204fb179f6941cfba113ec1ca863eb34f38e367c4de4"
+  },
+  "returning_root_render_safety_buffer_tokens": 512,
+  "scaffold": {
+    "path": "configs/stage-d/stage-d0-scaffold-fewshot-v3.txt",
+    "sha256": "1d67c4bf6dc01efada3721b6026128bb56eb49704b6c4789e4057af0b1e1fea7"
+  },
+  "schema_version": 1,
+  "scope": "reference-independent CPU capacity preflight",
+  "signed_payload_sha256": "3bae2ba1d18304c7c7074ece8282ab1d301b92d354cc9439461f0df11eaa3f56"
+}
