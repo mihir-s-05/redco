@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d0-scaffold-support-v4-10-hardware-1",
+  "status": "frozen_before_the_single_v4_10_deployment",
+  "frozen_at_utc": "2026-07-31T16:57:27Z",
+  "controlling_protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v4-10.json",
+  "controlling_protocol_sha256": "3709246858a5e3d1815289f40e990c780cdefcec29cc7695536c54c80aa74b76",
+  "controlling_audit": "reports/stage-d0-scaffold-support-preregistration-audit-v4-10.json",
+  "controlling_audit_sha256": "4210e444ef7bb6e0b07a67d6f27c13f7b06683dd73727ae778171e6d2ebb7a29",
+  "controlling_audit_signature": "87ad7743eb6d445fe53eab4f565e6e42e1fb70f5fca55371bd37ab56f85fca52",
+  "scientific_commit": "40821ffffe7aeb523bbfd6fa2be9eaf3ba0fa7e9",
+  "read_only_state_before_selection": {
+    "checked_at_utc": "2026-07-31T16:54:00Z",
+    "active_pods": 0,
+    "persistent_disks": 0,
+    "wallet_exact_usd": 45.5851
+  },
+  "selected_resource": {
+    "resource_id": "03c728",
+    "cloud_id": "gpu_1x_6000_ada",
+    "gpu_type": "RTX6000Ada 48GB",
+    "gpu_count": 1,
+    "gpu_memory_gb": 48,
+    "provider": "massedcompute",
+    "location": "US",
+    "socket": "PCIe",
+    "security": "datacenter",
+    "stock_status": "Available",
+    "is_spot": null,
+    "pricing_type": "on-demand non-spot",
+    "rate_usd_per_hour": 0.75,
+    "vcpus": 12,
+    "host_memory_gb": 72,
+    "ephemeral_disk_gb": 350,
+    "selection_reason": "cheapest genuinely available qualifying non-spot 1x48GB resource"
+  },
+  "lifetime_budget": {
+    "original_support_ceiling_usd": 6.0,
+    "v4_7_plus_v4_8_spend_usd": 0.2623,
+    "v4_9_attempt_spend_usd": 0.227,
+    "total_support_spend_before_v4_10_usd": 0.4893,
+    "remaining_support_ceiling_usd": 5.5107,
+    "authorized_total_billed_pod_lifetime_seconds": 21600,
+    "authorized_total_billed_pod_lifetime_hours": 6.0,
+    "maximum_v4_10_cost_usd": 4.5,
+    "maximum_total_support_cost_usd": 4.9893,
+    "minimum_original_support_ceiling_remaining_usd": 1.0107,
+    "authorized_wrapper_timeout_seconds": 17100,
+    "non_wrapper_lifetime_reserve_seconds": 4500,
+    "termination_grace_seconds": 300,
+    "constraint": "0.75 * 21600 / 3600 + 0.227 <= 5.7377; equivalently 4.5 + 0.4893 <= 6.0",
+    "ledger_clarification": "The preregistration field cumulative_support_spend_usd=0.227 denotes the v4.9 increment against the inherited post-v4.8 cap. The full original-support ledger also includes 0.2623 from v4.7 plus v4.8, yielding 0.4893 spent and 5.5107 remaining before v4.10.",
+    "passes": true
+  },
+  "lifetime_supervisor": {
+    "script": "scripts/supervise_prime_pod_lifetime_v4_9.ps1",
+    "script_sha256": "3046b686bd5469b992dae5c401cc433920237d866893514982e22ad89beccea2",
+    "start_boundary": "immediately after pod creation returns and before SSH or transfer",
+    "created_at_source": "exact created_at returned by prime pods status",
+    "total_billed_lifetime_cap_seconds": 21600,
+    "termination_trigger_seconds_after_creation": 21300,
+    "provider_shutdown_grace_seconds": 300,
+    "poll_seconds": 30,
+    "launch_mode": "hidden independent local PowerShell process",
+    "log": "runs/stage-d0/scaffold-support-v4-10-lifetime-supervisor.log",
+    "failure_policy": "the supervisor repeatedly requests termination until an authoritative successful pod list omits the pod; any failure to confirm by the absolute cap is logged as fatal"
+  },
+  "transfer": {
+    "repository": "https://github.com/mihir-s-05/redco.git",
+    "exact_checkout": "40821ffffe7aeb523bbfd6fa2be9eaf3ba0fa7e9",
+    "order": [
+      "clone the HTTPS repository and check out the exact commit",
+      "initialize clean pinned Prime submodules over HTTPS",
+      "extract the exact byte-preserving 48-file overlay",
+      "require an empty 48-file hash failure set",
+      "copy the compressed adapter by exact hash",
+      "invoke the frozen v4.10 wrapper"
+    ],
+    "overlay": "runs/stage-d0/scaffold-support-v4-8-frozen-source-overlay.tar.gz",
+    "overlay_sha256": "634a39993a3d716a4e675d4af8c7e537e5ffc09d7104cabf4d2a3d132cb6990d",
+    "overlay_member_count": 48,
+    "adapter": "runs/stage-d0/scaffold-support-v4/selected-adapter.tar.gz",
+    "adapter_sha256": "296a7d6163d1e1a7e8800f3fb1114a9646a8aaf6e9dfbd8437ba006025745263",
+    "forbidden": [
+      "git archive as the source of frozen working-tree bytes",
+      "CUDA or uv caches",
+      "merged 4B models",
+      "optimizer state"
+    ]
+  },
+  "launch": {
+    "pod_name": "redco-stage-d-v4-10",
+    "image": "ubuntu_22_cuda_12",
+    "persistent_storage": "forbidden",
+    "ssh_key": "C:/Users/mihir/.ssh/id_rsa",
+    "ssh_must_pass_noninteractively_before_transfer": true,
+    "environment": {
+      "REDCO_V4_10_AUTHORIZED_TIMEOUT_SECONDS": "17100"
+    },
+    "runner": "scripts/run_stage_d0_scaffold_support_v4_10.sh",
+    "runner_sha256": "47ec1b43d6aeb3e6a34debc1be64b5681d6a9f059553d5d3e07073fd531bdc3a"
+  },
+  "repair_boundary": {
+    "this_is_the_only_v4_10_deployment": true,
+    "automatic_repair": "forbidden",
+    "after_first_fixture_request": "terminal for the fixture address",
+    "after_first_power_request": "terminal for the power address",
+    "successor_beyond_v4_10": "requires explicit user authorization and a new preregistration"
+  },
+  "unchanged_fields": "all model, adapter, prompt, fixture, power, seed, sampling, replay, threshold, arm, metric, and future scientific fields",
+  "teardown": "always recover artifacts, terminate compute, confirm zero active pods and zero persistent disks, and record exact billing"
+}
