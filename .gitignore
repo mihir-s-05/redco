@@ -13,3 +13,4 @@ __pycache__/
 .redco/
 runs/**
 !runs/README.md
+/reports/**/*.md
