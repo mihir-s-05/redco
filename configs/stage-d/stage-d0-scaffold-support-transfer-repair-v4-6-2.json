@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d0-scaffold-support-v4-6-2-transfer-repair",
+  "status": "frozen_after_attempt_1_termination_before_redeployment",
+  "controlling_protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v4-6.json",
+  "controlling_protocol_sha256": "320c119ad7348f9197ae107416a8aecfedfceb538eecadb4ae005fd791f366cf",
+  "hardware_amendment_attempt_1": "configs/stage-d/stage-d0-scaffold-support-hardware-amendment-v4-6-1.json",
+  "hardware_amendment_attempt_1_sha256": "561ba71fd007e60a33760e2c04d8aea7c0eb589c3292f72d05f0b2063c6e0642",
+  "attempt_1": {
+    "pod_id": "d9a78754df1549f8baacd0cc576a2339",
+    "resource": "03c728 / RTX6000Ada 48GB / massedcompute / US / 0.75 USD per hour",
+    "terminated": true,
+    "persistent_disks_after_termination": 0,
+    "cost_usd": 0.1484,
+    "wallet_after_termination_usd": 46.2492,
+    "launcher_log": "runs/stage-d0/scaffold-support-v4-6-attempt-1/launcher.log",
+    "launcher_log_sha256": "26074d3b97664d38b022197cb9e27aa19e465d688129db9c283b19035820c070",
+    "selected_fixture_model_calls": 0,
+    "power_audit_model_calls": 0,
+    "scientific_arm_outcomes": 0,
+    "canonical_retention_score_payloads": 0,
+    "failure": "The sparse transfer copied the locally patched Verifiers worktree. The frozen preparation script cloned that transferred source and attempted to apply the same structural-trace patch, so git apply stopped on already-patched files."
+  },
+  "classification": {
+    "outcome_independent": true,
+    "before_any_candidate_score_or_unobserved_address": true,
+    "eligible_under_bounded_repair_rule": true,
+    "scientific_information_observed": false
+  },
+  "repair": {
+    "runner_changes": "none",
+    "scientific_source_changes": "none",
+    "adapter_changes": "none",
+    "clean_verifiers_commit": "b13ba60da63cea91389e7575766b7270d0d11fc5",
+    "clean_verifiers_archive_rule": "Create the transferred Verifiers tree with git archive from exactly the clean commit, not from the patched working tree.",
+    "clean_source_sha256": {
+      "verifiers/v1/interception/server.py": "179b117e04910c179605d88cc81260dc567aaf5be385fd7bced15ecd56411ee0",
+      "verifiers/v1/trace.py": "0a756de2539fcb310ea1722ffd7490aa1630c58efb4eefcefff14b355153671b"
+    },
+    "runtime_rule": "Initialize the transferred clean tree as a local Git repository. The unchanged frozen runner must then apply patches/verifiers-rlm-structural-trace.patch exactly once and pass its existing import preflight.",
+    "prelaunch_check": "On the new pod, verify both clean source hashes before launching the runner.",
+    "no_prepatched_transfer": true
+  },
+  "redeployment_rule": {
+    "maximum_additional_deployments": 1,
+    "this_consumes_the_v4_6_bounded_repair": true,
+    "no_further_environment_repair_or_redeployment": true,
+    "support_rerun_forbidden": true,
+    "sft_rerun_forbidden": true,
+    "observed_fixture_or_power_address_rerun_forbidden": true,
+    "canonical_retention_failure_is_terminal": true
+  },
+  "unchanged_fields": [
+    "retained adapter archive and every tensor hash",
+    "base model and revision",
+    "shared scaffold",
+    "canonical retention cases and exact-byte rule",
+    "selected fixture address",
+    "64-paper power block",
+    "K=4",
+    "minimum F1 range 0.05",
+    "58-of-64 joint threshold",
+    "six-hour timeout",
+    "budget ceiling",
+    "scientific metrics and future arms"
+  ]
+}
