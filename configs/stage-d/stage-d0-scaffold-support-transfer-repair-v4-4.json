@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d0-scaffold-support-v4-4-transfer-repair",
+  "status": "frozen_after_outcome_independent_pre_model_failure",
+  "scientific_commit": "7c3b718",
+  "hardware_commit": "d31d731",
+  "pod_id": "6bf9ef3733f648b8bb21adc98da62ad2",
+  "observed_at_utc": "2026-07-31T04:56:41.4759186Z",
+  "failure": {
+    "stage": "effective source hash verification before model download or model-server launch",
+    "message": "frozen hash mismatch: datasets/stage-d/qasper-scaffold-successor-manifest-v4.json: f1ccc0a8645d8c841da5c5a32e09635d940b7865e919418fab28f9c0f280603a != edc43d0a001b8842229f605d563f742e45b862b34db773403a4d7ba96e672f7d",
+    "cause": "git archive emitted repository-normalized LF blob bytes while the frozen source hashes describe the exact Windows working-tree bytes",
+    "model_calls": 0,
+    "optimizer_steps": 0,
+    "candidate_score_payloads": 0,
+    "scientific_arm_outcomes": 0,
+    "gpu_memory_mib": 2,
+    "created_environment_mib": 93,
+    "billing_to_observation_usd": 0.026
+  },
+  "bounded_repair": {
+    "same_pod": true,
+    "source_or_scientific_change": false,
+    "operation": "Overlay only the exact frozen non-Prime paths from the local working tree, preserving their bytes; retain the clean pinned remote Prime checkout and apply the already-frozen v2 Prime patch.",
+    "pre_retry_gate": "Recompute and require every effective v4 plus v4.1 plus v4.2 source hash on the pod before restarting the runner.",
+    "run_directory": "Delete only the failed empty/preflight run directory before the one repaired restart.",
+    "retry_limit": "one repaired restart after this zero-information failure"
+  },
+  "state": {
+    "active_pods": 1,
+    "persistent_disks": 0,
+    "wallet_usd": 46.9139
+  },
+  "unchanged_fields": "all protocol, corpus, seed, initialization, sampling, SFT, eligibility, informativeness, threshold, budget-envelope, and future-science fields",
+  "disposition": "Repair the byte-preserving transfer on the existing pod. If the complete pre-retry hash gate fails or any model call occurred, terminate without retry."
+}
