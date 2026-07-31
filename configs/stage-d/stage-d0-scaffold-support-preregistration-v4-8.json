@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d0-scaffold-support-v4-8",
+  "status": "frozen_before_any_v4_8_model_request",
+  "purpose": "Execute the still-unobserved Stage D fixture and power block through the byte-identical v4.7 scientific runner after moving every uv and XDG runtime path beneath the writable repository and positively probing every absolute runtime path.",
+  "history": {
+    "parent_protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v4-7.json",
+    "parent_protocol_sha256": "e4ba378f1db5c2f61f8e170f598c3c256a8704ca7530ee61922492a2c72b96ab",
+    "parent_audit": "reports/stage-d0-scaffold-support-preregistration-audit-v4-7.json",
+    "parent_audit_sha256": "04fdd854dc5fa291aa562111836a8ef8785640eab7312df8f0fc0b8da22b34db",
+    "parent_terminal_report": "reports/stage-d0-scaffold-support-v4-7-terminal-2026-07-31.json",
+    "parent_terminal_report_sha256": "e9e6b93ab183abf0eec48d53d11362385e465e1143281db58e401e607f80d0da",
+    "parent_terminal_report_signature": "e904e9ad32f78036c7d1bf15870e3284fcdc191f7766b9eff3475a0baaff043c",
+    "parent_fixture_model_calls": 0,
+    "parent_power_model_calls": 0,
+    "parent_scientific_model_calls": 0,
+    "parent_cost_usd": 0.1411,
+    "justification": "Both v4.7 deployments terminated before the production loader and before any model request because the provider mounted /workspace as root-owned. The failures produced no fixture, power, or scientific information. v4.8 is a distinct environment-only successor under the user-approved outcome-independent repair policy; it does not restart v4.7."
+  },
+  "claims": {
+    "can_establish": [
+      "every absolute runtime path required before a model request is writable by the unprivileged launch user",
+      "the exact v4.7 fixed initialization yields enough exact fixed-topology, reward-informative child-output targets to justify a separately preregistered scientific campaign"
+    ],
+    "cannot_establish": [
+      "a Stage D learning benefit",
+      "a local-versus-branch-global benefit",
+      "an end-to-end Stage D reward improvement",
+      "cross-hardware numerical equality"
+    ]
+  },
+  "scientific_inheritance": {
+    "policy": "byte-identical through the inherited v4.7 runner",
+    "fixture_dataset": "datasets/stage-d/evidence-selection-fixture-v2.jsonl",
+    "fixture_master_seed": "redco-stage-d0-selected-fixture-v4",
+    "fixture_replay_master_seed": "redco-stage-d0-selected-fixture-replay-v4",
+    "power_dataset": "datasets/stage-d/qasper-scaffold-successor-v4.jsonl",
+    "power_master_seed": "redco-stage-d0-power-audit-v4",
+    "power_replay_master_seed": "redco-stage-d0-power-replay-v4",
+    "power_papers": 64,
+    "K_including_regenerated_original": 4,
+    "minimum_f1_range": 0.05,
+    "joint_pass_rule": "at least 58 of 64 unique papers are both eligible and informative",
+    "unchanged_fields": [
+      "base model and revision",
+      "selected adapter bytes",
+      "shared few-shot scaffold bytes",
+      "inference configuration",
+      "fixture and power datasets",
+      "fixture and power addresses and seeds",
+      "sampling and replay rules",
+      "target selector",
+      "denominators",
+      "support thresholds",
+      "future scientific arms and metrics"
+    ]
+  },
+  "runtime": {
+    "wrapper": "scripts/run_stage_d0_scaffold_support_v4_8.sh",
+    "path_preflight": "scripts/preflight_stage_d_runtime_paths_v4_8.sh",
+    "inherited_runner": "scripts/run_stage_d0_scaffold_support_v4_7.sh",
+    "inherited_runner_sha256": "cdc470b0044349cab5c60abf04245e6322797f6547c46b29c1a97851109accd8",
+    "launch_user": "ubuntu",
+    "repository": "/workspace/redco",
+    "run_root": "runs/stage-d0/scaffold-support-v4-8",
+    "uv_environment": "/workspace/redco/.runtime/stage-d-v4-8/prime-env",
+    "uv_cache": "/workspace/redco/.runtime/stage-d-v4-8/uv-cache",
+    "xdg_config": "/workspace/redco/.runtime-config",
+    "minimum_free_kib": 47185920,
+    "exact_writable_paths": [
+      "/workspace/redco",
+      "/workspace/redco/runs/stage-d0",
+      "/workspace/redco/.runtime/stage-d-v4-8",
+      "/workspace/redco/.runtime/stage-d-v4-8/prime-env",
+      "/workspace/redco/.runtime/stage-d-v4-8/uv-cache",
+      "/workspace/redco/.runtime-config",
+      "/workspace/models",
+      "/workspace/.cache",
+      "/workspace/.cache/huggingface",
+      "/home/ubuntu/.local/uv-latest",
+      "/tmp"
+    ],
+    "exact_writable_file": "/workspace/evidence_context.txt",
+    "probe_contract": "Before invoking the inherited runner, create and remove a unique directory as ubuntu inside every exact directory, write/read/truncate the exact evidence context file, require at least 45 GiB free on both /workspace/redco and /tmp, and retain the tabular report.",
+    "root_owned_bootstrap": "The wrapper may use noninteractive sudo only to create and chown /workspace/models, /workspace/.cache, and /workspace/.cache/huggingface and to install an empty ubuntu-owned /workspace/evidence_context.txt before the unprivileged probes.",
+    "dependency_policy": "uv only; pip is forbidden"
+  },
+  "request_boundaries": {
+    "fixture": "The inherited runner writes FIXTURE_REQUESTS_STARTED immediately before its first live fixture command.",
+    "power": "The inherited runner writes POWER_REQUESTS_STARTED immediately before its first live power command.",
+    "address_reuse_justification": "Every v4.7 request count is cryptographically recorded as zero; no fixture or power output exists.",
+    "after_first_fixture_request": "Never reuse the fixture address.",
+    "after_first_power_request": "Never reuse any power address."
+  },
+  "repair_policy": {
+    "eligible_boundary": "Only a demonstrated outcome-independent environment or deployment failure before the first fixture request.",
+    "maximum_outcome_independent_redeployments": 1,
+    "required_before_redeployment": [
+      "recover all available artifacts",
+      "terminate the pod and confirm zero persistent disks",
+      "record exact billing and failure evidence",
+      "commit a bounded repair that changes no scientific field",
+      "adversarially review the repair"
+    ],
+    "after_fixture_request_started": "terminal for the fixture address; no silent retry or same-address reuse",
+    "after_power_request_started": "terminal for the power block; no silent retry or same-address reuse",
+    "frozen_science_changes": "forbidden",
+    "support_sft_and_retention_reruns": "forbidden"
+  },
+  "budget": {
+    "wallet_verified_after_top_up_usd": 45.9333,
+    "original_support_ceiling_usd": 6.0,
+    "prior_support_spend_usd": 0.1411,
+    "remaining_support_ceiling_usd": 5.8589,
+    "cumulative_v4_8_cap_usd": 5.8589,
+    "scientific_training_reserved_ceiling_usd": 31.817874,
+    "science_evaluation_reserved_usd": 2.0,
+    "untouchable_reserve_usd": 4.0,
+    "remaining_full_envelope_usd": 43.676774,
+    "headroom_usd": 2.256526,
+    "support_hardware_maximum_rate_usd_per_hour": 1.0,
+    "support_supervisor_timeout_maximum_hours": 6,
+    "hardware_amendment_rule": "rate_usd_per_hour * authorized_timeout_seconds / 3600 + cumulative_v4_8_spend_usd must be no greater than cumulative_v4_8_cap_usd",
+    "redeployment_budget_rule": "the repair inherits the depleted cumulative cap; it never resets",
+    "abort_if_wallet_cannot_cover_remaining_envelope": true
+  },
+  "hardware": {
+    "allowed": [
+      "non-spot 1x48GB A40",
+      "non-spot 1x48GB A6000",
+      "non-spot 1x48GB L40",
+      "non-spot 1x48GB L40S",
+      "non-spot 1x48GB RTX 6000 Ada"
+    ],
+    "maximum_rate_usd_per_hour": 1.0,
+    "forbidden": [
+      "A100",
+      "H100",
+      "spot or preemptible compute",
+      "persistent storage"
+    ],
+    "selection": "cheapest genuinely available qualifying resource after a committed hardware-only amendment",
+    "pods": "at most one; resume a single exact v4.8 pod rather than create a duplicate",
+    "ssh": "verify noninteractively with C:/Users/mihir/.ssh/id_rsa before sync or model work"
+  },
+  "authorization": {
+    "fixture_and_power_model_calls": "authorized only after every frozen preflight passes",
+    "scientific_training_model_calls": 0,
+    "next_if_power_passes": "terminate support compute, recover and verify artifacts, then separately freeze and adversarially audit the three-arm scientific campaign before any scientific model call",
+    "next_if_power_fails": "stop Stage D initialization engineering as already preregistered"
+  },
+  "artifact_policy": {
+    "always_local": [
+      "runtime-path preflight report",
+      "all inherited v4.7 fixture and power artifacts",
+      "request-boundary sentinels",
+      "control and GPU ledgers",
+      "hash manifests",
+      "billing and terminal report"
+    ],
+    "retained_model_artifact": "the already-local compressed step-8 adapter only",
+    "never_local": [
+      "merged 4B models",
+      "duplicate extracted adapters",
+      "optimizer state",
+      "CUDA or uv caches"
+    ],
+    "teardown": "always terminate compute and confirm zero persistent disks"
+  },
+  "source_sha256": {
+    "scripts/preflight_stage_d_runtime_paths_v4_8.sh": "0f9efad1514669735a5026076e25a72a067439641b2991763dca8a3a9f947a10",
+    "scripts/run_stage_d0_scaffold_support_v4_8.sh": "9c7aa61983597f43a681d76e0818de27a5d2912b6a4cb047c459836e16890520",
+    "scripts/run_stage_d0_scaffold_support_v4_7.sh": "cdc470b0044349cab5c60abf04245e6322797f6547c46b29c1a97851109accd8",
+    "scripts/audit_stage_d0_scaffold_support_preregistration_v4_8.py": "1d23e65c18e661a2ccd0db216e23efaf1d988799a48ba142effe488e73989bdd",
+    "configs/stage-d/stage-d0-scaffold-support-preregistration-v4-7.json": "e4ba378f1db5c2f61f8e170f598c3c256a8704ca7530ee61922492a2c72b96ab",
+    "reports/stage-d0-scaffold-support-preregistration-audit-v4-7.json": "04fdd854dc5fa291aa562111836a8ef8785640eab7312df8f0fc0b8da22b34db",
+    "reports/stage-d0-scaffold-support-v4-7-terminal-2026-07-31.json": "e9e6b93ab183abf0eec48d53d11362385e465e1143281db58e401e607f80d0da"
+  }
+}
