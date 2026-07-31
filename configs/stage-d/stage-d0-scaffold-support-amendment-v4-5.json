@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d0-scaffold-support-v4-5-flash-attn-activation-repair",
+  "status": "frozen_after_outcome_independent_pre_model_failure",
+  "base_protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v4.json",
+  "base_protocol_sha256": "fddc5e1b93036a1540a3f96f40aa63196b2a51e094aed03de2bf756e9e657aac",
+  "amendment_v4_1": "configs/stage-d/stage-d0-scaffold-support-amendment-v4-1.json",
+  "amendment_v4_1_sha256": "3f97d16fbb2ed504760c40f7ce3fb3dc773cc1246cf5656cb975674fdc60aa0b",
+  "amendment_v4_2": "configs/stage-d/stage-d0-scaffold-support-amendment-v4-2.json",
+  "amendment_v4_2_sha256": "a6638ee8105a58e7ea2f6c0be79de473e9b6c15e026393d5223e60e9e7241435",
+  "audit_v4_2": "reports/stage-d0-scaffold-support-preregistration-audit-v4-2.json",
+  "audit_v4_2_sha256": "ab32f01342caf8647afec6d0a6ba3116ed726525b18d0d56d22a4f624cfc2fe8",
+  "hardware_amendment": "configs/stage-d/stage-d0-scaffold-support-hardware-amendment-v4-3.json",
+  "hardware_amendment_sha256": "34da673e1f8b66d995ccb1f2f8dfa932051883f55d07e0f310a81369dd9bba70",
+  "transfer_repair": "configs/stage-d/stage-d0-scaffold-support-transfer-repair-v4-4.json",
+  "transfer_repair_sha256": "7fbe58530d2a8f9633615352ad5934daac794258e3c384bbdadf420b527aadfa",
+  "reason": "The byte-preserving repaired runner reached the frozen renderer audit, where importing the pinned Prime training stack failed because that preflight uv command did not activate the flash-attn dependency extra already frozen on the actual SFT command. The SFT dry-run used the same import path and also lacked the extra. The failure occurred before model-server launch, any model call, any optimizer step, any candidate score payload, or any scientific-arm outcome.",
+  "preobservation_evidence": {
+    "observed_at_utc": "2026-07-31T05:06:09.1392821Z",
+    "pod_id": "6bf9ef3733f648b8bb21adc98da62ad2",
+    "pod_name": "redco-stage-d0-scaffold-support-v4",
+    "gpu": "RTX6000Ada_48GB x1",
+    "gpu_memory_mib": 2,
+    "model_server_started": false,
+    "model_calls": 0,
+    "optimizer_steps": 0,
+    "candidate_score_payloads": 0,
+    "scientific_arm_outcomes": 0,
+    "persistent_disks": 0,
+    "wallet_usd": 46.8389,
+    "pod_billing_usd_at_observation": 0.101,
+    "recovered_logs": {
+      "runs/stage-d0/scaffold-support-v4/preflight-attempts/attempt-1-hash-transfer.log": "5f122d286918d7b32cba0920ec9e53c0b700868d13f686a6f1678043917b37fc",
+      "runs/stage-d0/scaffold-support-v4/preflight-attempts/attempt-2-flash-attn.log": "1defceaf07fefb885a7a9e055b1dcb23e822abd36711ac02b728c074b6a2e66c"
+    }
+  },
+  "failure": {
+    "stage": "renderer audit preflight",
+    "exception": "ModuleNotFoundError: No module named 'flash_attn'",
+    "cause": "The renderer audit and SFT dry-run invoked the pinned Prime project without the flash-attn optional dependency group, while the actual SFT command already activated that frozen group.",
+    "classification": "outcome-independent environment dependency activation failure"
+  },
+  "repair": {
+    "dependency_extra": "flash-attn",
+    "commands_changed": [
+      "renderer audit preflight",
+      "SFT launcher dry-run preflight"
+    ],
+    "actual_sft_command_changed": false,
+    "operation": "Activate the same pinned Prime flash-attn uv extra on both preflight commands. Keep the existing pod, environment, cache, corpus, source, model, and all scientific settings unchanged.",
+    "pre_restart_gate": "Run the signed v4.5 aggregate audit locally, copy the exact repaired bytes, verify every effective source hash remotely, and directly import prime_rl.trainer.model using uv with the flash-attn extra before restarting the frozen runner.",
+    "retry_scope": "One explicit restart on the same pod after this demonstrated zero-information dependency activation failure."
+  },
+  "scientific_changes": [],
+  "unchanged_fields": [
+    "dataset partitions and corpus bytes",
+    "initialization and SFT optimizer",
+    "sampling and seed rules",
+    "candidate order and selection rule",
+    "eligibility and informativeness definitions",
+    "58-of-64 joint support threshold",
+    "future scientific arms, outcomes, and budget envelope"
+  ],
+  "source_sha256_replacements": {
+    "scripts/run_stage_d0_scaffold_support_v4.sh": "d37336d6c06857691fb1676effeeb9cfd310cdb878acfec981a2c097dfe6844f",
+    "tests/test_stage_d_support_preregistration_v4.py": "4ceed70b34137f9e1d40b1492ffd41e5733374393b1ddd27660c3b5fbe9d7e92"
+  },
+  "source_sha256_additions": {
+    "scripts/audit_stage_d0_scaffold_support_amendment_v4_5.py": "2f441e18fb5d4986504c3194b98abbf7698c71a1c3ed0c3deb2bd7238b978d54"
+  },
+  "execution_rule": "Do not silently retry. Proceed only if the signed aggregate audit, complete remote effective-source hash gate, and direct flash-attn import gate all pass. Any subsequent scientific observation terminates repair eligibility."
+}

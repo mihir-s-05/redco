@@ -4,14 +4,14 @@ import importlib.util
 from pathlib import Path
 
 
-def test_stage_d_v4_2_preregistration_audit_passes() -> None:
+def test_stage_d_v4_5_preregistration_audit_passes() -> None:
     root = Path(__file__).parents[1]
     script = (
         root
         / "scripts"
-        / "audit_stage_d0_scaffold_support_amendment_v4_2.py"
+        / "audit_stage_d0_scaffold_support_amendment_v4_5.py"
     )
-    spec = importlib.util.spec_from_file_location("stage_d_v4_2_audit", script)
+    spec = importlib.util.spec_from_file_location("stage_d_v4_5_audit", script)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -33,15 +33,16 @@ def test_stage_d_v4_2_preregistration_audit_passes() -> None:
         / "stage-d"
         / "stage-d0-scaffold-support-amendment-v4-2.json"
     )
-    audit_v4 = (
+    amendment_v4_5 = (
         root
-        / "reports"
-        / "stage-d0-scaffold-support-preregistration-audit-v4.json"
+        / "configs"
+        / "stage-d"
+        / "stage-d0-scaffold-support-amendment-v4-5.json"
     )
-    audit_v4_1 = (
+    audit_v4_2 = (
         root
         / "reports"
-        / "stage-d0-scaffold-support-preregistration-audit-v4-1.json"
+        / "stage-d0-scaffold-support-preregistration-audit-v4-2.json"
     )
     patch_audit = (
         root
@@ -53,8 +54,8 @@ def test_stage_d_v4_2_preregistration_audit_passes() -> None:
         protocol,
         amendment_v4_1,
         amendment_v4_2,
-        audit_v4,
-        audit_v4_1,
+        amendment_v4_5,
+        audit_v4_2,
         patch_audit,
     )
     assert report["passes"], {

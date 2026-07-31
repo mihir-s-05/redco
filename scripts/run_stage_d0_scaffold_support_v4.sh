@@ -18,6 +18,7 @@ sft_train_config="configs/stage-d/stage-d0-scaffold-sft-v4.toml"
 protocol="configs/stage-d/stage-d0-scaffold-support-preregistration-v4.json"
 amendment_v4_1="configs/stage-d/stage-d0-scaffold-support-amendment-v4-1.json"
 amendment_v4_2="configs/stage-d/stage-d0-scaffold-support-amendment-v4-2.json"
+amendment_v4_5="configs/stage-d/stage-d0-scaffold-support-amendment-v4-5.json"
 dataset="datasets/stage-d/qasper-scaffold-successor-v4.jsonl"
 dataset_sha256="2ed4c2afc74b1a979558ada3899b008fcc1b259c5678b3a5ef1f7070aa4fb932"
 fixture_dataset="datasets/stage-d/evidence-selection-fixture-v1.jsonl"
@@ -65,6 +66,7 @@ test -f "$sft_train_config"
 test -f "$protocol"
 test -f "$amendment_v4_1"
 test -f "$amendment_v4_2"
+test -f "$amendment_v4_5"
 
 if git -C external/prime-rl apply --check \
   "$repo_root/patches/prime-rl-stage-d-sft-runtime-v2.patch"; then
@@ -76,7 +78,8 @@ else
 fi
 
 "$uv_bin" run --frozen python - \
-  "$protocol" "$amendment_v4_1" "$amendment_v4_2" <<'PY'
+  "$protocol" "$amendment_v4_1" "$amendment_v4_2" \
+  "$amendment_v4_5" <<'PY'
 import hashlib
 import json
 import pathlib
@@ -120,11 +123,13 @@ REDCO_PRIME_STRICT_ENV_GUARD=1 \
   bash scripts/run_rlm_structural_trace_audit.sh
 
 "$uv_bin" run --frozen --project external/prime-rl \
+  --extra flash-attn \
   python scripts/audit_stage_d_sft_renderer_v4.py \
   --config "$sft_train_config" \
   --output "$run_root/sft-renderer-preflight.json"
 
 "$uv_bin" run --frozen --project external/prime-rl \
+  --extra flash-attn \
   sft @ "$sft_train_config" --dry-run \
   >"$run_root/sft-launcher-dry-run.log" 2>&1
 rm -rf "$sft_dir"
