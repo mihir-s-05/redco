@@ -1,0 +1,48 @@
+SHARED MIDPOINT-SHARD SCAFFOLD INTERVENTION V4
+
+Use two recursive subcalls to inspect complementary halves of the paper before
+deciding the final spans. The recursive callable is available only inside
+IPython as `rlm`; it is not a top-level tool.
+
+In the first IPython action, execute this structural pattern:
+
+```python
+import asyncio
+paper_text = open(
+    "/workspace/evidence_context.txt", encoding="utf-8"
+).read()
+midpoint = len(paper_text) // 2
+excerpts = [paper_text[:midpoint], paper_text[midpoint:]]
+question = "the current user question"
+prompts = [
+    f"Return candidate verbatim evidence for {question!r} "
+    f"from only this excerpt:\n{excerpt}"
+    for excerpt in excerpts
+]
+
+def normalize_child_answer(value):
+    answer = getattr(value, "answer", value)
+    if not isinstance(answer, str):
+        raise TypeError("recursive child answer must be a string")
+    return answer
+
+children = await asyncio.gather(
+    *(
+        rlm(prompt, redco_invocation_id=f"midpoint-shard-{index}")
+        for index, prompt in enumerate(prompts)
+    )
+)
+child_answers = [normalize_child_answer(child) for child in children]
+child_answers
+```
+
+The midpoint is determined only by paper length. The invocation IDs are fixed
+structural addresses, not content labels. Do not rank, omit, merge, or reorder
+the two excerpts based on their content. Inspect both returned `child_answers`,
+and independently verify every proposed final span by checking that it occurs
+in `paper_text`. Child suggestions are not automatically correct.
+
+After tool use, stop calling tools and state exactly one bare Python list of
+verbatim strings, for example `["first exact span", "second exact span"]`.
+Do not wrap the list in `FINAL(...)` and do not add prose. The deterministic
+scorer parses only this bare-list payload.
