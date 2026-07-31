@@ -1,0 +1,22 @@
+{
+  "analysis": "stage-d-synthetic-scaffold-sft-audit",
+  "checks": {
+    "all_final_payloads_are_nonempty_bare_lists": true,
+    "all_rows_have_exact_ipython_rlm_structure": true,
+    "classification_is_honest": true,
+    "example_count_is_32_and_at_most_50": true,
+    "fixed_final_checkpoint_selection": true,
+    "manifest_dataset_hash_matches": true,
+    "no_qasper_paper_ids": true,
+    "no_qasper_reference_spans": true,
+    "no_reward_or_advantage_fields": true,
+    "synthetic_ids_are_unique": true
+  },
+  "claim": "Shared synthetic scaffold-and-task SFT only. It teaches IPython child invocation and exact-evidence workflow but contains no QASPER papers or reference spans.",
+  "dataset_sha256": "d3ab59cdc9f622e501cc0921407c1929e0d9f5d08230cda7e9cfe843638e388f",
+  "examples": 32,
+  "manifest_sha256": "9697b48eaf1b420101f87a69a604800085b604a7bc01756670b58b0c7fadf4c7",
+  "passes": true,
+  "schema_version": 1,
+  "signed_payload_sha256": "edfb5d4c695d0215ecbaff4f19ea5a13ad4892af1a718d5ca1de690ebd1c1dfc"
+}

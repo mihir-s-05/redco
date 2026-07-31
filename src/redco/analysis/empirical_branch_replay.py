@@ -485,6 +485,7 @@ def run_empirical_replay(
     candidate_max_tokens: int,
     continuation_max_tokens: int,
     minimum_distinct_candidate_fraction: float = 1.0,
+    maximum_targets: int | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> EmpiricalReplayReport:
     if alternatives_per_target < 1:
@@ -493,6 +494,8 @@ def run_empirical_replay(
         raise ValueError(
             "minimum_distinct_candidate_fraction must be in (0, 1]"
         )
+    if maximum_targets is not None and maximum_targets < 1:
+        raise ValueError("maximum_targets must be positive when provided")
     source_sha = hashlib.sha256(trace_path.read_bytes()).hexdigest()
     audit = audit_trace_file(trace_path)
     provenance = import_trace_file(trace_path)
@@ -518,6 +521,10 @@ def run_empirical_replay(
     target_calls = [call for call in calls if call.agent_depth == 1]
     if not target_calls:
         raise ValueError("trace has no recursive subcall targets")
+    if maximum_targets is not None:
+        # Structural, pre-action selector: the first depth-one call in the
+        # native call table. No action tokens, rewards, or content are read.
+        target_calls = target_calls[:maximum_targets]
 
     raw_trace = native_traces[0]
     nodes = _object_list(raw_trace.get("nodes"), "trace.nodes")
@@ -1066,6 +1073,14 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--expected-source-sha256", required=True)
     parser.add_argument("--alternatives-per-target", type=int, default=3)
+    parser.add_argument(
+        "--maximum-targets",
+        type=int,
+        help=(
+            "Structurally select at most this many depth-one targets in native "
+            "call order. Stage D uses 1."
+        ),
+    )
     parser.add_argument("--master-seed", default="redco-stage-b-replay-v1")
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--candidate-max-tokens", type=int, default=192)
@@ -1116,6 +1131,7 @@ def main() -> int:
         minimum_distinct_candidate_fraction=(
             args.minimum_distinct_candidate_fraction
         ),
+        maximum_targets=args.maximum_targets,
         progress_callback=progress,
     )
     payload = report.signed_dict()

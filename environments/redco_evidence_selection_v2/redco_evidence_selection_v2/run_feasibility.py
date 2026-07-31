@@ -203,7 +203,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--dataset-sha256", default=DEFAULT_DATASET_SHA256)
-    parser.add_argument("--split", choices=("train", "validation"), default="train")
+    parser.add_argument(
+        "--split",
+        choices=(
+            "train",
+            "validation",
+            "fewshot_support",
+            "power_audit",
+            "science_train",
+            "science_eval",
+        ),
+        default="train",
+    )
     parser.add_argument(
         "--prompt-profile",
         choices=("natural", "forced_trace_fixture", "fewshot_scaffold_v2"),

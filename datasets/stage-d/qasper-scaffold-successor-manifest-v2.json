@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "source": {
+    "path": "datasets/stage-d/qasper-deterministic-v2.jsonl",
+    "sha256": "de84fda40c43fa7f977e063130f3f60fbcf05f625f947d941f3b6c0a80cbd347"
+  },
+  "partition_rule": "Preserve frozen source order: train[0:8] fewshot_support, train[8:16] power_audit, train[16:32] science_train, and all validation rows science_eval.",
+  "replication": {
+    "fewshot_support": {
+      "papers": 8,
+      "episode_seeds_per_paper": 8,
+      "rollouts": 64
+    },
+    "power_audit": {
+      "papers": 8,
+      "episode_seeds_per_paper": 8,
+      "rollouts": 64
+    },
+    "science_train": {
+      "papers": 16,
+      "role": "scientific optimizer data only"
+    },
+    "science_eval": {
+      "papers": 32,
+      "role": "held-out scientific evaluation only"
+    }
+  },
+  "partitions": {
+    "fewshot_support": {
+      "examples": 8,
+      "paper_ids": [
+        "1705.09665",
+        "1805.02400",
+        "1811.00942",
+        "1907.05664",
+        "1908.06606",
+        "1909.00694",
+        "1910.14497",
+        "2003.07723"
+      ],
+      "answer_types": {
+        "abstractive": 2,
+        "extractive": 4,
+        "yes_no": 2
+      }
+    },
+    "power_audit": {
+      "examples": 8,
+      "paper_ids": [
+        "1810.04528",
+        "1904.09678",
+        "1910.04269",
+        "1912.02481",
+        "2002.02224",
+        "2003.06651",
+        "2003.07433",
+        "2003.12218"
+      ],
+      "answer_types": {
+        "abstractive": 1,
+        "extractive": 3,
+        "yes_no": 4
+      }
+    },
+    "science_train": {
+      "examples": 16,
+      "paper_ids": [
+        "1707.00995",
+        "1708.05873",
+        "1712.09127",
+        "1809.04960",
+        "1809.08731",
+        "1810.05320",
+        "1906.00378",
+        "1909.08402",
+        "1909.09491",
+        "1909.11189",
+        "1910.03042",
+        "1912.13072",
+        "2001.00137",
+        "2002.06644",
+        "2003.08529",
+        "2003.08553"
+      ],
+      "answer_types": {
+        "abstractive": 1,
+        "extractive": 12,
+        "yes_no": 3
+      }
+    },
+    "science_eval": {
+      "examples": 32,
+      "paper_ids": [
+        "1603.09631",
+        "1604.05372",
+        "1605.06083",
+        "1609.00425",
+        "1611.04798",
+        "1612.06685",
+        "1704.06194",
+        "1708.01464",
+        "1801.05147",
+        "1804.05918",
+        "1808.09111",
+        "1809.00540",
+        "1809.01541",
+        "1809.04267",
+        "1809.09194",
+        "1810.08699",
+        "1811.00383",
+        "1901.05287",
+        "1906.08593",
+        "1909.00512",
+        "1909.09067",
+        "1909.11687",
+        "1910.10781",
+        "1911.06964",
+        "1912.01214",
+        "1912.04961",
+        "1912.13337",
+        "2001.02284",
+        "2002.01664",
+        "2002.03407",
+        "2003.03106",
+        "2004.03354"
+      ],
+      "answer_types": {
+        "abstractive": 8,
+        "extractive": 17,
+        "yes_no": 7
+      }
+    }
+  },
+  "checks": {
+    "partition_sizes_exact": true,
+    "paper_ids_pairwise_disjoint": true,
+    "all_papers_unique": true,
+    "support_blocks_cover_all_answer_types": true
+  },
+  "output": {
+    "path": "datasets/stage-d/qasper-scaffold-successor-v2.jsonl",
+    "bytes": 1593688,
+    "sha256": "fbe3edb17aeaafb0e4326d5aaf83d898cfacb1490c5ee24b14468bffd0eaed80"
+  },
+  "passes": true
+}
