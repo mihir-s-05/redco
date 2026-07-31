@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "analysis": "stage-d-runtime-code-review-v1",
+  "policy": "configs/pre-gpu-runtime-review-policy-v1.json",
+  "policy_sha256": "bc74effd2793e634fc0b48aa5ca95b48c0a9c3897f148a21982d9edb9e1d48a9",
+  "reviewed_commit": "1749a3fbc479f8706f9ffb4ef2357a1cdbe0fd43",
+  "reviewer": {
+    "model_family": "gpt-5.6-sol",
+    "reasoning_effort": "xhigh",
+    "role": "independent runtime and code reviewer"
+  },
+  "decision": "NO_GO",
+  "gates": {
+    "exact_generated_runner_materialized": true,
+    "exact_cli_subprocess_all_profiles": false,
+    "production_dataset_load": false,
+    "prompt_parser_tool_roundtrip": false,
+    "demonstration_code_actual_runtime_types": false,
+    "model_free_real_pipeline": false,
+    "remote_generation_only_mocked": false,
+    "golden_trace_replay_matrix": false,
+    "structured_child_parent_provenance": false,
+    "linux_request_blocked_execution": false,
+    "cross_platform_semantic_equivalence": false,
+    "artifact_retention_execution": true
+  },
+  "critical_findings": [
+    {
+      "severity": "P0",
+      "finding": "The frozen prompt and SFT generator teach child.answer, but the pinned live RLM returns strings. Existing tests assert textual agreement without executing the demonstration against the real return type.",
+      "evidence": [
+        "configs/stage-d/stage-d0-scaffold-fewshot-v3.txt:22",
+        "scripts/build_stage_d_scaffold_sft.py:88",
+        "tests/test_stage_d_all_child_support.py:498"
+      ]
+    },
+    {
+      "severity": "P0",
+      "finding": "The all-child design permits multiple root turns, while replay searches only the final root tool response and ignores the recorded parent turn when locating child output text.",
+      "evidence": [
+        "configs/stage-d/stage-d0-all-child-successor-design-v1.json:82",
+        "src/redco/analysis/empirical_branch_replay.py:781",
+        "tests/test_stage_d_all_child_support.py:116"
+      ]
+    },
+    {
+      "severity": "P0",
+      "finding": "The named end-to-end dry run returns before rollout, IPython, trace writing, precommit, replay, scoring, and gate evaluation; the first meaningful execution happens after ADDRESS_STARTED.",
+      "evidence": [
+        "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/run_feasibility.py:94",
+        "scripts/generate_stage_d_all_child_live_runner_v1.py:86"
+      ]
+    },
+    {
+      "severity": "P1",
+      "finding": "CLI and generated-runner tests rely on AST or text inspection and mocks instead of executing exact subprocess commands in a request-blocked Linux harness.",
+      "evidence": [
+        "tests/test_stage_d_all_child_live_protocol.py:265",
+        "scripts/generate_stage_d_all_child_live_runner_v1.py:199"
+      ]
+    }
+  ],
+  "required_before_go": [
+    "Version the successor scaffold so its extracted Python executes with actual string RLM results.",
+    "Replace global text substitution with structured child-to-parent-turn provenance or event/state-aware replay.",
+    "Replay the exact recovered failing trace and a golden matrix covering retries, duplicates, multiline output, hidden state, and completion-order changes.",
+    "Execute the exact generated Linux runner through a blocked first-request barrier using production CLI, dataset, parser, environment, trace, replay, scorer, and retention paths.",
+    "Obtain a fresh independent Sol xhigh runtime review tied to the exact successor commit."
+  ],
+  "unresolved_assumptions": [
+    "The correct persistent-IPython counterfactual state contract is not yet implemented.",
+    "No successor has proven that every precommitted child target maps to its exact consuming root event.",
+    "The exact generated successor runner has not executed end to end before its request boundary."
+  ],
+  "signed_payload_sha256": "03bc4e42f09a4b6b08e49759bee90157e928851d6ff2196d2ca679498fb0db57"
+}

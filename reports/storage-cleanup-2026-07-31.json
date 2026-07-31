@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "analysis": "local-storage-cleanup-2026-07-31",
+  "status": "complete",
+  "free_space_gib": {
+    "before": 31.753,
+    "after": 33.047
+  },
+  "removed": {
+    "total_bytes": 1388919680,
+    "total_gib": 1.2936,
+    "uncompressed_transfer_tars": [
+      {
+        "path": "runs/frozen-rollout-artifacts.tar",
+        "bytes": 198604800
+      },
+      {
+        "path": "runs/deterministic-replay-artifacts.tar",
+        "bytes": 132423680
+      }
+    ],
+    "archived_extracted_adapters": {
+      "count": 16,
+      "bytes_each": 66118200,
+      "total_bytes": 1057891200,
+      "roots": [
+        "runs/stage-a/noop-confirmation",
+        "runs/stage-a/stock-noise-calibration"
+      ]
+    }
+  },
+  "retained_verified_archives": {
+    ".redco/noop-confirmation.tar.zst": "6e3e59373c7bd887956bd674f2e479de4c28ad4af0326ba2061cb328d5747311",
+    ".redco/stock-noise-calibration.tar.zst": "d9863599e9826db9926a87272ae1040ab202b2399f34dab3d0e676dab72a7b2f",
+    "runs/deterministic-replay-artifacts.tar.zst": "ae65db9554a33f8ac701b3132066128480968393a3e4cecfc22d49ddca76810f",
+    "runs/frozen-rollout-artifacts.tar.zst": "d1fb73a37885e3f0d8e30805fbd1ce54cb81ed3d6078b0f113fa56e90a5e2786"
+  },
+  "verification": {
+    "all_archives_passed_zstd_long_30_test": true,
+    "every_removed_adapter_path_present_in_its_archive": true,
+    "large_file_duplicate_scan_minimum_bytes": 52428800,
+    "large_files_hashed": 75,
+    "exact_duplicate_groups": 0
+  },
+  "deliberately_retained": [
+    "Stage C6 and C9 final-adapter archives",
+    "selected Stage D adapter",
+    "persistent local uv environments",
+    "raw metrics, logs, manifests, configs, and reports"
+  ],
+  "signed_payload_sha256": "c9fe53ffc0ac04f75a56b09efcc3075ac7f79af38906cc2d8837ba679f30c29c"
+}

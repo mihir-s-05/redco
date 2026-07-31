@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "policy": "pre-gpu-runtime-review-v1",
+  "status": "active",
+  "reviewer": {
+    "independent_from_scientific_design_review": true,
+    "model_family": "gpt-5.6-sol",
+    "minimum_reasoning_effort": "xhigh"
+  },
+  "authorization_rule": "No paid model request may start unless a signed review artifact tied to the exact reviewed commit and policy hash records GO, every required gate passes, and unresolved assumptions is empty.",
+  "required_gates": [
+    "exact_generated_runner_materialized",
+    "exact_cli_subprocess_all_profiles",
+    "production_dataset_load",
+    "prompt_parser_tool_roundtrip",
+    "demonstration_code_actual_runtime_types",
+    "model_free_real_pipeline",
+    "remote_generation_only_mocked",
+    "golden_trace_replay_matrix",
+    "structured_child_parent_provenance",
+    "linux_request_blocked_execution",
+    "cross_platform_semantic_equivalence",
+    "artifact_retention_execution"
+  ],
+  "golden_trace_cases": [
+    "multiple root turns",
+    "failed IPython turn followed by retry",
+    "duplicate child outputs",
+    "multiline or escaped child outputs",
+    "hidden-state-only child outputs",
+    "concurrent children completing in either order"
+  ],
+  "prohibited_substitutes": [
+    "source-text or AST inspection without execution",
+    "config-object tests without the production parse path",
+    "mocking the pipeline component under review",
+    "scientific-design review standing in for runtime review",
+    "hash verification standing in for behavioral validation"
+  ],
+  "future_runner_requirement": "Every new paid runner must verify the signed GO artifact before ADDRESS_STARTED and before any model request."
+}
