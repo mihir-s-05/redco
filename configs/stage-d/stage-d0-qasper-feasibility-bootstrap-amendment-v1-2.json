@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "status": "frozen_before_relaunch_and_before_any_model_call",
+  "parent_protocol": "configs/stage-d/stage-d0-qasper-feasibility-preregistration-v1.json",
+  "parent_protocol_sha256": "30ac3bbccd7a8362a39a96193eb4ff7058b7f6dcdcc8253ddbbe2f4f64b0bfff",
+  "hardware_amendment": "configs/stage-d/stage-d0-qasper-feasibility-hardware-amendment-v1-1.json",
+  "hardware_amendment_sha256": "ff1cc1781ab64579a3e8de5cfa28b746ad53f107c1d8f514475c4525d495a65f",
+  "failed_attempt": {
+    "classification": "outcome-independent bootstrap failure",
+    "model_download_started": false,
+    "inference_server_started": false,
+    "natural_completions_observed": 0,
+    "fixture_completions_observed": 0,
+    "scientific_outputs_observed": false,
+    "error": "Prime RL's pinned deps/pydantic-config submodule had the correct Git object checked out but its tracked working-tree files were all staged as deleted, so uv stopped before dependency resolution with a missing pyproject.toml error.",
+    "evidence_disposition": "Preserve the first launcher log locally and in the terminal evidence bundle; do not reinterpret it as a scientific run."
+  },
+  "bounded_repair": {
+    "change": "After the exact pinned submodule update, run git reset --hard HEAD inside each of the three required dependency submodules so their tracked working trees match their already-pinned commits.",
+    "scope": "remote bootstrap only",
+    "scientific_fields_changed": false,
+    "model_or_checkpoint_changed": false,
+    "dataset_or_task_changed": false,
+    "prompt_or_seed_changed": false,
+    "decoding_changed": false,
+    "threshold_or_decision_rule_changed": false,
+    "resource_changed": false,
+    "same_pod": true,
+    "maximum_relaunches_after_this_amendment": 1
+  },
+  "repaired_bootstrap": {
+    "path": "scripts/prepare_stage_d0_qasper_remote_v1.sh",
+    "sha256": "167026b65079b513f4d991fac138bb8a4610b505a93ca948b1ce3dcd72c87125"
+  },
+  "authorization": "The parent protocol explicitly permits one versioned outcome-independent launcher/environment repair before any natural completion. This amendment consumes that allowance."
+}

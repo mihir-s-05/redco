@@ -36,6 +36,9 @@ git -C "$workspace/redco/external/prime-rl" submodule set-url \
   deps/verifiers https://github.com/PrimeIntellect-ai/verifiers.git
 git -C "$workspace/redco/external/prime-rl" submodule update \
   --init --depth 1 deps/pydantic-config deps/renderers deps/verifiers
+for dependency in deps/pydantic-config deps/renderers deps/verifiers; do
+  git -C "$workspace/redco/external/prime-rl/$dependency" reset --hard HEAD
+done
 
 test "$(
   git -C "$workspace/redco/external/prime-rl" rev-parse HEAD
