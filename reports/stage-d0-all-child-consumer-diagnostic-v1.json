@@ -1,0 +1,136 @@
+{
+  "analysis": "stage-d-child-consumer-provenance-v1",
+  "child_call_count": 4,
+  "child_consumers": [
+    {
+      "action_text_characters": 64,
+      "action_text_line_breaks": 0,
+      "action_text_sha256": "1b30ae66897413b21980e8e0de741cec48db54221b8c363153a66024a44b3882",
+      "call_index": 1,
+      "classification": "duplicate_alias_elsewhere",
+      "duplicate_action_call_indices": [
+        1,
+        4
+      ],
+      "final_root_tool_exact_count": 1,
+      "other_root_tool_escaped_repr_counts": [
+        0
+      ],
+      "other_root_tool_exact_counts": [
+        1
+      ],
+      "other_root_tool_node_indices": [
+        17
+      ],
+      "parent_session_id": "2a5f256b473a",
+      "parent_tool_escaped_repr_count": 0,
+      "parent_tool_exact_count": 0,
+      "parent_tool_node_index": 9,
+      "parent_turn_index": 0,
+      "session_id": "sub-a997f7ca"
+    },
+    {
+      "action_text_characters": 425,
+      "action_text_line_breaks": 2,
+      "action_text_sha256": "5a6c2d9f8a75467d6507a92c8567a1636c5badda44aded1e51d87bf414aaaaae",
+      "call_index": 2,
+      "classification": "hidden_state_only",
+      "duplicate_action_call_indices": [
+        2
+      ],
+      "final_root_tool_exact_count": 0,
+      "other_root_tool_escaped_repr_counts": [
+        0
+      ],
+      "other_root_tool_exact_counts": [
+        0
+      ],
+      "other_root_tool_node_indices": [
+        17
+      ],
+      "parent_session_id": "2a5f256b473a",
+      "parent_tool_escaped_repr_count": 0,
+      "parent_tool_exact_count": 0,
+      "parent_tool_node_index": 9,
+      "parent_turn_index": 0,
+      "session_id": "sub-dc367f85"
+    },
+    {
+      "action_text_characters": 64,
+      "action_text_line_breaks": 0,
+      "action_text_sha256": "1b30ae66897413b21980e8e0de741cec48db54221b8c363153a66024a44b3882",
+      "call_index": 4,
+      "classification": "exact_surface_ambiguous_duplicate",
+      "duplicate_action_call_indices": [
+        1,
+        4
+      ],
+      "final_root_tool_exact_count": 1,
+      "other_root_tool_escaped_repr_counts": [
+        0
+      ],
+      "other_root_tool_exact_counts": [
+        0
+      ],
+      "other_root_tool_node_indices": [
+        9
+      ],
+      "parent_session_id": "2a5f256b473a",
+      "parent_tool_escaped_repr_count": 0,
+      "parent_tool_exact_count": 1,
+      "parent_tool_node_index": 17,
+      "parent_turn_index": 1,
+      "session_id": "sub-c072b8f7"
+    },
+    {
+      "action_text_characters": 463,
+      "action_text_line_breaks": 2,
+      "action_text_sha256": "e0e6cc9af426f855880dab6aefb67e07a7485500cbfddd030eb6820fc6e3a7b0",
+      "call_index": 5,
+      "classification": "escaped_surface",
+      "duplicate_action_call_indices": [
+        5
+      ],
+      "final_root_tool_exact_count": 0,
+      "other_root_tool_escaped_repr_counts": [
+        0
+      ],
+      "other_root_tool_exact_counts": [
+        0
+      ],
+      "other_root_tool_node_indices": [
+        9
+      ],
+      "parent_session_id": "2a5f256b473a",
+      "parent_tool_escaped_repr_count": 1,
+      "parent_tool_exact_count": 0,
+      "parent_tool_node_index": 17,
+      "parent_turn_index": 1,
+      "session_id": "sub-a4bbb0b9"
+    }
+  ],
+  "classification_counts": {
+    "duplicate_alias_elsewhere": 1,
+    "escaped_surface": 1,
+    "exact_surface_ambiguous_duplicate": 1,
+    "hidden_state_only": 1
+  },
+  "first_replace_unique_failure_in_native_order": 2,
+  "interpretation": {
+    "current_adapter_contract": "Each child action must occur exactly once as raw text in the final root tool-response message.",
+    "disposition": "Use structured child-result provenance or event/state-aware replay; do not relax replace_unique or drop committed targets.",
+    "observed_violation": "The multi-turn IPython trace contains hidden, escaped, and duplicate/aliased child results."
+  },
+  "native_child_replay_order": [
+    1,
+    2,
+    4,
+    5
+  ],
+  "root_tool_turn_count": 2,
+  "schema_version": 1,
+  "signed_payload_sha256": "ead548ef57d0b3e8be6264d62f21990e97284525d12465972b6f84cb730555e9",
+  "source_trace": "runs/stage-d0/all-child-support-v1/work/fixture-000/traces/000-9a6df158322f.jsonl",
+  "source_trace_sha256": "9a6df158322f8c34c4ef45c8217150c016146f870bccfbb577d99ed82c28625c",
+  "trace_id": "69a46a5f46b143d78bd6d33342a766f2"
+}
