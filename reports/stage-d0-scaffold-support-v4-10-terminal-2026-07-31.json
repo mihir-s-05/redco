@@ -1,0 +1,92 @@
+{
+  "analysis": "stage-d0-scaffold-support-v4-10-terminal",
+  "artifacts": {
+    "artifact_manifest_count": 25,
+    "artifact_manifest_failures": [],
+    "launcher_log_sha256": "2148ee7947cfb7040c6d91c3c9c58ce441b6980c1db62fe01d85e11f43189944",
+    "lifetime_supervisor_log_sha256": "1b78862f90a12e96195426aac8b438778e7959b7b97e442dead05d9c1f0a4747",
+    "run_root": "runs/stage-d0/scaffold-support-v4-10",
+    "transfer_overlay_audit_sha256": "7d22d1d9c81805223c849ded929069e66eec539790990787ee38822b89a561c8"
+  },
+  "checks": {
+    "all_pre_request_gates_passed": true,
+    "artifact_manifest_exact": true,
+    "branch_replay_and_scoring_plumbing_passed": true,
+    "fixture_gate_failed_as_frozen": true,
+    "fixture_request_observed_power_never_started": true,
+    "fixture_rollout_completed_successfully": true,
+    "generated_runners_signed_and_passing": true,
+    "hardware_amendment_exact": true,
+    "live_eager_runtime_proven": true,
+    "persistent_disks_zero": true,
+    "preregistration_audit_exact_and_passing": true,
+    "protocol_exact": true,
+    "resources_terminated": true,
+    "transfer_overlay_signed_and_exact": true
+  },
+  "controlling_audit": "reports/stage-d0-scaffold-support-preregistration-audit-v4-10.json",
+  "controlling_audit_sha256": "4210e444ef7bb6e0b07a67d6f27c13f7b06683dd73727ae778171e6d2ebb7a29",
+  "controlling_protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v4-10.json",
+  "controlling_protocol_sha256": "3709246858a5e3d1815289f40e990c780cdefcec29cc7695536c54c80aa74b76",
+  "decision": "fail",
+  "disposition": "Terminal v4.10 result. Never retry this fixture address or power block. Any successor requires explicit user authorization and a separately frozen design; v4.10 itself has no repair deployment remaining.",
+  "hardware_amendment": "configs/stage-d/stage-d0-scaffold-support-hardware-amendment-v4-10-1.json",
+  "hardware_amendment_sha256": "e032187ea6705ef311c4c36327bae54674fcc883ed6d40e47fafdac8e83b52b3",
+  "interpretation": {
+    "claim_scope": "This is a negative Stage D scaffold-support gate, not an algorithm result. No power block and no stock, branch-global, or local-credit training arm ran.",
+    "what_failed": "The single frozen fixture produced a richer root-child-root-child-root topology (3 root and 2 child calls) instead of the required two-root shape, and all four branch outcomes scored F1=1.0, yielding zero informativeness.",
+    "what_succeeded": "The eager runtime repair, real tool-call scaffold, one live fixture rollout, target selection, K=4 branch generation, exact replay, and deterministic scoring all executed successfully."
+  },
+  "ledgers": {
+    "alternative_action_generated_tokens": 153,
+    "branch_downstream_generated_tokens": 148,
+    "branch_model_request_wall_seconds": 5.503955456000028,
+    "exact_billing_usd": 0.1171,
+    "fixture_wall_seconds": 21.590235474999986,
+    "pod_wall_lifetime_seconds": 654.227,
+    "provider_billed_gpu_hours": 0.15613333333333332,
+    "recorded_rollout_generated_tokens": 558
+  },
+  "passes": true,
+  "pod": {
+    "cost_usd": 0.1171,
+    "created_at_utc": "2026-07-31T16:59:40.199000",
+    "gpu": "RTX6000Ada 48GB",
+    "id": "cfb7963d6edc49bca2b6c364137de974",
+    "rate_usd_per_hour": 0.75,
+    "terminated_at_utc": "2026-07-31T17:10:34.426000"
+  },
+  "resources": {
+    "active_pods_after_termination": 0,
+    "original_support_ceiling_remaining_usd": 5.3936,
+    "persistent_disks_after_termination": 0,
+    "total_support_spend_usd": 0.6064,
+    "wallet_after_termination_usd": 45.468
+  },
+  "result": {
+    "branch_alternatives": 3,
+    "child_calls": 2,
+    "expected_root_calls": 2,
+    "f1_range": 0.0,
+    "failed_topology_check": "exactly_two_root_calls",
+    "fixture_eligible": false,
+    "fixture_informative": false,
+    "fixture_reward": 1.0,
+    "fixture_rollouts": 1,
+    "joint_gate": false,
+    "observed_root_calls": 3,
+    "power_requests": 0,
+    "recorded_policy_calls": 5,
+    "regenerated_and_alternative_f1": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "root_calls": 3,
+    "scientific_training_requests": 0
+  },
+  "schema_version": 1,
+  "signed_payload_sha256": "434761510d4aa0948fb0aef974a54f021cbd754b340426e6994d1d0505306548",
+  "status": "terminal_fixture_gate_failure"
+}
