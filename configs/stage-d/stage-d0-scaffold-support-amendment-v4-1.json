@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d0-scaffold-support-v4-1",
+  "status": "frozen_before_any_v4_model_call",
+  "base_protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v4.json",
+  "base_protocol_sha256": "fddc5e1b93036a1540a3f96f40aa63196b2a51e094aed03de2bf756e9e657aac",
+  "base_commit": "0f00d29",
+  "reason": "An adversarial pre-provisioning review found three outcome-independent execution hazards and local deployment inspection found that the frozen SFT configuration depends on two uncommitted Prime-RL local-JSON changes. No Prime pod was created and no model output, optimizer step, candidate score, or scientific outcome exists under v4.",
+  "preobservation_evidence": {
+    "checked_at_utc": "2026-07-31T04:18:17.8255375Z",
+    "prime_pods_created": 0,
+    "prime_active_pods_at_freeze": 0,
+    "prime_persistent_disks_at_freeze": 0,
+    "model_calls": 0,
+    "optimizer_steps": 0,
+    "candidate_score_payloads": 0,
+    "scientific_arm_outcomes": 0,
+    "wallet_verified_usd": 46.9399,
+    "user_reported_additional_funding_usd": 30.0,
+    "budget_interpretation": "The live verified wallet, not the reported top-up amount, controls provisioning. The frozen 44.817874 USD full envelope and 4 USD reserve are unchanged."
+  },
+  "bounded_repairs": [
+    {
+      "issue": "EXIT cleanup omitted the conditional SFT work tree.",
+      "repair": "Delete the exact sft_dir together with the reloaded adapter and merged model on every exit while preserving only the compact selected-adapter archive."
+    },
+    {
+      "issue": "Outer and SFT timeouts sent TERM without a forced-kill deadline.",
+      "repair": "Add timeout --kill-after=120 to both frozen timeout boundaries."
+    },
+    {
+      "issue": "All ValueError and RuntimeError instances from replay were converted into denominator-negative scientific observations.",
+      "repair": "Introduce DeterministicReplayIneligibility and convert only declared fixed-topology or trace-eligibility failures; malformed responses, transport failures, and internal invariants remain fatal."
+    },
+    {
+      "issue": "The frozen SFT config depends on local JSON data_files support that exists only in the dirty local Prime-RL submodule.",
+      "repair": "Package the exact two-file Prime-RL diff, apply it idempotently before frozen source verification, and verify the resulting Prime-RL file hashes already frozen by v4."
+    }
+  ],
+  "seed_semantics": {
+    "planned_slots": "all 64 planned episode seeds are exact",
+    "present_traces": "every present observed root seed must align exactly",
+    "missing_traces": "missing traces remain denominator negatives and do not count as observed-seed successes"
+  },
+  "scientific_changes": [],
+  "unchanged_fields": [
+    "dataset partitions and corpus bytes",
+    "initialization and SFT optimizer",
+    "sampling and seed rules",
+    "candidate order and selection rule",
+    "eligibility and informativeness definitions",
+    "58-of-64 joint support threshold",
+    "future scientific arms, outcomes, and budget envelope"
+  ],
+  "source_sha256_replacements": {
+    "src/redco/analysis/empirical_branch_replay.py": "c21a3ebaca6b37edae1145ba731db9043e7319d9180def28f39e79a27e5b5dc5",
+    "src/redco/analysis/stage_d_branch_group.py": "d15ec1df6d70b5e4bdc7517a26f105a77c9188f17290e454dcb59ecbcc0140b7",
+    "scripts/run_stage_d0_scaffold_support_v4.sh": "2e52640964b6bfb5477c621e48396cb4ba4ec1583440ec093b4ed760935fdbb1"
+  },
+  "source_sha256_additions": {
+    "patches/prime-rl-stage-d-sft-local-json-v1.patch": "4bd0d03eb14a4d3a816076040adce1ace9d5372d7fac6f3193ef8d92fab18f59",
+    "tests/test_stage_d_branch_group.py": "93f0b85d4c32835bcf478b4c952cd6e0e15612fce5b6daf359c06b8de18aef91",
+    "tests/test_stage_d_support_preregistration_v4.py": "717f0f93f25c5941d91b21ede77b79782ed030999b716a69367e522714bf34fc",
+    "scripts/audit_stage_d0_scaffold_support_amendment_v4_1.py": "536ec85a1d8ef1a5700ef58d940133b2459c95c9c8ecad488e69270e13fa25c6"
+  },
+  "execution_rule": "Run the amended audit and adversarial review on the exact committed state. Provision nothing unless both pass. Any later hardware choice requires a separate hardware-only amendment."
+}

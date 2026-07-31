@@ -6,6 +6,9 @@ from types import SimpleNamespace
 import pytest
 
 from redco.analysis import stage_d_branch_group
+from redco.analysis.empirical_branch_replay import (
+    DeterministicReplayIneligibility,
+)
 from redco.integrations.signed_subprocess import verify_signed_payload
 
 
@@ -35,7 +38,9 @@ def test_deterministic_replay_negative_is_a_signed_observation(
     )
 
     def fail(**_: object) -> None:
-        raise ValueError("fixed-topology splice is unavailable")
+        raise DeterministicReplayIneligibility(
+            "fixed-topology splice is unavailable"
+        )
 
     monkeypatch.setattr(stage_d_branch_group, "run_empirical_replay", fail)
     report, replayable = _run(tmp_path)
@@ -65,4 +70,26 @@ def test_infrastructure_error_is_not_converted_to_negative(
 
     monkeypatch.setattr(stage_d_branch_group, "run_empirical_replay", fail)
     with pytest.raises(OSError, match="network unavailable"):
+        _run(tmp_path)
+
+
+def test_malformed_response_is_not_converted_to_negative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        stage_d_branch_group,
+        "load_trace_records",
+        lambda _: [{"id": "trace-1"}],
+    )
+    monkeypatch.setattr(
+        stage_d_branch_group,
+        "audit_trace_file",
+        lambda _: SimpleNamespace(calls=[object()]),
+    )
+
+    def fail(**_: object) -> None:
+        raise ValueError("malformed inference JSON")
+
+    monkeypatch.setattr(stage_d_branch_group, "run_empirical_replay", fail)
+    with pytest.raises(ValueError, match="malformed inference JSON"):
         _run(tmp_path)

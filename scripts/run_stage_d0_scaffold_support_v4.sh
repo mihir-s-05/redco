@@ -3,7 +3,7 @@ set -euo pipefail
 
 if test "${REDCO_STAGE_D_TIMEOUT_WRAPPED:-0}" != "1"; then
   export REDCO_STAGE_D_TIMEOUT_WRAPPED=1
-  exec timeout --signal=TERM 21600 bash "$0" "$@"
+  exec timeout --signal=TERM --kill-after=120 21600 bash "$0" "$@"
 fi
 
 repo_root="${REDCO_REPO_ROOT:-/workspace/redco}"
@@ -16,6 +16,7 @@ base_config="configs/stage-d/stage-d0-scaffold-inference-base-v3.toml"
 sft_config="configs/stage-d/stage-d0-scaffold-inference-sft-v4.toml"
 sft_train_config="configs/stage-d/stage-d0-scaffold-sft-v4.toml"
 protocol="configs/stage-d/stage-d0-scaffold-support-preregistration-v4.json"
+amendment="configs/stage-d/stage-d0-scaffold-support-amendment-v4-1.json"
 dataset="datasets/stage-d/qasper-scaffold-successor-v4.jsonl"
 dataset_sha256="2ed4c2afc74b1a979558ada3899b008fcc1b259c5678b3a5ef1f7070aa4fb932"
 fixture_dataset="datasets/stage-d/evidence-selection-fixture-v1.jsonl"
@@ -61,15 +62,29 @@ test -f "$base_config"
 test -f "$sft_config"
 test -f "$sft_train_config"
 test -f "$protocol"
+test -f "$amendment"
 
-"$uv_bin" run --frozen python - "$protocol" <<'PY'
+if git -C external/prime-rl apply --check \
+  "$repo_root/patches/prime-rl-stage-d-sft-local-json-v1.patch"; then
+  git -C external/prime-rl apply \
+    "$repo_root/patches/prime-rl-stage-d-sft-local-json-v1.patch"
+else
+  git -C external/prime-rl apply --reverse --check \
+    "$repo_root/patches/prime-rl-stage-d-sft-local-json-v1.patch"
+fi
+
+"$uv_bin" run --frozen python - "$protocol" "$amendment" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
 
 protocol = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-for name, expected in protocol["source_sha256"].items():
+amendment = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+source_sha256 = dict(protocol["source_sha256"])
+source_sha256.update(amendment["source_sha256_replacements"])
+source_sha256.update(amendment["source_sha256_additions"])
+for name, expected in source_sha256.items():
     actual = hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()
     if actual != expected:
         raise SystemExit(f"frozen hash mismatch: {name}: {actual} != {expected}")
@@ -127,7 +142,7 @@ stop_inference() {
 
 cleanup() {
   stop_inference
-  rm -rf "$sft_reloaded" "$sft_merged"
+  rm -rf "$sft_dir" "$sft_reloaded" "$sft_merged"
 }
 trap cleanup EXIT
 
@@ -221,7 +236,7 @@ selected_config="$base_config"
 selected_kind="shared-fewshot-base"
 if test "$support_status" = "20"; then
   CUDA_VISIBLE_DEVICES=0 \
-  timeout --signal=TERM 3600 \
+  timeout --signal=TERM --kill-after=120 3600 \
     "$uv_bin" run --frozen --project external/prime-rl \
     --extra flash-attn \
     sft @ "$sft_train_config" \

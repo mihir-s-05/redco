@@ -323,6 +323,10 @@ class InferenceTransportError(RuntimeError):
     """An outcome-independent inference-service or network failure."""
 
 
+class DeterministicReplayIneligibility(ValueError):
+    """A declared fixed-topology or trace-eligibility failure."""
+
+
 def _request_json(payload: dict[str, object]) -> bytes:
     """Serialize an API request without reordering prompt-bearing objects."""
     return json.dumps(
@@ -352,7 +356,9 @@ def build_replay_indices(
         if policy_node_ids_by_call[call_index] in descendants
     )
     if not sliced:
-        raise ValueError("target has no affected suffix policy calls")
+        raise DeterministicReplayIneligibility(
+            "target has no affected suffix policy calls"
+        )
     return full, sliced
 
 
@@ -480,10 +486,14 @@ def execute_cached_arm(
 
 def replace_unique(text: str, old: str, new: str) -> str:
     if not old:
-        raise ValueError("replacement source must be non-empty")
+        raise DeterministicReplayIneligibility(
+            "replacement source must be non-empty"
+        )
     count = text.count(old)
     if count != 1:
-        raise ValueError(f"replacement source must occur exactly once, found {count}")
+        raise DeterministicReplayIneligibility(
+            f"replacement source must occur exactly once, found {count}"
+        )
     return text.replace(old, new, 1)
 
 
@@ -494,25 +504,33 @@ def derive_lossless_render_boundary(
     canonical_render: tuple[int, ...],
 ) -> LosslessRenderBoundary:
     if not recorded_static_prefix:
-        raise ValueError("recorded static prefix must be non-empty")
+        raise DeterministicReplayIneligibility(
+            "recorded static prefix must be non-empty"
+        )
     if recorded_prompt[: len(recorded_static_prefix)] != recorded_static_prefix:
-        raise ValueError("recorded static prefix does not prefix recorded prompt")
+        raise DeterministicReplayIneligibility(
+            "recorded static prefix does not prefix recorded prompt"
+        )
     exact_suffix = recorded_prompt[len(recorded_static_prefix) :]
     if not exact_suffix:
-        raise ValueError("recorded affected suffix must be non-empty")
+        raise DeterministicReplayIneligibility(
+            "recorded affected suffix must be non-empty"
+        )
     canonical_suffix_start = len(canonical_render) - len(exact_suffix)
     if (
         canonical_suffix_start < 0
         or canonical_render[canonical_suffix_start:] != exact_suffix
     ):
-        raise ValueError(
+        raise DeterministicReplayIneligibility(
             "canonical render does not preserve the exact recorded affected suffix"
         )
     reconstructed = (
         recorded_static_prefix + canonical_render[canonical_suffix_start:]
     )
     if reconstructed != recorded_prompt:
-        raise ValueError("lossless hybrid did not reconstruct recorded prompt")
+        raise DeterministicReplayIneligibility(
+            "lossless hybrid did not reconstruct recorded prompt"
+        )
     return LosslessRenderBoundary(
         recorded_static_prefix_tokens=len(recorded_static_prefix),
         canonical_suffix_start_tokens=canonical_suffix_start,
@@ -529,9 +547,13 @@ def splice_lossless_rendered_suffix(
 ) -> tuple[int, ...]:
     split = boundary.canonical_suffix_start_tokens
     if len(recorded_static_prefix) != boundary.recorded_static_prefix_tokens:
-        raise ValueError("recorded static prefix length changed")
+        raise DeterministicReplayIneligibility(
+            "recorded static prefix length changed"
+        )
     if canonical_branch[:split] != canonical_original[:split]:
-        raise ValueError("branch changed tokens before the affected suffix")
+        raise DeterministicReplayIneligibility(
+            "branch changed tokens before the affected suffix"
+        )
     return recorded_static_prefix + canonical_branch[split:]
 
 
@@ -566,7 +588,9 @@ def run_empirical_replay(
         or not audit.ready_for_exact_key_replay
         or not provenance.ready_for_representative_raf
     ):
-        raise ValueError("campaign requires one exact-key, representative trace")
+        raise DeterministicReplayIneligibility(
+            "campaign requires one exact-key, representative trace"
+        )
     trace = provenance.traces[0]
     calls = tuple(sorted(audit.calls, key=lambda item: item.call_index))
     calls_by_index = {call.call_index: call for call in calls}
@@ -576,11 +600,15 @@ def run_empirical_replay(
         if call.agent_depth == 0 and call.turn_index is not None
     ]
     if not final_candidates:
-        raise ValueError("trace has no root policy calls")
+        raise DeterministicReplayIneligibility(
+            "trace has no root policy calls"
+        )
     final_call = max(final_candidates, key=lambda item: item.turn_index or 0)
     target_calls = [call for call in calls if call.agent_depth == 1]
     if not target_calls:
-        raise ValueError("trace has no recursive subcall targets")
+        raise DeterministicReplayIneligibility(
+            "trace has no recursive subcall targets"
+        )
     if maximum_targets is not None:
         # Structural, pre-action selector: the first depth-one call in the
         # native call table. No action tokens, rewards, or content are read.
@@ -604,7 +632,9 @@ def run_empirical_replay(
     )
     tools = _chat_tools(raw_trace.get("tools"))
     if final_call.event_seed is None:
-        raise ValueError("final call has no event seed")
+        raise DeterministicReplayIneligibility(
+            "final call has no event seed"
+        )
     rendered_original = client.render_chat(
         root_messages,
         tools,
@@ -626,7 +656,9 @@ def run_empirical_replay(
         if type(call_index) is int:
             policy_node_ids_by_call[call_index] = node.node_id
     if len(policy_node_ids_by_call) != len(calls):
-        raise ValueError("policy graph and native call table do not align")
+        raise DeterministicReplayIneligibility(
+            "policy graph and native call table do not align"
+        )
 
     baseline_cache = build_policy_cache(calls)
     branch_decoding_config_hash = hashlib.sha256(
@@ -643,7 +675,9 @@ def run_empirical_replay(
     candidate_hashes_by_target: dict[str, set[str]] = {}
     for target in target_calls:
         if target.agent_depth is None:
-            raise ValueError("eligible target call has no agent depth")
+            raise DeterministicReplayIneligibility(
+                "eligible target call has no agent depth"
+            )
         original_child_text = _message_content(nodes[target.node_index])
         target_node_id = policy_node_ids_by_call[target.call_index]
         full_indices, sliced_indices = build_replay_indices(
@@ -754,10 +788,14 @@ def run_empirical_replay(
                 None,
             )
             if tool_message is None:
-                raise ValueError("root conversation has no tool response")
+                raise DeterministicReplayIneligibility(
+                    "root conversation has no tool response"
+                )
             content = tool_message.get("content")
             if not isinstance(content, str):
-                raise TypeError("root tool response content must be a string")
+                raise DeterministicReplayIneligibility(
+                    "root tool response content must be a string"
+                )
             tool_message["content"] = replace_unique(
                 content,
                 original_child_text,
@@ -789,7 +827,9 @@ def run_empirical_replay(
 
             paired_cache = baseline_cache.fork()
             if final_call.event_seed is None:
-                raise ValueError("final call has no event seed")
+                raise DeterministicReplayIneligibility(
+                    "final call has no event seed"
+                )
             branch_final_key = PolicyCallKey.from_call(
                 branch_prompt,
                 checkpoint_id=final_call.checkpoint_id,
@@ -863,7 +903,9 @@ def run_empirical_replay(
                 )
 
     if final_call.event_seed is None:
-        raise ValueError("final call has no event seed")
+        raise DeterministicReplayIneligibility(
+            "final call has no event seed"
+        )
     repro_first = client.generate(
         final_call.prompt_token_ids,
         seed=final_call.event_seed,

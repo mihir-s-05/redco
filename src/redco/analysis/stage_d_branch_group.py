@@ -12,7 +12,7 @@ from redco.integrations.verifiers_trace import (
 )
 
 from .empirical_branch_replay import (
-    InferenceTransportError,
+    DeterministicReplayIneligibility,
     TokenInferenceClient,
     run_empirical_replay,
 )
@@ -47,9 +47,7 @@ def run_group(
             continuation_max_tokens=continuation_max_tokens,
             minimum_distinct_candidate_fraction=1 / 3,
         )
-    except InferenceTransportError:
-        raise
-    except (ValueError, RuntimeError) as error:
+    except DeterministicReplayIneligibility as error:
         return (
             sign_payload(
                 {
