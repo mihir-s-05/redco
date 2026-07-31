@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d0-scaffold-support-v4-8-final-hardware-3",
+  "status": "frozen_before_final_redeployment",
+  "frozen_at_utc": "2026-07-31T08:22:16Z",
+  "controlling_protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v4-8.json",
+  "controlling_protocol_sha256": "64353a18f7d907357f521bb9db89f6163d24525e03ac5d6122c9d13e652a4816",
+  "controlling_repair": "configs/stage-d/stage-d0-scaffold-support-transfer-repair-v4-8-2.json",
+  "controlling_repair_sha256": "175f47ef1f3e99778e54dd74d042e5ec7da89173efa8613db8f7b3e5850dbd5d",
+  "repair_commit": "ac393ca74b241dc7388c93403332c65171c6ef8f",
+  "read_only_state_before_selection": {
+    "active_pods": 0,
+    "persistent_disks": 0,
+    "wallet_cli_display_usd": 45.86,
+    "wallet_exact_inferred_usd": 45.8574,
+    "prior_selected_resource_ea69b8_available": false
+  },
+  "selected_resource": {
+    "resource_id": "03c728",
+    "cloud_id": "gpu_1x_6000_ada",
+    "gpu_type": "RTX6000Ada 48GB",
+    "gpu_count": 1,
+    "gpu_memory_gb": 48,
+    "provider": "massedcompute",
+    "location": "US",
+    "socket": "PCIe",
+    "security": "datacenter",
+    "stock_status": "Available",
+    "is_spot": null,
+    "pricing_type": "on-demand non-spot",
+    "rate_usd_per_hour": 0.75,
+    "vcpus": 12,
+    "host_memory_gb": 72,
+    "ephemeral_disk_gb": 350,
+    "selection_reason": "cheapest genuinely available qualifying non-spot 1x48GB resource after the cheaper A6000 became unavailable"
+  },
+  "runtime_budget": {
+    "cumulative_v4_8_cap_usd": 5.8589,
+    "cumulative_v4_8_spend_before_attempt_usd": 0.0759,
+    "authorized_timeout_seconds": 21600,
+    "authorized_timeout_hours": 6.0,
+    "maximum_attempt_cost_usd": 4.5,
+    "maximum_cumulative_cost_after_attempt_usd": 4.5759,
+    "minimum_cap_remaining_after_attempt_usd": 1.283,
+    "constraint": "0.75 * 21600 / 3600 + 0.0759 <= 5.8589",
+    "passes": true
+  },
+  "transfer": {
+    "order": [
+      "extract the committed root archive",
+      "reconstruct exact pinned clean Prime submodules",
+      "extract the exact byte-preserving 48-file overlay",
+      "verify every inherited v4.7 source hash with an empty failure set",
+      "invoke the frozen v4.8 wrapper"
+    ],
+    "overlay": "runs/stage-d0/scaffold-support-v4-8-frozen-source-overlay.tar.gz",
+    "overlay_sha256": "634a39993a3d716a4e675d4af8c7e537e5ffc09d7104cabf4d2a3d132cb6990d",
+    "overlay_audit": "reports/stage-d0-scaffold-support-v4-8-transfer-overlay-audit.json",
+    "overlay_audit_sha256": "a0ae3da6466f6743d4ed6358ba2b1bdc3bf3974c47acb650b819e02e4c13a457",
+    "overlay_audit_signature": "52fa514b10b53480cb20a616798ea1f4e17e185307ec12932b52ba7a06339883"
+  },
+  "launch": {
+    "pod_name": "redco-stage-d-v4-8",
+    "persistent_storage": "forbidden",
+    "ssh_key": "C:/Users/mihir/.ssh/id_rsa",
+    "ssh_must_pass_noninteractively_before_sync": true,
+    "environment": {
+      "REDCO_V4_8_AUTHORIZED_TIMEOUT_SECONDS": "21600"
+    },
+    "runner": "scripts/run_stage_d0_scaffold_support_v4_8.sh"
+  },
+  "finality": {
+    "this_is_the_single_authorized_redeployment": true,
+    "any_further_failure_is_terminal": true,
+    "no_third_deployment": true
+  },
+  "unchanged_fields": "all model, adapter, prompt, fixture, power, seed, sampling, replay, threshold, and future scientific fields",
+  "teardown": "always terminate compute and confirm zero persistent disks after artifact recovery or failure"
+}
