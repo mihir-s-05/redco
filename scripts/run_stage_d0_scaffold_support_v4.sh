@@ -16,7 +16,8 @@ base_config="configs/stage-d/stage-d0-scaffold-inference-base-v3.toml"
 sft_config="configs/stage-d/stage-d0-scaffold-inference-sft-v4.toml"
 sft_train_config="configs/stage-d/stage-d0-scaffold-sft-v4.toml"
 protocol="configs/stage-d/stage-d0-scaffold-support-preregistration-v4.json"
-amendment="configs/stage-d/stage-d0-scaffold-support-amendment-v4-1.json"
+amendment_v4_1="configs/stage-d/stage-d0-scaffold-support-amendment-v4-1.json"
+amendment_v4_2="configs/stage-d/stage-d0-scaffold-support-amendment-v4-2.json"
 dataset="datasets/stage-d/qasper-scaffold-successor-v4.jsonl"
 dataset_sha256="2ed4c2afc74b1a979558ada3899b008fcc1b259c5678b3a5ef1f7070aa4fb932"
 fixture_dataset="datasets/stage-d/evidence-selection-fixture-v1.jsonl"
@@ -62,28 +63,33 @@ test -f "$base_config"
 test -f "$sft_config"
 test -f "$sft_train_config"
 test -f "$protocol"
-test -f "$amendment"
+test -f "$amendment_v4_1"
+test -f "$amendment_v4_2"
 
 if git -C external/prime-rl apply --check \
-  "$repo_root/patches/prime-rl-stage-d-sft-local-json-v1.patch"; then
+  "$repo_root/patches/prime-rl-stage-d-sft-runtime-v2.patch"; then
   git -C external/prime-rl apply \
-    "$repo_root/patches/prime-rl-stage-d-sft-local-json-v1.patch"
+    "$repo_root/patches/prime-rl-stage-d-sft-runtime-v2.patch"
 else
   git -C external/prime-rl apply --reverse --check \
-    "$repo_root/patches/prime-rl-stage-d-sft-local-json-v1.patch"
+    "$repo_root/patches/prime-rl-stage-d-sft-runtime-v2.patch"
 fi
 
-"$uv_bin" run --frozen python - "$protocol" "$amendment" <<'PY'
+"$uv_bin" run --frozen python - \
+  "$protocol" "$amendment_v4_1" "$amendment_v4_2" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
 
 protocol = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-amendment = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
 source_sha256 = dict(protocol["source_sha256"])
-source_sha256.update(amendment["source_sha256_replacements"])
-source_sha256.update(amendment["source_sha256_additions"])
+for amendment_name in sys.argv[2:]:
+    amendment = json.loads(
+        pathlib.Path(amendment_name).read_text(encoding="utf-8")
+    )
+    source_sha256.update(amendment["source_sha256_replacements"])
+    source_sha256.update(amendment["source_sha256_additions"])
 for name, expected in source_sha256.items():
     actual = hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()
     if actual != expected:

@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d0-scaffold-support-v4-2",
+  "status": "frozen_before_any_v4_model_call",
+  "base_protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v4.json",
+  "base_protocol_sha256": "fddc5e1b93036a1540a3f96f40aa63196b2a51e094aed03de2bf756e9e657aac",
+  "amendment_v4_1": "configs/stage-d/stage-d0-scaffold-support-amendment-v4-1.json",
+  "amendment_v4_1_sha256": "3f97d16fbb2ed504760c40f7ce3fb3dc773cc1246cf5656cb975674fdc60aa0b",
+  "v4_1_commit": "bde3291",
+  "reason": "The adversarial review of exact commit bde3291 returned a hard pre-provisioning NO-GO because the v4.1 two-file Prime patch was not dependency-complete on clean Prime commit 3b22dd951. The frozen SFT config also requires adapter-only checkpoint configuration and implementation, and the validated one-adapter CUDA fallback. No pod or model output existed, so this amendment freezes only the missing outcome-independent dependency closure.",
+  "preobservation_evidence": {
+    "checked_at_utc": "2026-07-31T04:43:35.6484927Z",
+    "prime_pods_created": 0,
+    "prime_active_pods_at_freeze": 0,
+    "prime_persistent_disks_at_freeze": 0,
+    "model_calls": 0,
+    "optimizer_steps": 0,
+    "candidate_score_payloads": 0,
+    "scientific_arm_outcomes": 0,
+    "wallet_verified_usd": 46.9399
+  },
+  "adversarial_disposition": {
+    "reviewed_commit": "bde3291",
+    "decision": "hard_no_go_before_provisioning",
+    "blocking_finding": "The local-JSON patch omitted the adapter_only checkpoint field and implementation and the validated single-adapter LoRA fallback, so a clean pinned checkout could not execute the frozen SFT configuration.",
+    "other_v4_1_repairs": "accepted"
+  },
+  "prime_dependency_closure": {
+    "base_commit": "3b22dd951cad1036d1fe8dd0a0bfc40807a9b360",
+    "patch": "patches/prime-rl-stage-d-sft-runtime-v2.patch",
+    "patch_sha256": "d8468a19de6f8319651765778a8abffb2999b1c84076fa9815c116608cdf8d73",
+    "patched_sources": [
+      "packages/prime-rl-configs/src/prime_rl/configs/sft.py",
+      "packages/prime-rl-configs/src/prime_rl/configs/trainer.py",
+      "src/prime_rl/trainer/ckpt.py",
+      "src/prime_rl/trainer/models/layers/lora/multi_linear.py",
+      "src/prime_rl/trainer/sft/data.py"
+    ],
+    "clean_validation": "reports/stage-d-prime-sft-runtime-patch-v2-audit.json",
+    "clean_validation_sha256": "86d6fa7d7335a1ac9526fd69ab9f7edb80547a9d03bd28da20deedfda07a0965",
+    "validated_contracts": [
+      "the complete patch applies to a detached clean worktree at the pinned commit",
+      "only the five declared Prime source files differ",
+      "the real frozen SFT config parses with local JSON and adapter_only enabled",
+      "the 32-row local JSON corpus loads through the patched Prime data path",
+      "the one-adapter LoRA module selects the algebraically equivalent non-grouped path",
+      "the real sft launcher completes --dry-run from clean patched source"
+    ]
+  },
+  "scientific_changes": [],
+  "unchanged_fields": [
+    "dataset partitions and corpus bytes",
+    "initialization and SFT optimizer",
+    "sampling and seed rules",
+    "candidate order and selection rule",
+    "eligibility and informativeness definitions",
+    "58-of-64 joint support threshold",
+    "future scientific arms, outcomes, and budget envelope"
+  ],
+  "source_sha256_replacements": {
+    "scripts/run_stage_d0_scaffold_support_v4.sh": "618beb40db778fd6d28394f0a4510490822eaa674e1b72d665ad1c259810d046",
+    "tests/test_stage_d_support_preregistration_v4.py": "3a221cce9a830c0a9dff1b2cd99c6588dc9e6ee3766143b7b2309515e1ad99c9"
+  },
+  "source_sha256_additions": {
+    "patches/prime-rl-stage-d-sft-runtime-v2.patch": "d8468a19de6f8319651765778a8abffb2999b1c84076fa9815c116608cdf8d73",
+    "reports/stage-d-prime-sft-runtime-patch-v2-audit.json": "86d6fa7d7335a1ac9526fd69ab9f7edb80547a9d03bd28da20deedfda07a0965",
+    "scripts/audit_stage_d_prime_patch_v2.py": "660a016ec297dcf02ce7ec8eb33ac87622743c4e2d910e22ab5c1fd812c37a5f",
+    "scripts/audit_stage_d0_scaffold_support_amendment_v4_2.py": "0efef8bd39c8cede6ccddb6bf373c923d4940ece7221bb07f0b4aa2a4d82ae7c",
+    "external/prime-rl/packages/prime-rl-configs/src/prime_rl/configs/trainer.py": "8181f8c99b0c1be0382f457203de9e295c31a852eb0eb5a8ab88f999a5bdce4b",
+    "external/prime-rl/src/prime_rl/trainer/ckpt.py": "96e6c8d8b9d916a15205658a4040bfe85fc8a5cd76d49c36cffae6ddbc0b01dc",
+    "external/prime-rl/src/prime_rl/trainer/models/layers/lora/multi_linear.py": "f1fd0d52e68e1e835300af38b5186cde264dc81b14f31954203b99631e6f46c9"
+  },
+  "execution_rule": "Run the v4.2 aggregate audit and a new adversarial review on the exact committed state. Provision nothing unless both pass. Any hardware selection remains a separate hardware-only amendment."
+}

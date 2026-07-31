@@ -1,0 +1,230 @@
+diff --git a/packages/prime-rl-configs/src/prime_rl/configs/sft.py b/packages/prime-rl-configs/src/prime_rl/configs/sft.py
+index 941c531de..d4642b64f 100644
+--- a/packages/prime-rl-configs/src/prime_rl/configs/sft.py
++++ b/packages/prime-rl-configs/src/prime_rl/configs/sft.py
+@@ -77,6 +77,9 @@ class SFTDataConfig(BaseDataConfig):
+     name: str = "PrimeIntellect/Reverse-Text-SFT"
+     """HF dataset name or path."""
+ 
++    data_files: str | list[str] | dict[str, str | list[str]] | None = None
++    """Local or remote files forwarded to ``datasets.load_dataset``."""
++
+     subsets: list[str] | None = None
+     """Subsets to load from the HF dataset."""
+ 
+@@ -259,6 +262,20 @@ class SFTConfig(BaseConfig):
+             self.optim.max_norm = None
+         return self
+ 
++    @model_validator(mode="after")
++    def validate_adapter_only_checkpoint(self):
++        if (
++            self.ckpt
++            and self.ckpt.weights
++            and self.ckpt.weights.adapter_only
++            and self.model.lora is None
++        ):
++            raise ValueError(
++                "adapter_only=True requires LoRA to be enabled. "
++                "Set model.lora or disable adapter_only."
++            )
++        return self
++
+     @model_validator(mode="after")
+     def validate_deployment(self):
+         if self.deployment.type == "multi_node" and self.slurm is None:
+diff --git a/packages/prime-rl-configs/src/prime_rl/configs/trainer.py b/packages/prime-rl-configs/src/prime_rl/configs/trainer.py
+index d18ce525b..9da441bbd 100644
+--- a/packages/prime-rl-configs/src/prime_rl/configs/trainer.py
++++ b/packages/prime-rl-configs/src/prime_rl/configs/trainer.py
+@@ -414,6 +414,9 @@ class WeightCheckpointConfig(BaseConfig):
+     save_adapter_separately: bool = False
+     """Save LoRA adapters separately before merging into full model weights."""
+ 
++    adapter_only: bool = False
++    """Save only the LoRA adapter, avoiding a gathered full-model checkpoint."""
++
+ 
+ class CheckpointConfig(BaseConfig):
+     output_dir: Path | None = None
+diff --git a/src/prime_rl/trainer/ckpt.py b/src/prime_rl/trainer/ckpt.py
+index 83728c8d9..e1f322239 100644
+--- a/src/prime_rl/trainer/ckpt.py
++++ b/src/prime_rl/trainer/ckpt.py
+@@ -386,30 +386,31 @@ class WeightCheckpointManager:
+             start_time = time.perf_counter()
+ 
+             self.logger.debug(f"Saving weight checkpoint to {path}")
+-            # Suppress torch.distributed warnings during checkpoint saving
+-            with warnings.catch_warnings():
+-                warnings.filterwarnings("ignore", category=FutureWarning, module="torch.distributed")
+-                warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed.*")
+-
+-                # Save weights
+-                save_state_dict(state_dict, path, self.config.save_format, self.config.save_sharded)
+-
+-                # Save model config, generation arguments and tokenizer
+-                model.config.save_pretrained(path)
+-                if model.generation_config:
+-                    # training sets use_cache=False which can conflict with
+-                    # cache_implementation — save with use_cache=True without
+-                    # mutating the model's config
+-                    from copy import deepcopy
+-
+-                    gen_config = deepcopy(model.generation_config)
+-                    gen_config.use_cache = True
+-                    gen_config.save_pretrained(path)
+-                # Processor first: it saves its own (unmodified) tokenizer, which the
+-                # configured tokenizer (pad token, custom chat template) must override.
+-                if processor is not None:
+-                    processor.save_pretrained(path)
+-                tokenizer.save_pretrained(path)
++            if not self.config.adapter_only:
++                # Suppress torch.distributed warnings during checkpoint saving
++                with warnings.catch_warnings():
++                    warnings.filterwarnings("ignore", category=FutureWarning, module="torch.distributed")
++                    warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed.*")
++
++                    # Save weights
++                    save_state_dict(state_dict, path, self.config.save_format, self.config.save_sharded)
++
++                    # Save model config, generation arguments and tokenizer
++                    model.config.save_pretrained(path)
++                    if model.generation_config:
++                        # training sets use_cache=False which can conflict with
++                        # cache_implementation — save with use_cache=True without
++                        # mutating the model's config
++                        from copy import deepcopy
++
++                        gen_config = deepcopy(model.generation_config)
++                        gen_config.use_cache = True
++                        gen_config.save_pretrained(path)
++                    # Processor first: it saves its own (unmodified) tokenizer, which the
++                    # configured tokenizer (pad token, custom chat template) must override.
++                    if processor is not None:
++                        processor.save_pretrained(path)
++                    tokenizer.save_pretrained(path)
+ 
+             if lora_state_dict is not None:
+                 adapter_path = path / "lora_adapters"
+@@ -442,18 +443,25 @@ class WeightCheckpointManager:
+             step_path.mkdir(parents=True, exist_ok=True)
+         torch.distributed.barrier()
+ 
+-        # Gather all weights on master rank
+-        self.logger.debug("Gathering weights on master rank for weight checkpoint")
+-        start_time = time.perf_counter()
+-        state_dict = gather_weights_on_master(model, self.world.is_master, dtype=torch.bfloat16)
+-        self.logger.debug(f"Gathered weights on master rank in {time.perf_counter() - start_time:.2f} seconds")
++        if self.config.adapter_only:
++            if not has_lora_layers(model):
++                raise ValueError("adapter-only checkpoints require a LoRA model")
++            state_dict = {}
++        else:
++            # Gather all weights on master rank
++            self.logger.debug("Gathering weights on master rank for weight checkpoint")
++            start_time = time.perf_counter()
++            state_dict = gather_weights_on_master(model, self.world.is_master, dtype=torch.bfloat16)
++            self.logger.debug(f"Gathered weights on master rank in {time.perf_counter() - start_time:.2f} seconds")
+ 
+         # Remove tied weight keys to match original model format
+         if getattr(model.config, "tie_word_embeddings", False):
+             for key in getattr(model, "_tied_weights_keys", []):
+                 state_dict.pop(key, None)
+ 
+-        if has_lora_layers(model) and self.config.save_adapter_separately:
++        if has_lora_layers(model) and (
++            self.config.save_adapter_separately or self.config.adapter_only
++        ):
+             self.logger.debug("Getting run adapter state dict for weight checkpoint")
+             start_time = time.perf_counter()
+             lora_state_dict = self.get_run_adapter_state_dict()
+@@ -462,7 +470,9 @@ class WeightCheckpointManager:
+             lora_state_dict = None
+ 
+         # Convert to HF hub format if needed
+-        if isinstance(model, PreTrainedModelPrimeRL) and model.is_prime_state_dict(state_dict):
++        if self.config.adapter_only:
++            pass
++        elif isinstance(model, PreTrainedModelPrimeRL) and model.is_prime_state_dict(state_dict):
+             self.logger.debug("Converting PrimeRL format to HF format for weight checkpoint")
+             start_time = time.perf_counter()
+             model.convert_to_hf(state_dict)
+diff --git a/src/prime_rl/trainer/models/layers/lora/multi_linear.py b/src/prime_rl/trainer/models/layers/lora/multi_linear.py
+index fd9b59e78..7b2bf73f9 100644
+--- a/src/prime_rl/trainer/models/layers/lora/multi_linear.py
++++ b/src/prime_rl/trainer/models/layers/lora/multi_linear.py
+@@ -60,7 +60,11 @@ class MultiLoRALinear(MultiLoRAModule):
+         self.n_adapters = n_adapters
+         self.alpha = alpha
+         self.lora_dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
+-        self.use_grouped_mm = use_grouped_mm
++        # A grouped GEMM has no grouping benefit for one adapter, while
++        # torch._grouped_mm is a private API with a less mature compiled CUDA
++        # path than ordinary matmul. Use the algebraically equivalent fallback
++        # for the common single-run trainer configuration.
++        self.use_grouped_mm = use_grouped_mm and n_adapters > 1
+         self.in_features = base_layer.in_features
+         self.out_features = base_layer.out_features
+ 
+diff --git a/src/prime_rl/trainer/sft/data.py b/src/prime_rl/trainer/sft/data.py
+index 7aa27b5fb..717ac270d 100644
+--- a/src/prime_rl/trainer/sft/data.py
++++ b/src/prime_rl/trainer/sft/data.py
+@@ -551,6 +551,7 @@ def cat_collate(samples: list[Sample]) -> Batch:
+ 
+ def setup_and_interleave_datasets(
+     dataset_name: str,
++    data_files: str | list[str] | dict[str, str | list[str]] | None,
+     subsets_and_splits: list[tuple[str | None, str]],
+     probabilities: list[float] | None,
+     stopping_strategy: Literal["first_exhausted", "all_exhausted"],
+@@ -560,7 +561,15 @@ def setup_and_interleave_datasets(
+     datasets = []
+     for subset, split in subsets_and_splits:
+         logger.debug(f"Loading dataset {dataset_name} with {subset=} and {split=}")
+-        dataset = cast(Dataset, load_dataset(dataset_name, subset, split=split))
++        dataset = cast(
++            Dataset,
++            load_dataset(
++                dataset_name,
++                subset,
++                split=split,
++                data_files=data_files,
++            ),
++        )
+         num_examples = len(dataset)
+         dataset = dataset.add_column("__subset", [subset] * num_examples, new_fingerprint=str(uuid.uuid4()))
+         dataset = dataset.add_column("__split", [split] * num_examples, new_fingerprint=str(uuid.uuid4()))
+@@ -586,6 +595,7 @@ def load_sft_dataset(config: SFTDataConfig) -> Dataset:
+     if config.subsets is None and config.splits is None:
+         return setup_and_interleave_datasets(
+             dataset_name=config.name,
++            data_files=config.data_files,
+             subsets_and_splits=[(None, "train")],
+             probabilities=config.probabilities,
+             stopping_strategy=config.stopping_strategy,
+@@ -594,6 +604,7 @@ def load_sft_dataset(config: SFTDataConfig) -> Dataset:
+         logger.debug(f"Loading datasets for subsets {config.subsets} with default split 'train'")
+         return setup_and_interleave_datasets(
+             dataset_name=config.name,
++            data_files=config.data_files,
+             subsets_and_splits=[(subset, "train") for subset in config.subsets],
+             probabilities=config.probabilities,
+             stopping_strategy=config.stopping_strategy,
+@@ -602,6 +613,7 @@ def load_sft_dataset(config: SFTDataConfig) -> Dataset:
+         logger.debug(f"Loading datasets for splits {config.splits} with default subset 'None'")
+         return setup_and_interleave_datasets(
+             dataset_name=config.name,
++            data_files=config.data_files,
+             subsets_and_splits=[(None, split) for split in config.splits],
+             probabilities=config.probabilities,
+             stopping_strategy=config.stopping_strategy,
+@@ -611,6 +623,7 @@ def load_sft_dataset(config: SFTDataConfig) -> Dataset:
+         logger.debug(f"Loading datasets for subsets {config.subsets} with splits {config.splits}")
+         return setup_and_interleave_datasets(
+             dataset_name=config.name,
++            data_files=config.data_files,
+             subsets_and_splits=list(zip(config.subsets, config.splits)),
+             probabilities=config.probabilities,
+             stopping_strategy=config.stopping_strategy,
