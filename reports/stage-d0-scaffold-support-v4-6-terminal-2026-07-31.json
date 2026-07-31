@@ -1,0 +1,93 @@
+{
+  "analysis": "stage-d0-scaffold-support-v4-6-terminal",
+  "checks": {
+    "bounded_repair_was_exhausted": true,
+    "fixture_schema_failure_exact": true,
+    "isolated_canonical_retention_passed": true,
+    "merged_vllm_health_passed": true,
+    "no_fixture_output_observed": true,
+    "no_power_output_observed": true,
+    "protocol_frozen_and_audit_passed": true,
+    "retained_archive_identity_exact": true
+  },
+  "controlling_audit": "reports/stage-d0-scaffold-support-preregistration-audit-v4-6.json",
+  "controlling_audit_sha256": "5465714151ed210fdc2c7e4918bbfd95b83f655ee0c709df7ec8296bbc5b3f02",
+  "controlling_protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v4-6.json",
+  "controlling_protocol_sha256": "320c119ad7348f9197ae107416a8aecfedfceb538eecadb4ae005fd791f366cf",
+  "disposition": "Close v4.6. Do not restart or redeploy it. Any successor must be separately frozen and must repair the fixture schema with an end-to-end task-loading preflight before paid work.",
+  "evidence": {
+    "archive": "runs/stage-d0/scaffold-support-v4-6-terminal-evidence.tar.gz",
+    "archive_byte_length": 143043,
+    "archive_sha256": "17c00260c797b39a22ac822f98dbb827b0f9141135c76ba53bfedc3af37325ae",
+    "members": [
+      "runs/stage-d0/scaffold-support-v4-6/archive-manifest-recomputed.json",
+      "runs/stage-d0/scaffold-support-v4-6/deployed-adapter-manifest.json",
+      "runs/stage-d0/scaffold-support-v4-6/gpu-resource-selected.csv",
+      "runs/stage-d0/scaffold-support-v4-6/inference-selected.log",
+      "runs/stage-d0/scaffold-support-v4-6/retention-ledger.json",
+      "runs/stage-d0/scaffold-support-v4-6/retention/canonical-action-1.json",
+      "runs/stage-d0/scaffold-support-v4-6/retention/canonical-action-2.json",
+      "runs/stage-d0/scaffold-support-v4-6/retention/canonical-root-1.json",
+      "runs/stage-d0/scaffold-support-v4-6/retention/canonical-root-2.json",
+      "runs/stage-d0/scaffold-support-v4-6/retention/extraction-1-manifest.json",
+      "runs/stage-d0/scaffold-support-v4-6/retention/extraction-2-manifest.json",
+      "runs/stage-d0/scaffold-support-v4-6/runtime-action-score.log",
+      "runs/stage-d0/scaffold-support-v4-6/runtime-action-scores.json",
+      "runs/stage-d0/scaffold-support-v4-6/runtime-health.json",
+      "runs/stage-d0/scaffold-support-v4-6/runtime-root-score.log",
+      "runs/stage-d0/scaffold-support-v4-6/runtime-root-scores.json",
+      "runs/stage-d0/scaffold-support-v4-6/selected-fixture-control.log",
+      "runs/stage-d0/scaffold-support-v4-6/selected-fixture.log",
+      "runs/stage-d0/scaffold-support-v4-6/selected-merge-manifest.json",
+      "stage-d-v4-6-launcher.log"
+    ]
+  },
+  "passes": true,
+  "resources": {
+    "active_pods_after_termination": 0,
+    "attempt_1_cost_usd": 0.1484,
+    "attempt_2_cost_usd": 0.1748,
+    "persistent_disks_after_termination": 0,
+    "v4_6_total_cost_usd": 0.32320000000000004,
+    "wallet_after_v4_6_usd": 46.0744,
+    "wallet_before_v4_6_usd": 46.3976,
+    "wallet_delta_usd": 0.32319999999999993
+  },
+  "schema_version": 1,
+  "signed_payload_sha256": "c016d8e442c0eae6ddbd2c6929c5e50192be7e08a958dd1816575d1dd16abcd4",
+  "status": "terminal_before_fixture_model_call_and_power_audit",
+  "terminal_failure": {
+    "failure": "The frozen fixture row lacks answer_type, while the shared v2 task loader requires row['answer_type'].",
+    "fixture_model_calls": 0,
+    "fixture_outputs": 0,
+    "interpretation": "This does not invalidate the exact adapter-retention or merged-vLLM health passes. It leaves target eligibility and Stage D power unmeasured.",
+    "outcome_independent": true,
+    "power_audit_model_calls": 0,
+    "scientific_arm_outcomes": 0,
+    "stage": "selected_fixture_task_loading"
+  },
+  "transfer_repair": "configs/stage-d/stage-d0-scaffold-support-transfer-repair-v4-6-2.json",
+  "transfer_repair_sha256": "7059cd969049325e6c3d863576491f0aa2381c15046f95b444575a3b3db1f2bf",
+  "validated_results": {
+    "merged_vllm_health": {
+      "checks": {
+        "all_payloads_signed": true,
+        "all_runtime_values_finite": true,
+        "canonical_runtime_case_sets_exact": true,
+        "canonical_runtime_greedy_tokens_agree": true,
+        "canonical_runtime_root_cases_exact": true,
+        "canonical_runtime_root_routes_exact": true,
+        "canonical_runtime_root_token_ids_exact": true,
+        "runtime_root_model_source_exact": true
+      },
+      "passes": true,
+      "signed_payload_sha256": "ff8d24297990aadaa14a5baf61873155839c7f0eb3f988eff8000833e4aa73d3"
+    },
+    "retention": {
+      "action_payloads_byte_identical": true,
+      "passes": true,
+      "root_payloads_byte_identical": true,
+      "signed_payload_sha256": "8891fe4a2b24c4acc93b134b16983592bab9e3b408a61730cdfff187a311ac91"
+    }
+  }
+}
