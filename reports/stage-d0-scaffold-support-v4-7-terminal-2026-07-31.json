@@ -1,0 +1,50 @@
+{
+  "analysis": "stage-d0-scaffold-support-v4-7-terminal",
+  "attempts": [
+    {
+      "cost_usd": 0.0956,
+      "failure": "root-owned /workspace prevented model/cache directory creation",
+      "launcher_log": "runs/stage-d0/scaffold-support-v4-7-attempt-1/launcher.log",
+      "launcher_log_sha256": "74730c99215c5beaaf0404eebfda40c2a371747c3cb73cb3779b30c2bce08114",
+      "pod_id": "3d0b2695ecdb4cf894fb16c162ecf177"
+    },
+    {
+      "cost_usd": 0.0455,
+      "failure": "root-owned /workspace prevented uv cache initialization",
+      "launcher_log": "runs/stage-d0/scaffold-support-v4-7-attempt-2/launcher.log",
+      "launcher_log_sha256": "3942f55ae8dfbaf59b025607bfcecf26d254b3cf1cf7c772835b757bdda0d22d",
+      "pod_id": "89b96117b6854c3aa241ad0fced6bae1"
+    }
+  ],
+  "checks": {
+    "attempt_1_root_owned_workspace_failure_exact": true,
+    "attempt_2_uv_workspace_failure_exact": true,
+    "both_failures_precede_production_loader_and_model_request": true,
+    "bounded_repair_exhausted": true,
+    "persistent_disks_zero": true,
+    "pods_terminated": true,
+    "protocol_and_audit_exact": true
+  },
+  "controlling_audit": "reports/stage-d0-scaffold-support-preregistration-audit-v4-7.json",
+  "controlling_audit_sha256": "04fdd854dc5fa291aa562111836a8ef8785640eab7312df8f0fc0b8da22b34db",
+  "controlling_protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v4-7.json",
+  "controlling_protocol_sha256": "e4ba378f1db5c2f61f8e170f598c3c256a8704ca7530ee61922492a2c72b96ab",
+  "disposition": "Close v4.7. Never restart or redeploy it. A separately frozen successor may preserve all scientific fields and move uv runtime state beneath the writable repository only after auditing every absolute runtime path.",
+  "environment_repair": "configs/stage-d/stage-d0-scaffold-support-environment-repair-v4-7-2.json",
+  "environment_repair_sha256": "c3a8c81e307298c3867a027daac8110429e31bf283e8755a449cc6adce24871c",
+  "model_request_counts": {
+    "fixture": 0,
+    "power": 0,
+    "scientific": 0
+  },
+  "passes": true,
+  "resources": {
+    "active_pods_after_termination": 0,
+    "persistent_disks_after_termination": 0,
+    "total_v4_7_cost_usd": 0.1411,
+    "wallet_after_termination_usd": 45.9333
+  },
+  "schema_version": 1,
+  "signed_payload_sha256": "e904e9ad32f78036c7d1bf15870e3284fcdc191f7766b9eff3475a0baaff043c",
+  "status": "terminal_before_production_loader_or_model_request"
+}
