@@ -28,10 +28,10 @@ function Write-GuardLog {
     Add-Content -LiteralPath $logFile -Value "$timestamp`t$Message"
 }
 
-if ($terminationTrigger -le [DateTimeOffset]::UtcNow) {
-    throw "termination trigger is not in the future"
-}
 Write-GuardLog "START pod=$PodId created=$($created.ToString('o')) cap=$($absoluteCap.ToString('o')) trigger=$($terminationTrigger.ToString('o'))"
+if ($terminationTrigger -le [DateTimeOffset]::UtcNow) {
+    Write-GuardLog "LATE_START termination trigger already reached"
+}
 
 while ([DateTimeOffset]::UtcNow -lt $terminationTrigger) {
     $statusOutput = & prime --plain pods status $PodId --output json 2>&1
@@ -60,16 +60,18 @@ do {
     $terminateOutput = & prime --plain pods terminate $PodId --yes 2>&1
     Write-GuardLog "TERMINATE_RESULT exit=$LASTEXITCODE $($terminateOutput -join ' ')"
     Start-Sleep -Seconds 10
-    $statusOutput = & prime --plain pods status $PodId --output json 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-GuardLog "CONFIRMED absent"
-        exit 0
+    $listOutput = & prime --plain pods list --output json 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $podList = ($listOutput -join "`n") | ConvertFrom-Json
+        $matching = @($podList.pods | Where-Object { $_.id -eq $PodId })
+        if ($matching.Count -eq 0) {
+            Write-GuardLog "CONFIRMED absent from authoritative active-pod list"
+            exit 0
+        }
+        Write-GuardLog "CONFIRM_ACTIVE status=$($matching[0].status)"
     }
-    $status = ($statusOutput -join "`n") | ConvertFrom-Json
-    Write-GuardLog "CONFIRM_STATUS $($status.status)"
-    if ($status.status -in @("TERMINATED", "FAILED", "DELETED")) {
-        Write-GuardLog "CONFIRMED terminal"
-        exit 0
+    else {
+        Write-GuardLog "CONFIRM_ERROR $($listOutput -join ' ')"
     }
 } while ([DateTimeOffset]::UtcNow -lt $shutdownDeadline)
 
