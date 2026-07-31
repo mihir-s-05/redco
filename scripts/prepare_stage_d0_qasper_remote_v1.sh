@@ -9,9 +9,13 @@ verifiers_commit="b13ba60da63cea91389e7575766b7270d0d11fc5"
 uv_bin="/home/ubuntu/.local/uv-latest/uv"
 
 test "$(sha256sum "$archive" | cut -d ' ' -f 1)" = "$archive_sha256"
-test ! -e "$workspace/redco"
-mkdir "$workspace/redco"
-tar -xzf "$archive" -C "$workspace/redco"
+if ! test -d "$workspace/redco"; then
+  mkdir "$workspace/redco"
+  tar -xzf "$archive" -C "$workspace/redco"
+else
+  test -f "$workspace/redco/pyproject.toml"
+  test -f "$workspace/redco/scripts/run_stage_d0_qasper_feasibility_v1.sh"
+fi
 
 if ! test -x "$uv_bin"; then
   curl -LsSf https://astral.sh/uv/0.12.0/install.sh |
@@ -19,9 +23,11 @@ if ! test -x "$uv_bin"; then
 fi
 "$uv_bin" --version
 
-git clone --filter=blob:none --no-checkout \
-  https://github.com/PrimeIntellect-ai/prime-rl.git \
-  "$workspace/redco/external/prime-rl"
+if ! test -d "$workspace/redco/external/prime-rl/.git"; then
+  git clone --filter=blob:none --no-checkout \
+    https://github.com/PrimeIntellect-ai/prime-rl.git \
+    "$workspace/redco/external/prime-rl"
+fi
 git -C "$workspace/redco/external/prime-rl" checkout "$prime_commit"
 git -C "$workspace/redco/external/prime-rl" submodule update \
   --init --depth 1 deps/pydantic-config deps/renderers deps/verifiers
