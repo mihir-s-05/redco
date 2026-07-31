@@ -1,0 +1,27 @@
+diff --git a/src/rlm/mcp.py b/src/rlm/mcp.py
+index 9fc9f08..f52a124 100644
+--- a/src/rlm/mcp.py
++++ b/src/rlm/mcp.py
+@@ -24,7 +24,12 @@ from typing import Any
+ 
+ from mcp import ClientSession, StdioServerParameters
+ from mcp.client.stdio import stdio_client
+-from mcp.client.streamable_http import streamablehttp_client
++try:
++    from mcp.client.streamable_http import streamable_http_client
++except ImportError:  # MCP < 2.0 used the unseparated historical name.
++    from mcp.client.streamable_http import (
++        streamablehttp_client as streamable_http_client,
++    )
+ from mcp.types import Tool
+ 
+ MCP_CONFIG_ENV = "RLM_MCP_CONFIG"
+@@ -100,7 +105,7 @@ async def _client_session(
+     if isinstance(normalized, str) or "url" in normalized:
+         url, headers = _http_connection(normalized)
+         async with (
+-            streamablehttp_client(url, headers=headers or None) as (read, write, _),
++            streamable_http_client(url, headers=headers or None) as (read, write, _),
+             ClientSession(read, write) as session,
+         ):
+             yield session

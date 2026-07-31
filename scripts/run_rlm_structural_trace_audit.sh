@@ -27,6 +27,9 @@ fi
 test "$(
   sha256sum patches/rlm-structural-trace-headers.patch | cut -d ' ' -f 1
 )" = "589d412de4aff70ecfd52e35e474ef42c9033e5a221c7db9929ee838b24bcfb9"
+test "$(
+  sha256sum patches/rlm-mcp-client-symbol-compat.patch | cut -d ' ' -f 1
+)" = "0706fe4aa96c8c9e648ca55312c433797d923958b422ca27386085b4cfed87bd"
 case "$tool_patch_mode" in
   all_turns)
     tool_patch="patches/rlm-required-tool-choice.patch"
@@ -71,12 +74,16 @@ git -C "$rlm_worktree" checkout --quiet \
 git -C "$rlm_worktree" apply \
   "$repo_root/patches/rlm-structural-trace-headers.patch"
 git -C "$rlm_worktree" apply \
+  "$repo_root/patches/rlm-mcp-client-symbol-compat.patch"
+git -C "$rlm_worktree" apply \
   "$repo_root/$tool_patch"
 mkdir -p "$rlm_tool_root/bin" "$rlm_tool_root/tools"
 UV_TOOL_BIN_DIR="$rlm_tool_root/bin" \
   UV_TOOL_DIR="$rlm_tool_root/tools" \
   "$uv_bin" tool install --python 3.12 --editable "$rlm_worktree"
 test -x "$rlm_tool_root/bin/rlm"
+"$rlm_tool_root/tools/rlm/bin/python" -c \
+  "import rlm.mcp; assert hasattr(rlm.mcp, 'streamable_http_client')"
 
 git clone --quiet \
   "$repo_root/external/prime-rl/deps/verifiers" \

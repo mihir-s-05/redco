@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "status": "frozen_before_relaunch_and_before_any_model_call",
+  "parent_protocol": "configs/stage-d/stage-d0-qasper-feasibility-preregistration-v1.json",
+  "parent_protocol_sha256": "30ac3bbccd7a8362a39a96193eb4ff7058b7f6dcdcc8253ddbbe2f4f64b0bfff",
+  "prior_bootstrap_amendment": "configs/stage-d/stage-d0-qasper-feasibility-bootstrap-amendment-v1-2.json",
+  "prior_bootstrap_amendment_sha256": "879440187895e243521183305a8e559a65a75cd623b67fd9532acc7c71b61d0d",
+  "failed_attempt": {
+    "classification": "outcome-independent pinned-runtime compatibility failure",
+    "model_download_completed": true,
+    "inference_server_started": true,
+    "model_api_calls": 0,
+    "model_generated_tokens": 0,
+    "natural_model_completions_observed": 0,
+    "fixture_model_completions_observed": 0,
+    "scientific_outputs_observed": false,
+    "trace_records": 1,
+    "trace_disposition": "The sole trace is a preserved failed harness record with turns=0, calls=[], model duration=0.0, HarnessError, and no reward component. Its numeric reward=0.0 is the framework failure sentinel and is excluded from every feasibility statistic.",
+    "error": "The pinned RLM source imported MCP's historical streamablehttp_client symbol, while uv tool installation resolved MCP 2.0.0, which exposes streamable_http_client. The harness exited during Python import before reaching the model endpoint.",
+    "evidence_bundle": "runs/stage-d0/qasper-feasibility-v1-infra-attempt2.tar.gz",
+    "evidence_bundle_sha256": "3511545ffb360b8f8c20c2d348e97ca4c52e9855aca337c1081b71ebc793cb9e"
+  },
+  "bounded_repair": {
+    "change": "Apply a compatibility-only RLM patch that imports MCP 2.x's streamable_http_client and falls back to the historical pre-2.0 name. Add an executable import regression after uv tool installation.",
+    "scope": "harness startup compatibility only",
+    "compatibility_patch": "patches/rlm-mcp-client-symbol-compat.patch",
+    "compatibility_patch_sha256": "0706fe4aa96c8c9e648ca55312c433797d923958b422ca27386085b4cfed87bd",
+    "preparation_script": "scripts/run_rlm_structural_trace_audit.sh",
+    "preparation_script_sha256": "ed64f04583d9ab9295dcccfbd12c89d0d1def50777d03d49639564b01dc30738",
+    "live_import_regression": "passed against the installed MCP 2.0.0 tool environment before this amendment was frozen",
+    "scientific_fields_changed": false,
+    "model_or_checkpoint_changed": false,
+    "dataset_or_task_changed": false,
+    "prompt_or_seed_changed": false,
+    "decoding_changed": false,
+    "threshold_or_decision_rule_changed": false,
+    "resource_changed": false
+  },
+  "repair_rule_supersession": {
+    "reason": "The user explicitly revised the project rule so demonstrated environment failures unrelated to the tested construct terminate the current GPU attempt, are preserved, and may be fixed and redeployed rather than terminating the scientific case.",
+    "new_rule": "An outcome-independent infrastructure defect may receive a versioned repair and redeployment only when the complete failed evidence is preserved and there were zero successful model API calls, zero sampled model tokens, and zero scientific outcomes. Once any model output is observed, no affected episode may be rerun. Scientific settings and decision rules remain immutable.",
+    "effect": "This supersedes only the parent protocol's numerical relaunch cap and v1-2's one-relaunch sentence. It does not loosen any scientific field, resource ceiling, artifact requirement, or no-resampling rule."
+  },
+  "authorization": "Relaunch is authorized on the same pod after syncing the two repaired files and re-running the import regression. Any later defect is judged only by the superseding zero-model-output rule above."
+}
