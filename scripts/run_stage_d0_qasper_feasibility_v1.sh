@@ -104,7 +104,7 @@ if test "$ready" != "1"; then
 fi
 grep -Fx "REDCO_STRICT_TOOL_CALLING_ENV=1" "$inference_log"
 
-{
+(
   cd "$verifiers_worktree"
   VLLM_API_KEY=EMPTY \
   UV_PROJECT_ENVIRONMENT="$verifiers_environment" \
@@ -143,7 +143,7 @@ grep -Fx "REDCO_STRICT_TOOL_CALLING_ENV=1" "$inference_log"
     --top-p 1.0 \
     --max-completion-tokens 768 \
     --max-total-tokens 8192
-} >"$control_log" 2>&1
+) >"$control_log" 2>&1
 
 fixture_trace="$run_root/fixture/traces.jsonl"
 fixture_sha256="$(sha256sum "$fixture_trace" | cut -d ' ' -f 1)"

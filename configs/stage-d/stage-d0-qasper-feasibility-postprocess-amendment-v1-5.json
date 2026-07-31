@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "status": "frozen_after_live-smoke observation and before any fixture-replay model call",
+  "parent_protocol": "configs/stage-d/stage-d0-qasper-feasibility-preregistration-v1.json",
+  "parent_protocol_sha256": "30ac3bbccd7a8362a39a96193eb4ff7058b7f6dcdcc8253ddbbe2f4f64b0bfff",
+  "prior_renderer_amendment": "configs/stage-d/stage-d0-qasper-feasibility-renderer-amendment-v1-4.json",
+  "prior_renderer_amendment_sha256": "3165c6f514241a22ebd009d71045bb9613454d6f012f6e83f8370258fe561de7",
+  "observed_inputs": {
+    "natural_trace": "runs/stage-d0/qasper-feasibility-v1/natural/traces.jsonl",
+    "natural_trace_sha256": "317d031b1528dd1191e5415102d592d1070fc262c5df4eafe684652e99e87c6b",
+    "natural_episodes": 32,
+    "fixture_trace": "runs/stage-d0/qasper-feasibility-v1/fixture/traces.jsonl",
+    "fixture_trace_sha256": "c826975f1bbe459318fe12e51f32886d69b61e95ccdeac18c74622d87edbdf1f",
+    "fixture_episodes": 1,
+    "fixture_replay_alternatives_observed": 0,
+    "fixture_replay_terminals_observed": 0
+  },
+  "failure": {
+    "classification": "post-sampling working-directory defect",
+    "error": "The grouped natural/fixture block used shell braces around a cd into the verifier worktree. Because braces do not create a subshell, the later relative fixture path resolved under /tmp/redco-verifiers-structural and sha256sum stopped before fixture replay.",
+    "natural_or_fixture_sampling_affected": false,
+    "observed_trace_bytes_changed": false,
+    "scientific_settings_changed": false
+  },
+  "repair": {
+    "launcher_change": "Use a subshell for the verifier working-directory block.",
+    "launcher_path": "scripts/run_stage_d0_qasper_feasibility_v1.sh",
+    "launcher_sha256": "9bd1fecd382957614558fd56cc246be9398dc2773241fb0ddfa96d94af535930",
+    "postprocess_script": "scripts/resume_stage_d0_qasper_postprocess_v1.sh",
+    "postprocess_script_sha256": "4ca0b0748af4834db45146a84addf05895a7e8d002b33ad84dbac1d3e8cd7be2",
+    "allowed_actions": [
+      "restart the exact frozen inference server",
+      "verify the two observed trace hashes",
+      "generate the preregistered one alternative per forced child for the first and only time",
+      "run paired cache/path replay",
+      "run the deterministic offline scorer",
+      "write artifact hashes"
+    ],
+    "forbidden_actions": [
+      "rerun any natural episode",
+      "rerun the forced fixture episode",
+      "change the observed trace bytes",
+      "change replay seeds, counts, temperature, or token limits",
+      "change any scientific threshold or interpretation"
+    ]
+  },
+  "natural_gate_interim_audit": {
+    "status": "definitive fail regardless of fixture postprocessing",
+    "parseable": "1/32",
+    "all_verbatim": "1/32",
+    "eligible_child_targets": "0/32",
+    "informative_groups": "0/8",
+    "median_total_calls": 4.0,
+    "median_root_calls": 4.0,
+    "median_child_calls": 0.0,
+    "unique_episode_seeds": 32,
+    "meaning": "The natural task interface does not provide the spontaneous child decisions or valid reward diversity required for a stock learning gate. Postprocessing is completed only to preserve the separate forced-fixture plumbing evidence."
+  },
+  "authorization": "Run the postprocess-only script once. It cannot authorize stock learning because the natural gate has already failed."
+}
