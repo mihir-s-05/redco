@@ -1,0 +1,56 @@
+{
+  "schema_version": 2,
+  "dataset": "allenai/qasper",
+  "source_revision": "fdc9d8214fbab5dd782958601db4d678e6934a54",
+  "converted_parquet_revision": "06806e4608976fc2fac0a090ac425d5b2b29caf4",
+  "license": "cc-by-4.0",
+  "task": "deterministic single-paper exact-evidence extraction",
+  "selection": {
+    "order": "source paper order, then first eligible question",
+    "one_question_per_paper": true,
+    "paper_disjoint_splits": true,
+    "reference_span_disjoint_splits": true,
+    "train_papers": 88,
+    "validation_papers": 32,
+    "maximum_paper_characters": 60000,
+    "minimum_span_characters": 20,
+    "exclude_unanswerable_or_empty_evidence": true
+  },
+  "audit": {
+    "split_counts": {
+      "train": 88,
+      "validation": 32
+    },
+    "unique_papers": 120,
+    "unique_questions": 120,
+    "answer_types": {
+      "train": {
+        "abstractive": 14,
+        "yes_no": 18,
+        "extractive": 56
+      },
+      "validation": {
+        "extractive": 17,
+        "abstractive": 8,
+        "yes_no": 7
+      }
+    },
+    "paper_characters": {
+      "minimum": 5805.0,
+      "median": 24057.5,
+      "p90": 36732.0,
+      "maximum": 55213.0
+    },
+    "reference_characters": {
+      "minimum": 119.0,
+      "median": 735.5,
+      "p90": 1574.0,
+      "maximum": 2159.0
+    }
+  },
+  "output": {
+    "path": "datasets/stage-d/qasper-deterministic-v4.jsonl",
+    "bytes": 3027021,
+    "sha256": "88fa2c114d2f251b8ce0400023980fe652e4733d14b0357f5517f517d5775d71"
+  }
+}

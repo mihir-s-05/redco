@@ -6,8 +6,10 @@ import pytest
 
 from redco.analysis.stage_d_target_eligibility import (
     _snapshot,
+    _target_behavior_logprobs,
     aggregate_support,
 )
+from redco.integrations.signed_subprocess import sign_payload
 from redco.integrations.verifiers_trace import RecordedPolicyCall
 
 
@@ -73,14 +75,45 @@ def test_snapshot_excludes_target_action_and_reward(tmp_path: Path) -> None:
     assert len(snapshot["sha256"]) == 64
 
 
+def test_behavior_logprobs_must_be_finite_and_token_aligned() -> None:
+    target = _call(0, depth=1, action=(7, 8))
+    raw = {"nodes": [{"logprobs": [-0.1, -0.2]}]}
+    assert _target_behavior_logprobs(raw, target) == [-0.1, -0.2]
+
+    with pytest.raises(ValueError, match="align"):
+        _target_behavior_logprobs(
+            {"nodes": [{"logprobs": [-0.1]}]}, target
+        )
+    with pytest.raises(ValueError, match="finite"):
+        _target_behavior_logprobs(
+            {"nodes": [{"logprobs": [-0.1, float("nan")]}]}, target
+        )
+
+
 def test_support_aggregate_requires_58_of_64() -> None:
     passing = [
-        {
-            "trace_id": f"trace-{index}",
-            "eligible": index < 60,
-            "informative": index < 58,
-            "joint_eligible_and_informative": index < 58,
-        }
+        sign_payload(
+            {
+                "slot_id": f"slot-{index}",
+                "trace_id": f"trace-{index}",
+                "paper_id": f"paper-{index}",
+                "answer_type": (
+                    "abstractive"
+                    if index % 3 == 0
+                    else "extractive"
+                    if index % 3 == 1
+                    else "yes_no"
+                ),
+                "replicate": 0,
+                "seed_contract": True,
+                "selected_initialization_sha256": "a" * 64,
+                "root_calls": 2,
+                "child_calls": 1,
+                "eligible": index < 60,
+                "informative": index < 58,
+                "joint_eligible_and_informative": index < 58,
+            }
+        )
         for index in range(64)
     ]
     report = aggregate_support(passing)
@@ -88,9 +121,14 @@ def test_support_aggregate_requires_58_of_64() -> None:
     assert report["joint_eligible_and_informative"] == 58
     assert report["passes"]
 
-    failing = [dict(row) for row in passing]
-    failing[57]["informative"] = False
-    failing[57]["joint_eligible_and_informative"] = False
+    failing = []
+    for index, row in enumerate(passing):
+        unsigned = dict(row)
+        unsigned.pop("signed_payload_sha256")
+        if index == 57:
+            unsigned["informative"] = False
+            unsigned["joint_eligible_and_informative"] = False
+        failing.append(sign_payload(unsigned))
     assert not aggregate_support(failing)["passes"]
 
 
@@ -98,13 +136,23 @@ def test_support_aggregate_rejects_duplicate_or_partial_blocks() -> None:
     with pytest.raises(ValueError, match="exactly 64"):
         aggregate_support([])
     duplicate = [
-        {
-            "trace_id": "same",
-            "eligible": True,
-            "informative": True,
-            "joint_eligible_and_informative": True,
-        }
-        for _ in range(64)
+        sign_payload(
+            {
+                "slot_id": "same",
+                "trace_id": f"trace-{index}",
+                "paper_id": f"paper-{index}",
+                "answer_type": "extractive",
+                "replicate": 0,
+                "seed_contract": True,
+                "selected_initialization_sha256": "a" * 64,
+                "root_calls": 2,
+                "child_calls": 1,
+                "eligible": True,
+                "informative": True,
+                "joint_eligible_and_informative": True,
+            }
+        )
+        for index in range(64)
     ]
     with pytest.raises(ValueError, match="unique"):
         aggregate_support(duplicate)

@@ -1,0 +1,271 @@
+{
+  "schema_version": 4,
+  "experiment": "stage-d0-scaffold-support-v4",
+  "status": "frozen_before_any_v4_model_call",
+  "objective": "Select exactly one shared Stage D scaffold initialization and determine whether it yields enough exact fixed-topology, reward-informative child-output targets to justify a separately preregistered three-arm scientific campaign.",
+  "claim_scope": {
+    "can_establish": [
+      "the selected shared initialization produces the audited root-child-root topology at the frozen density",
+      "the first pre-action structurally selected child output supports exact paired full/sliced fixed-topology replay",
+      "K=4 CRN branch groups are reward-informative often enough across 64 independent papers"
+    ],
+    "cannot_establish": [
+      "a learning benefit",
+      "a local-versus-branch-global benefit",
+      "an end-to-end Stage D reward improvement",
+      "serialization or restoration of arbitrary mutable IPython state"
+    ]
+  },
+  "history": {
+    "closed_v1": "reports/stage-d0-qasper-feasibility-terminal-disposition-v1.json",
+    "cpu_successor": "configs/stage-d/stage-d0-scaffold-successor-design-v2.json",
+    "funding": "configs/stage-d/stage-d0-scaffold-successor-funding-amendment-v2-2.json",
+    "v3_preobservation_closure": "reports/stage-d0-scaffold-support-v3-preobservation-closure.json",
+    "v3_model_calls": 0,
+    "v3_optimizer_steps": 0
+  },
+  "base_model": {
+    "repo": "Qwen/Qwen3-4B-Instruct-2507",
+    "revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+    "local_path": "/workspace/models/qwen3-4b-instruct-2507-cdbee75",
+    "renderer_model_name": "Qwen/Qwen3-4B-Instruct-2507"
+  },
+  "shared_interface": {
+    "prompt_profile": "fewshot_scaffold_v2",
+    "prompt": "configs/stage-d/stage-d0-scaffold-fewshot-v2.txt",
+    "only_top_level_tool": "ipython",
+    "recursive_call": "children = await asyncio.gather(*(rlm(prompt) for prompt in child_prompts))",
+    "answer_contract": "exactly one bare Python list of verbatim spans",
+    "classification": "shared scaffold intervention",
+    "identical_across_all_future_arms": true
+  },
+  "paper_partition": {
+    "dataset": "datasets/stage-d/qasper-scaffold-successor-v4.jsonl",
+    "manifest": "datasets/stage-d/qasper-scaffold-successor-manifest-v4.json",
+    "fewshot_support": {
+      "papers": 8,
+      "replicates_per_paper": 8,
+      "rollouts": 64,
+      "role": "binary base-versus-prefrozen-SFT cascade trigger only",
+      "master_seed": "redco-stage-d0-fewshot-support-v4"
+    },
+    "power_audit": {
+      "papers": 64,
+      "replicates_per_paper": 1,
+      "rollouts": 64,
+      "inferential_unit": "paper",
+      "master_seed": "redco-stage-d0-power-audit-v4",
+      "replay_master_seed": "redco-stage-d0-power-replay-v4"
+    },
+    "science_train": {
+      "papers": 16,
+      "not_observed_by_this_gate": true
+    },
+    "science_eval": {
+      "papers": 32,
+      "not_observed_by_this_gate": true
+    },
+    "paper_ids_pairwise_disjoint": true,
+    "all_answer_types_present_in_each_nonempty_split": true
+  },
+  "frozen_cascade": {
+    "step_0_preflight": {
+      "requirements": [
+        "verify every frozen source hash on the pod",
+        "prepare and test the pinned structural verifiers worktree",
+        "parse the real Prime-RL SFTConfig",
+        "render all 32 SFT rows with the pinned prime-qwen3 renderer and tokenizer",
+        "prove every row fits 2048 tokens without truncation",
+        "prove both the assistant tool call and final answer contain trainable tokens",
+        "run the real SFT launcher in dry-run mode",
+        "start no model server before all checks pass"
+      ],
+      "failure": "outcome-independent infrastructure failure; no model output exists"
+    },
+    "step_1_root_support": {
+      "initialization": "base model plus shared scaffold",
+      "sampling": {
+        "temperature": 0.7,
+        "top_p": 1.0,
+        "max_completion_tokens": 768,
+        "max_total_tokens": 8192
+      },
+      "denominator": "all 64 predeclared paper/replicate slots; missing or failed episodes are failures",
+      "seed_audit": "recompute every episode seed from master seed, example ID, and replicate; require all 64 unique and observed roots aligned",
+      "pass_rule": [
+        "at least 58 of 64 are parseable, verbatim, and precursor-eligible",
+        "median child calls is between 1 and 2 inclusive",
+        "p95 child calls is at most 2",
+        "all produced traces are assigned exactly once"
+      ],
+      "pass_disposition": "select base model plus scaffold",
+      "fail_disposition": "run exactly the prefrozen step-8 SFT fallback"
+    },
+    "step_2_conditional_sft": {
+      "trigger": "step_1 fails",
+      "dataset": "datasets/stage-d/scaffold-sft-v2.jsonl",
+      "classification": "shared synthetic scaffold-and-task SFT; not format-only",
+      "config": "configs/stage-d/stage-d0-scaffold-sft-v4.toml",
+      "hardware": "one 48 GB GPU",
+      "optimizer_steps": 8,
+      "candidate_selection": "fixed final step 8 only",
+      "required_physical_checkpoints": [2, 4, 6, 8],
+      "retention_test": "physically archive and re-extract step 8, require adapter bytes exact, and reproduce the frozen vLLM score payload",
+      "deployment": "merge only the re-extracted adapter into an ephemeral directory outside the run root",
+      "cleanup": "delete merged model, reloaded directory, intermediate adapters, and SFT work tree before artifact sync"
+    },
+    "step_3_exact_fixture": {
+      "dataset": "datasets/stage-d/evidence-selection-fixture-v1.jsonl",
+      "papers": 1,
+      "rollouts": 1,
+      "master_seed": "redco-stage-d0-selected-fixture-v4",
+      "replay_master_seed": "redco-stage-d0-selected-fixture-replay-v4",
+      "pass_rule": "one exact eligible target with a regenerated-original arm and three alternatives under one continuation seed"
+    },
+    "step_4_independent_power_audit": {
+      "target_selector": "first depth-one native call in call-index order using pre-action structural fields only",
+      "maximum_targets_per_rollout": 1,
+      "K_including_regenerated_original": 4,
+      "alternatives_per_target": 3,
+      "alternative_sampling": "three IID selected-policy draws with distinct action seeds; duplicate actions are valid observations",
+      "CRN": "regenerated original and all three alternatives share exactly one downstream/root continuation seed",
+      "minimum_f1_range": 0.05,
+      "eligible_definition": [
+        "trace completed",
+        "exactly two root calls and one or two child calls",
+        "finite behavior logprobs exactly aligned to target action tokens",
+        "trace-indexed fixed-topology prompt-splice and exact-key cache capsule",
+        "downstream root provenance",
+        "exact cached full/sliced recorded replay",
+        "one exact regenerated-original full/sliced replay",
+        "three exact alternative full/sliced replays",
+        "parseable verbatim original and alternative outputs"
+      ],
+      "informativeness_definition": "regenerated-original plus three alternative F1 rewards have range at least 0.05",
+      "denominator": "exactly 64 signed paper slots; missing traces, zero-child traces, deterministic topology failures, duplicates, and parse failures remain denominator negatives",
+      "joint_pass_rule": "at least 58 of 64 unique papers are both eligible and informative",
+      "power_interpretation": "The paper is the Bernoulli unit. 58/64 has a two-sided 95% Wilson lower bound above 0.808; at p=0.808, eight groups provide at least five informative groups with probability at least 0.95."
+    }
+  },
+  "restore_scope": {
+    "implemented": "trace-indexed fixed-topology prompt splicing plus exact-key policy cache pairing",
+    "not_claimed": "environment snapshotting or arbitrary IPython heap restoration",
+    "topology_divergence": "signed denominator-negative observation"
+  },
+  "future_science": {
+    "required_arms": [
+      "shared-scaffold stock broadcast",
+      "shared-scaffold branch-global",
+      "shared-scaffold local"
+    ],
+    "byte_identical_initialization_and_interface": true,
+    "primary_outcomes_separate": [
+      "nuisance drift or error at known non-causal targets",
+      "policy calls and generated tokens to the frozen causal criterion"
+    ],
+    "no_composite_score": true,
+    "held_out_evaluation": "32 paper-disjoint final evaluations per arm are budgeted",
+    "requires_separate_preregistration": true
+  },
+  "budget": {
+    "wallet_verified_usd": 46.9399,
+    "support_hardware_maximum_rate_usd_per_hour": 1.0,
+    "support_supervisor_timeout_hours": 6,
+    "support_and_informativeness_ceiling_usd": 3.5,
+    "conditional_sft_and_scoring_ceiling_usd": 3.0,
+    "artifact_recovery_ceiling_usd": 0.5,
+    "scientific_training_reserved_ceiling_usd": 31.817874,
+    "science_evaluation_reserved_usd": 2.0,
+    "untouchable_reserve_usd": 4.0,
+    "full_envelope_usd": 44.817874,
+    "headroom_usd": 2.122026,
+    "abort_if_wallet_cannot_cover_remaining_envelope": true
+  },
+  "support_hardware": {
+    "allowed": [
+      "non-spot 1x48GB A40",
+      "non-spot 1x48GB A6000",
+      "non-spot 1x48GB L40",
+      "non-spot 1x48GB L40S",
+      "non-spot 1x48GB RTX 6000 Ada"
+    ],
+    "maximum_rate_usd_per_hour": 1.0,
+    "forbidden": [
+      "A100",
+      "H100",
+      "spot or preemptible compute",
+      "persistent storage"
+    ],
+    "selection": "cheapest genuinely available qualifying resource after a committed hardware-only amendment",
+    "pods": "at most one; resume the exact v4 pod rather than duplicate",
+    "ssh": "verify noninteractively with C:/Users/mihir/.ssh/id_rsa before sync or model calls"
+  },
+  "repair_policy": {
+    "before_any_model_output": "At most one versioned outcome-independent environment repair and redeployment is allowed.",
+    "after_any_model_output": "The v4 deployment is never silently retried and no observed address is rerun. An outcome-independent infrastructure failure closes v4; a separately frozen successor may use an entirely fresh unobserved paper/seed block while preserving scientific metrics and reporting the v4 artifacts.",
+    "after_sft_optimizer_step": "No SFT restart because checkpoints are weights-only.",
+    "after_aggregate": "No threshold, initialization, or prompt retuning.",
+    "scientific_outcome": "No scientific arm is run by this protocol."
+  },
+  "terminal_dispositions": {
+    "power_pass": "freeze the selected initialization bytes/hash and preregister the scientific campaign",
+    "sft_or_fixture_failure": "close v4 before the power audit",
+    "power_failure": "stop Stage D initialization engineering; any later run must be explicitly exploratory",
+    "budget_failure": "stop before further paid work"
+  },
+  "artifact_policy": {
+    "always_local": [
+      "raw traces and run summaries",
+      "signed replay, score, per-slot, and aggregate reports",
+      "renderer and launcher preflights",
+      "control and GPU ledgers",
+      "hash manifests",
+      "billing and terminal report"
+    ],
+    "sft_pass_only": "one compressed selected adapter plus hash",
+    "never_local": [
+      "merged 4B models",
+      "optimizer state",
+      "intermediate adapters",
+      "CUDA or uv caches"
+    ],
+    "teardown": "always terminate compute and confirm zero persistent disks"
+  },
+  "source_sha256": {
+    "configs/stage-d/stage-d0-scaffold-fewshot-v2.txt": "b0db1850aecc8f6f65f530de4ce2ce4ecf6c15a75daf20596564ddf17d7540e2",
+    "configs/stage-d/stage-d0-scaffold-sft-v4.toml": "1136612be9400e180daeed90fdbf16f2b03256473b28049dc5c0354684a931bd",
+    "configs/stage-d/stage-d0-scaffold-inference-base-v3.toml": "71b535c5c875cfe6a86c1ccc8b60449de94f4d3e4c3680e6e665e94304698d48",
+    "configs/stage-d/stage-d0-scaffold-inference-sft-v4.toml": "123e2ec911fccd85e1cdd8a462c52344d2c94155d4347442b577db1c5b140adc",
+    "datasets/stage-d/scaffold-sft-v2.jsonl": "d3ab59cdc9f622e501cc0921407c1929e0d9f5d08230cda7e9cfe843638e388f",
+    "datasets/stage-d/qasper-scaffold-successor-v4.jsonl": "2ed4c2afc74b1a979558ada3899b008fcc1b259c5678b3a5ef1f7070aa4fb932",
+    "datasets/stage-d/qasper-scaffold-successor-manifest-v4.json": "edc43d0a001b8842229f605d563f742e45b862b34db773403a4d7ba96e672f7d",
+    "datasets/stage-d/evidence-selection-fixture-v1.jsonl": "06a22dfea8acc8d7e1cf36f00091610c49cae7cdb7f25ac7d647dc2fcb344783",
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/taskset.py": "7705077fb78dbbfc6b28d50cda3c7dce7df3bc12b2a1f25e1891aa05a2141457",
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/run_feasibility.py": "2885bde81c926b0d1680614c2c1570de73188985df49d1236942bcdcb802435c",
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/seeding.py": "451972d0a44e5c251b15baf4e329f2656daada5f7fb9e4792b3528cbe3b52ad5",
+    "src/redco/analysis/empirical_branch_replay.py": "b374223af9d1369e7928671685194c542760740c3579216753f09a9e021548fe",
+    "src/redco/analysis/stage_d_target_eligibility.py": "5ab50e5e5e9b7ee5b62d13792a7e40aaa265d9f7ec4a90c0de245f860dc63219",
+    "src/redco/analysis/stage_d_scaffold_support.py": "e4774a1ab88b0da14224942cfd8f15a950a8a8a9989229262760e1b839fcf653",
+    "src/redco/analysis/stage_d_branch_group.py": "76b4a2ee454f160441f0fc1539cc66de434ee8452c7c4346a740c066fd12d4a3",
+    "src/redco/analysis/stage_d_power_records.py": "3fad2d5d690bff66d27237a0b493fff1f71573bc3c7559567a328aa8bb339a9b",
+    "scripts/audit_stage_d_scaffold_support.py": "c311f997872a4f126beb7add4f3b6466e2f961efe87af5fbf4f1169c2ab212bd",
+    "scripts/audit_stage_d_target_support.py": "8cceeeb8ea33d67b9020a8e2e3d28ed29346cab186711d5d78ae2da1a4cbadb6",
+    "scripts/split_stage_d_traces.py": "4f9a5651d4f606d48024310dbac523efb93118da66ef5c981f0f0816a0b05d67",
+    "scripts/score_stage_d_replay_fixture.py": "067391208374c86bff435599a600f01c0efa1506a1bc0d8b09449b22edb6e76a",
+    "scripts/run_stage_d_branch_group.py": "7ea03acc9bd7dff03ffad91f11a85a57bdf7b44736cae19e095d75f886906115",
+    "scripts/materialize_stage_d_power_records.py": "3c536e399e2daa7af8701c66b51feb70de9fe9c643116893c5ce9fa1f1880cfe",
+    "scripts/audit_stage_d_sft_renderer_v4.py": "90db376588f4ae5e71562e6c7d1e1df3dc73307edc4c5d16f65fd3692525e3d5",
+    "scripts/run_stage_d0_scaffold_support_v4.sh": "f7d898ab537e1d01078342d71c3e408c2e9b60bb671de3a8871f9e87426c4759",
+    "scripts/run_rlm_structural_trace_audit.sh": "ed64f04583d9ab9295dcccfbd12c89d0d1def50777d03d49639564b01dc30738",
+    "scripts/merge_stage_c_warmstart.py": "06046f345d0ac29e0919d43fce50c2a6ae20a29d03be215785323413e28d0416",
+    "scripts/score_stage_c_policies_vllm.py": "f997e502151fd69b2c4333520008ce5fc57dc540d6d4e896a904e4f185f0b772",
+    "scripts/audit_stage_d0_scaffold_support_preregistration_v4.py": "5b0c84e9f6fc10565a710692cbea5fcd283784430519cc7e2e1656b6b15f0035",
+    "patches/prime-rl-strict-tool-env-guard.patch": "1c52102bf79741d8a1791733397de26d7319b907531317c22d5ec1e6cd29c001",
+    "patches/rlm-structural-trace-headers.patch": "589d412de4aff70ecfd52e35e474ef42c9033e5a221c7db9929ee838b24bcfb9",
+    "patches/rlm-mcp-client-symbol-compat.patch": "0706fe4aa96c8c9e648ca55312c433797d923958b422ca27386085b4cfed87bd",
+    "patches/rlm-root-initial-required-tool-choice.patch": "9730e59d2fc161e2b0dc69bccafca5fc07fe1b94ded06b8c9647e8d3d5a41c75",
+    "patches/verifiers-rlm-structural-trace.patch": "95db874f84fdd1487399d6ee77b11f1726e7ff27c14d0626a1a7e6f2c664b577",
+    "external/prime-rl/packages/prime-rl-configs/src/prime_rl/configs/sft.py": "a248f662e473a0d63f5e11da06792818b813ff8891accc54231ee964de63b8b9",
+    "external/prime-rl/src/prime_rl/trainer/sft/data.py": "958c749090071643f2ae305cd0ca73230bb3237c17452a117c7f926485968cc1"
+  }
+}

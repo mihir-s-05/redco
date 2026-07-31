@@ -160,6 +160,10 @@ async def run_grouped(args: argparse.Namespace) -> int:
                     )
                     records.append(
                         {
+                            "slot_id": (
+                                f"{_task_example_id(task)}::"
+                                f"replicate-{replicate}"
+                            ),
                             "task_position": task_position,
                             "task_index": task.data.idx,
                             "example_id": _task_example_id(task),
@@ -171,8 +175,6 @@ async def run_grouped(args: argparse.Namespace) -> int:
                             "wall_seconds": time.monotonic() - episode_started,
                         }
                     )
-                    if not episode.ok:
-                        return 1
     finally:
         await client.close()
         summary = {

@@ -77,6 +77,21 @@ class EmpiricalBranchPair:
 
 
 @dataclass(frozen=True, slots=True)
+class EmpiricalOriginalArm:
+    target_node_id: str
+    target_call_index: int
+    target_agent_depth: int
+    continuation_seed: int
+    prompt_sha256: str
+    downstream_generation: GeneratedAction
+    full_suffix: ReplayArmResult
+    sliced: ReplayArmResult
+    terminal_artifacts_exact: bool
+    rewards_exact: bool
+    cached_actions_exact: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ReproducibilityAudit:
     seed: int
     first_action_sha256: str
@@ -146,6 +161,7 @@ class EmpiricalReplayReport:
     empirical_sliced_policy_token_raf: float
     same_prompt_same_seed_reproducibility: ReproducibilityAudit
     target_metrics: tuple[EmpiricalTargetMetrics, ...]
+    regenerated_originals: tuple[EmpiricalOriginalArm, ...]
     pairs: tuple[EmpiricalBranchPair, ...]
     passed_representative_micro_gate: bool
     gate_gb_cleared: bool
@@ -290,13 +306,21 @@ class TokenInferenceClient:
                 response_body = response.read()
         except urllib.error.HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(
+            raise InferenceTransportError(
                 f"POST {path} failed with HTTP {exc.code}: {error_body}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise InferenceTransportError(
+                f"POST {path} failed before receiving a response: {exc}"
             ) from exc
         decoded = json.loads(response_body)
         if not isinstance(decoded, dict):
             raise TypeError(f"{path} response must be an object")
         return decoded
+
+
+class InferenceTransportError(RuntimeError):
+    """An outcome-independent inference-service or network failure."""
 
 
 def _request_json(payload: dict[str, object]) -> bytes:
@@ -330,6 +354,42 @@ def build_replay_indices(
     if not sliced:
         raise ValueError("target has no affected suffix policy calls")
     return full, sliced
+
+
+def derive_branch_group_seeds(
+    *,
+    master_seed: str,
+    rollout_id: str,
+    target_node_id: str,
+    final_turn_index: int,
+    alternatives: int,
+) -> tuple[int, tuple[int, ...]]:
+    """Return one CRN continuation seed and unique alternative action seeds."""
+    group = SeedNamespace(
+        master_seed=master_seed,
+        rollout_id=rollout_id,
+        target_id=target_node_id,
+        replicate=1,
+    )
+    continuation_seed = group.derive(
+        EventAddress(
+            parent_node_id=target_node_id,
+            turn_index=final_turn_index,
+            call_slot_index=0,
+        )
+    )
+    action_seeds = tuple(
+        SeedNamespace(
+            master_seed=master_seed,
+            rollout_id=rollout_id,
+            target_id=target_node_id,
+            replicate=index,
+        ).action_seed(index)
+        for index in range(1, alternatives + 1)
+    )
+    if len(set(action_seeds)) != alternatives:
+        raise RuntimeError("alternative action seeds collided")
+    return continuation_seed, action_seeds
 
 
 def execute_cached_arm(
@@ -579,6 +639,7 @@ def run_empirical_replay(
         )
     ).hexdigest()
     pairs: list[EmpiricalBranchPair] = []
+    regenerated_originals: list[EmpiricalOriginalArm] = []
     candidate_hashes_by_target: dict[str, set[str]] = {}
     for target in target_calls:
         if target.agent_depth is None:
@@ -592,21 +653,88 @@ def run_empirical_replay(
             descendants=trace.graph.descendants(target_node_id),
         )
         original_child_text = _message_content(nodes[target.node_index])
+        common_continuation_seed, action_seeds = derive_branch_group_seeds(
+            master_seed=master_seed,
+            rollout_id=trace.trace_id,
+            target_node_id=target_node_id,
+            final_turn_index=final_call.turn_index or 0,
+            alternatives=alternatives_per_target,
+        )
+        regenerated_original = client.generate(
+            final_call.prompt_token_ids,
+            seed=common_continuation_seed,
+            temperature=temperature,
+            max_tokens=continuation_max_tokens,
+        )
+        regenerated_original_text = _clean_action_text(
+            client.detokenize(regenerated_original.token_ids)
+        )
+        regenerated_original_reward = float(
+            regenerated_original_text.strip() == expected_terminal.strip()
+        )
+        original_cache = baseline_cache.fork()
+        original_final_key = PolicyCallKey.from_call(
+            final_call.prompt_token_ids,
+            checkpoint_id=final_call.checkpoint_id,
+            decoding_config_hash=branch_decoding_config_hash,
+            event_seed=common_continuation_seed,
+        )
+        original_cache.record(
+            CachedPolicyAction(
+                original_final_key,
+                regenerated_original.token_ids,
+            )
+        )
+        original_full = execute_cached_arm(
+            mode=ReplayMode.FULL_SUFFIX,
+            calls_by_index=calls_by_index,
+            visited_call_indices=full_indices,
+            final_call_index=final_call.call_index,
+            branch_final_prompt=final_call.prompt_token_ids,
+            branch_final_seed=common_continuation_seed,
+            branch_final_decoding_config_hash=branch_decoding_config_hash,
+            branch_final_action=regenerated_original.token_ids,
+            cache=original_cache.fork(),
+            reward=regenerated_original_reward,
+        )
+        original_sliced = execute_cached_arm(
+            mode=ReplayMode.SLICED,
+            calls_by_index=calls_by_index,
+            visited_call_indices=sliced_indices,
+            final_call_index=final_call.call_index,
+            branch_final_prompt=final_call.prompt_token_ids,
+            branch_final_seed=common_continuation_seed,
+            branch_final_decoding_config_hash=branch_decoding_config_hash,
+            branch_final_action=regenerated_original.token_ids,
+            cache=original_cache.fork(),
+            reward=regenerated_original_reward,
+        )
+        regenerated_originals.append(
+            EmpiricalOriginalArm(
+                target_node_id=target_node_id,
+                target_call_index=target.call_index,
+                target_agent_depth=target.agent_depth,
+                continuation_seed=common_continuation_seed,
+                prompt_sha256=_token_hash(final_call.prompt_token_ids),
+                downstream_generation=regenerated_original,
+                full_suffix=original_full,
+                sliced=original_sliced,
+                terminal_artifacts_exact=(
+                    original_full.terminal_action_sha256
+                    == original_sliced.terminal_action_sha256
+                ),
+                rewards_exact=(
+                    original_full.reward == original_sliced.reward
+                ),
+                cached_actions_exact=(
+                    set(original_sliced.exact_key_reused_call_indices)
+                    <= set(original_full.exact_key_reused_call_indices)
+                ),
+            )
+        )
         for alternative_index in range(1, alternatives_per_target + 1):
-            namespace = SeedNamespace(
-                master_seed=master_seed,
-                rollout_id=trace.trace_id,
-                target_id=target_node_id,
-                replicate=alternative_index,
-            )
-            action_seed = namespace.action_seed(alternative_index)
-            continuation_seed = namespace.derive(
-                EventAddress(
-                    parent_node_id=target_node_id,
-                    turn_index=final_call.turn_index or 0,
-                    call_slot_index=0,
-                )
-            )
+            action_seed = action_seeds[alternative_index - 1]
+            continuation_seed = common_continuation_seed
             candidate = client.generate(
                 target.prompt_token_ids,
                 seed=action_seed,
@@ -648,8 +776,6 @@ def run_empirical_replay(
                 canonical_branch=canonical_branch_prompt,
                 boundary=render_boundary,
             )
-            if branch_prompt == final_call.prompt_token_ids:
-                raise RuntimeError("candidate action did not change the final prompt")
             downstream = client.generate(
                 branch_prompt,
                 seed=continuation_seed,
@@ -774,26 +900,64 @@ def run_empirical_replay(
     terminal_mismatches = sum(not pair.terminal_artifacts_exact for pair in pairs)
     reward_mismatches = sum(not pair.rewards_exact for pair in pairs)
     cache_mismatches = sum(not pair.cached_actions_exact for pair in pairs)
-    full_visits = sum(len(pair.full_suffix.visited_call_indices) for pair in pairs)
-    sliced_visits = sum(len(pair.sliced.visited_call_indices) for pair in pairs)
+    original_terminal_mismatches = sum(
+        not arm.terminal_artifacts_exact for arm in regenerated_originals
+    )
+    original_reward_mismatches = sum(
+        not arm.rewards_exact for arm in regenerated_originals
+    )
+    original_cache_mismatches = sum(
+        not arm.cached_actions_exact for arm in regenerated_originals
+    )
+    full_visits = sum(
+        len(pair.full_suffix.visited_call_indices) for pair in pairs
+    ) + sum(
+        len(arm.full_suffix.visited_call_indices)
+        for arm in regenerated_originals
+    )
+    sliced_visits = sum(
+        len(pair.sliced.visited_call_indices) for pair in pairs
+    ) + sum(
+        len(arm.sliced.visited_call_indices)
+        for arm in regenerated_originals
+    )
     candidate_tokens = sum(
         pair.candidate_action_generation.generated_tokens for pair in pairs
     )
     downstream_tokens = sum(
         pair.downstream_generation.generated_tokens for pair in pairs
+    ) + sum(
+        arm.downstream_generation.generated_tokens
+        for arm in regenerated_originals
     )
     generation_prompt_tokens = sum(
         pair.candidate_action_generation.prompt_tokens
         + pair.downstream_generation.prompt_tokens
         for pair in pairs
+    ) + sum(
+        arm.downstream_generation.prompt_tokens
+        for arm in regenerated_originals
     )
     model_wall = sum(
         pair.candidate_action_generation.wall_seconds
         + pair.downstream_generation.wall_seconds
         for pair in pairs
+    ) + sum(
+        arm.downstream_generation.wall_seconds
+        for arm in regenerated_originals
     ) + repro_first.wall_seconds + repro_second.wall_seconds
-    full_cost = _sum_arm_costs(pair.full_suffix for pair in pairs)
-    sliced_cost = _sum_arm_costs(pair.sliced for pair in pairs)
+    full_cost = _sum_arm_costs(
+        [
+            *(pair.full_suffix for pair in pairs),
+            *(arm.full_suffix for arm in regenerated_originals),
+        ]
+    )
+    sliced_cost = _sum_arm_costs(
+        [
+            *(pair.sliced for pair in pairs),
+            *(arm.sliced for arm in regenerated_originals),
+        ]
+    )
     baseline_generated = sum(
         call.completion_tokens_reported or len(call.action_token_ids)
         for call in calls
@@ -813,6 +977,10 @@ def run_empirical_replay(
         and terminal_mismatches == 0
         and reward_mismatches == 0
         and cache_mismatches == 0
+        and original_terminal_mismatches == 0
+        and original_reward_mismatches == 0
+        and original_cache_mismatches == 0
+        and len(regenerated_originals) == len(target_calls)
         and sliced_visits < full_visits
         and sliced_fraction < 0.9
     )
@@ -855,6 +1023,7 @@ def run_empirical_replay(
         empirical_sliced_policy_token_raf=policy_token_raf,
         same_prompt_same_seed_reproducibility=reproducibility,
         target_metrics=_target_metrics(pairs),
+        regenerated_originals=tuple(regenerated_originals),
         pairs=tuple(pairs),
         passed_representative_micro_gate=passed,
         gate_gb_cleared=False,

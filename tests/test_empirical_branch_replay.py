@@ -8,6 +8,7 @@ from redco.analysis.empirical_branch_replay import (
     _openai_messages,
     _request_json,
     build_replay_indices,
+    derive_branch_group_seeds,
     derive_lossless_render_boundary,
     execute_cached_arm,
     replace_unique,
@@ -106,6 +107,25 @@ def test_replay_indices_isolate_descendants() -> None:
 
     assert full == (2, 3, 4)
     assert sliced == (4,)
+
+
+def test_branch_group_uses_one_crn_seed_and_unique_action_seeds() -> None:
+    continuation, actions = derive_branch_group_seeds(
+        master_seed="master",
+        rollout_id="rollout",
+        target_node_id="target",
+        final_turn_index=1,
+        alternatives=3,
+    )
+    assert continuation > 0
+    assert len(actions) == len(set(actions)) == 3
+    assert derive_branch_group_seeds(
+        master_seed="master",
+        rollout_id="rollout",
+        target_node_id="target",
+        final_turn_index=1,
+        alternatives=3,
+    ) == (continuation, actions)
 
 
 def test_cached_arms_reach_the_same_terminal_action() -> None:

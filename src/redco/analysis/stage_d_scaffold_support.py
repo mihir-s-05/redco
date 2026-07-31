@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import statistics
 from collections import Counter
@@ -19,6 +21,23 @@ from .stage_d_target_eligibility import (
     _policy_node_ids,
     _target_behavior_logprobs,
 )
+
+
+def _derive_episode_seed(
+    master_seed: str, example_id: str, replicate: int
+) -> int:
+    payload = json.dumps(
+        {
+            "master_seed": master_seed,
+            "example_id": example_id,
+            "replicate": replicate,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big") % (
+        2**31 - 1
+    ) + 1
 
 
 def _percentile(values: list[int], percentile: float) -> int:
@@ -96,19 +115,113 @@ def _row(trace: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def evaluate(path: Path) -> dict[str, Any]:
+def evaluate(path: Path, summary_path: Path) -> dict[str, Any]:
     traces = load_trace_records(path)
-    rows = [_row(trace) for trace in traces]
+    traces_by_id = {str(trace.get("id")): trace for trace in traces}
+    if len(traces_by_id) != len(traces):
+        raise ValueError("trace IDs must be unique")
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    master_seed = str(summary["master_seed"])
+    records = summary.get("records") or []
+    rows = []
+    referenced_trace_ids: set[str] = set()
+    for record in records:
+        example_id = str(record["example_id"])
+        replicate = int(record["replicate"])
+        expected_seed = _derive_episode_seed(
+            master_seed, example_id, replicate
+        )
+        trace_ids = [str(value) for value in record.get("trace_ids") or []]
+        trace = (
+            traces_by_id.get(trace_ids[0])
+            if len(trace_ids) == 1
+            else None
+        )
+        if trace is None:
+            row = {
+                "trace_id": f"missing::{record['slot_id']}",
+                "example_id": example_id,
+                "paper_id": None,
+                "root_calls": 0,
+                "child_calls": 0,
+                "exact_call_contract": False,
+                "behavior_logprobs_present": False,
+                "selected_child_reaches_later_root": False,
+                "parseable": False,
+                "verbatim": False,
+                "precursor_eligible": False,
+                "reason": "missing_or_nonunique_trace",
+            }
+            observed_seed = None
+        else:
+            referenced_trace_ids.add(trace_ids[0])
+            try:
+                row = _row(trace)
+            except (IndexError, KeyError, TypeError, ValueError) as error:
+                row = {
+                    "trace_id": trace.get("id"),
+                    "example_id": example_id,
+                    "paper_id": (
+                        ((trace.get("task") or {}).get("data") or {}).get(
+                            "paper_id"
+                        )
+                    ),
+                    "root_calls": 0,
+                    "child_calls": 0,
+                    "exact_call_contract": False,
+                    "behavior_logprobs_present": False,
+                    "selected_child_reaches_later_root": False,
+                    "parseable": False,
+                    "verbatim": False,
+                    "precursor_eligible": False,
+                    "reason": f"{type(error).__name__}: {error}",
+                }
+            root_calls = [
+                call
+                for call in extract_policy_calls(trace)
+                if call.agent_depth == 0
+            ]
+            observed_seed = (
+                root_calls[0].event_seed if root_calls else None
+            )
+        row.update(
+            {
+                "slot_id": record["slot_id"],
+                "replicate": replicate,
+                "expected_seed": expected_seed,
+                "recorded_plan_seed": record["seed"],
+                "observed_root_seed": observed_seed,
+                "plan_seed_contract": expected_seed == record["seed"],
+                "observed_seed_contract": (
+                    observed_seed is None
+                    or record["seed"] == observed_seed
+                ),
+            }
+        )
+        row["precursor_eligible"] = (
+            row["precursor_eligible"]
+            and row["plan_seed_contract"]
+            and row["observed_seed_contract"]
+        )
+        rows.append(row)
     child_counts = [row["child_calls"] for row in rows]
     example_counts = Counter(str(row["example_id"]) for row in rows)
     successes = sum(row["precursor_eligible"] for row in rows)
     checks = {
         "exactly_64_rollouts": len(rows) == 64,
+        "all_traces_accounted_for_once": (
+            referenced_trace_ids == set(traces_by_id)
+        ),
         "eight_examples_with_eight_seeds_each": (
             len(example_counts) == 8
             and set(example_counts.values()) == {8}
         ),
         "at_least_58_precursor_eligible": successes >= 58,
+        "all_64_episode_seeds_unique_and_exact": (
+            len({row["expected_seed"] for row in rows}) == 64
+            and all(row["plan_seed_contract"] for row in rows)
+            and all(row["observed_seed_contract"] for row in rows)
+        ),
         "median_child_calls_in_cost_band": (
             bool(child_counts)
             and 1 <= statistics.median(child_counts) <= 2

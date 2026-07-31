@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import statistics
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -11,7 +13,10 @@ from typing import Any
 from redco.contracts import canonical_json
 from redco.env.replay import ReplayMode
 from redco.env.tracer import EventNodeKind
-from redco.integrations.signed_subprocess import sign_payload
+from redco.integrations.signed_subprocess import (
+    sign_payload,
+    verify_signed_payload,
+)
 from redco.integrations.verifiers_provenance import import_trace_file
 from redco.integrations.verifiers_trace import (
     RecordedPolicyCall,
@@ -26,6 +31,18 @@ from .empirical_branch_replay import (
 )
 
 MINIMUM_REWARD_RANGE = 0.05
+
+
+class ArtifactIntegrityError(ValueError):
+    """A corrupted or unsigned artifact, never a scientific negative."""
+
+
+def _signature_valid(value: dict[str, Any]) -> bool:
+    try:
+        verify_signed_payload(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _sha256(value: bytes) -> str:
@@ -65,7 +82,14 @@ def _target_behavior_logprobs(
         raise ValueError("target node has no behavior logprobs")
     if any(not isinstance(value, (int, float)) for value in values):
         raise TypeError("target behavior logprobs must be numeric")
-    return [float(value) for value in values]
+    numeric = [float(value) for value in values]
+    if len(numeric) != len(target.action_token_ids):
+        raise ValueError(
+            "target behavior logprobs do not align with action tokens"
+        )
+    if any(not math.isfinite(value) for value in numeric):
+        raise ValueError("target behavior logprobs must be finite")
+    return numeric
 
 
 def _snapshot(
@@ -90,9 +114,9 @@ def _snapshot(
     ]
     snapshot = {
         "schema_version": 1,
-        "restore_scope": (
-            "fixed-topology policy-call cache plus content-addressed QASPER "
-            "workspace; not arbitrary IPython heap serialization"
+        "scope": (
+            "trace-indexed fixed-topology prompt-splice and exact-key cache "
+            "capsule; this is provenance metadata, not an environment snapshot"
         ),
         "source_trace": {
             "path": trace_path.as_posix(),
@@ -207,7 +231,7 @@ def _original_replay(
     }
 
 
-def evaluate_target(
+def _evaluate_target_strict(
     *,
     trace_path: Path,
     replay_path: Path,
@@ -223,11 +247,19 @@ def evaluate_target(
     calls = tuple(sorted(audit.calls, key=lambda call: call.call_index))
     targets = [call for call in calls if call.agent_depth == 1]
     if not targets:
+        task = ((raw_trace.get("task") or {}).get("data") or {})
         return sign_payload(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "analysis": "stage-d-target-eligibility",
                 "trace_id": raw_trace.get("id"),
+                "example_id": task.get("example_id"),
+                "paper_id": task.get("paper_id"),
+                "answer_type": task.get("answer_type"),
+                "root_calls": sum(
+                    call.agent_depth == 0 for call in calls
+                ),
+                "child_calls": 0,
                 "eligible": False,
                 "informative": False,
                 "joint_eligible_and_informative": False,
@@ -237,6 +269,31 @@ def evaluate_target(
     # This is the committed structural selector. It does not inspect the target
     # action, score, or reference answer.
     target = targets[0]
+    roots = [call for call in calls if call.agent_depth == 0]
+    task = ((raw_trace.get("task") or {}).get("data") or {})
+    replay = json.loads(replay_path.read_text(encoding="utf-8"))
+    if not _signature_valid(replay):
+        raise ArtifactIntegrityError(
+            "branch replay report signature is invalid"
+        )
+    if replay.get("status") == "deterministic_ineligible":
+        return sign_payload(
+            {
+                "schema_version": 2,
+                "analysis": "stage-d-target-eligibility",
+                "trace_id": raw_trace.get("id"),
+                "example_id": task.get("example_id"),
+                "paper_id": task.get("paper_id"),
+                "answer_type": task.get("answer_type"),
+                "root_calls": len(roots),
+                "child_calls": len(targets),
+                "eligible": False,
+                "informative": False,
+                "joint_eligible_and_informative": False,
+                "reason": replay.get("reason"),
+                "deterministic_negative": True,
+            }
+        )
     node_ids = _policy_node_ids(trace)
     target_node_id = node_ids[target.call_index]
     score = (
@@ -260,8 +317,11 @@ def evaluate_target(
         original_reward=original_f1,
     )
 
-    replay = json.loads(replay_path.read_text(encoding="utf-8"))
     scorer = json.loads(scorer_path.read_text(encoding="utf-8"))
+    if not _signature_valid(scorer):
+        raise ArtifactIntegrityError(
+            "branch scorer report signature is invalid"
+        )
     pairs = [
         pair
         for pair in replay.get("pairs") or []
@@ -275,12 +335,31 @@ def evaluate_target(
     scored_by_index = {
         int(pair["alternative_index"]): pair for pair in scored
     }
+    original_arms = [
+        arm
+        for arm in replay.get("regenerated_originals") or []
+        if arm.get("target_call_index") == target.call_index
+    ]
+    scored_originals = [
+        arm
+        for arm in scorer.get("regenerated_originals") or []
+        if arm.get("target_call_index") == target.call_index
+    ]
     alternative_f1 = [
         float(scored_by_index[int(pair["alternative_index"])]["f1"])
         for pair in pairs
         if int(pair["alternative_index"]) in scored_by_index
     ]
-    rewards = [original_f1, *alternative_f1]
+    regenerated_original_f1 = (
+        float(scored_originals[0]["f1"])
+        if len(scored_originals) == 1
+        else None
+    )
+    rewards = (
+        [regenerated_original_f1, *alternative_f1]
+        if regenerated_original_f1 is not None
+        else alternative_f1
+    )
     reward_range = max(rewards) - min(rewards) if rewards else 0.0
 
     descendants = trace.graph.descendants(target_node_id)
@@ -289,6 +368,27 @@ def evaluate_target(
         and call.call_index > target.call_index
         and node_ids[call.call_index] in descendants
         for call in calls
+    )
+    common_seed_exact = (
+        len(original_arms) == 1
+        and len(pairs) == 3
+        and len(
+            {
+                int(original_arms[0]["continuation_seed"]),
+                *(int(pair["continuation_seed"]) for pair in pairs),
+            }
+        )
+        == 1
+    )
+    action_seeds_unique = (
+        len(pairs) == 3
+        and len({int(pair["action_seed"]) for pair in pairs}) == 3
+    )
+    regenerated_original_exact = (
+        len(original_arms) == 1
+        and original_arms[0].get("terminal_artifacts_exact") is True
+        and original_arms[0].get("rewards_exact") is True
+        and original_arms[0].get("cached_actions_exact") is True
     )
     alternative_replay_exact = (
         len(pairs) == 3
@@ -299,13 +399,31 @@ def evaluate_target(
             and pair.get("cached_actions_exact") is True
             for pair in pairs
         )
+    )
+    original_output_valid = (
+        len(scored_originals) == 1
+        and scored_originals[0].get("parseable") is True
+        and scored_originals[0].get(
+            "all_predicted_spans_verbatim"
+        )
+        == 1.0
+    )
+    alternatives_output_valid = (
+        len(scored) == 3
         and all(
-            pair.get("alternative_distinct_from_original") is True
-            and pair.get("downstream_prompt_changed") is True
+            pair.get("parseable") is True
+            and pair.get("all_predicted_spans_verbatim") == 1.0
             for pair in scored
         )
     )
+    trace_output_valid = (
+        score.get("parseable") == 1.0
+        and score.get("all_predicted_spans_verbatim") == 1.0
+    )
     exact_fields = {
+        "trace_completed_ok": raw_trace.get("ok") is True,
+        "exactly_two_root_calls": len(roots) == 2,
+        "child_calls_in_cost_band": 1 <= len(targets) <= 2,
         "structural_event_address": bool(target_node_id),
         "prompt_token_ids": bool(target.prompt_token_ids),
         "checkpoint_id": target.checkpoint_id != "unknown",
@@ -314,14 +432,22 @@ def evaluate_target(
         "behavior_logprobs": bool(
             _target_behavior_logprobs(raw_trace, target)
         ),
-        "pre_call_snapshot_bytes_and_sha256": (
+        "trace_replay_capsule_bytes_and_sha256": (
             snapshot["bytes"] > 0 and len(snapshot["sha256"]) == 64
         ),
         "downstream_provenance": downstream_root,
-        "exact_original_full_and_sliced_replay": original_replay[
+        "recorded_trace_cache_pairing": original_replay[
             "terminal_and_reward_exact"
         ],
+        "regenerated_original_full_and_sliced_replay": (
+            regenerated_original_exact
+        ),
         "exact_alternative_full_and_sliced_replay": alternative_replay_exact,
+        "common_downstream_seed_across_K4": common_seed_exact,
+        "three_unique_action_seeds": action_seeds_unique,
+        "recorded_trace_output_valid": trace_output_valid,
+        "regenerated_original_output_valid": original_output_valid,
+        "all_alternative_outputs_valid": alternatives_output_valid,
     }
     eligible = all(exact_fields.values())
     informative = (
@@ -332,7 +458,7 @@ def evaluate_target(
     )
     return sign_payload(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "analysis": "stage-d-target-eligibility",
             "trace_id": raw_trace.get("id"),
             "example_id": (
@@ -340,21 +466,34 @@ def evaluate_target(
                     "example_id"
                 )
             ),
+            "paper_id": task.get("paper_id"),
+            "answer_type": task.get("answer_type"),
+            "root_calls": len(roots),
+            "child_calls": len(targets),
             "target_call_index": target.call_index,
             "target_node_id": target_node_id,
             "selector": "first-depth-one-native-call-v1",
-            "snapshot": snapshot,
+            "trace_replay_capsule": snapshot,
             "behavior_logprobs": _target_behavior_logprobs(
                 raw_trace, target
             ),
-            "original_replay": original_replay,
+            "recorded_trace_cache_pairing": original_replay,
+            "regenerated_original": {
+                "arm": original_arms[0] if len(original_arms) == 1 else None,
+                "score": (
+                    scored_originals[0]
+                    if len(scored_originals) == 1
+                    else None
+                ),
+            },
             "alternative_replay": {
                 "pairs": len(pairs),
                 "scored_pairs": len(scored),
                 "exact": alternative_replay_exact,
             },
             "reward_informativeness": {
-                "original_f1": original_f1,
+                "recorded_original_f1_diagnostic_only": original_f1,
+                "regenerated_original_f1": regenerated_original_f1,
                 "alternative_f1": alternative_f1,
                 "range": reward_range,
                 "minimum_range": MINIMUM_REWARD_RANGE,
@@ -365,9 +504,9 @@ def evaluate_target(
             "joint_eligible_and_informative": eligible and informative,
             "limitations": [
                 (
-                    "Restore is exact for the frozen fixed-topology policy-call "
-                    "cache and content-addressed QASPER workspace; it is not a "
-                    "generic serialized IPython heap."
+                    "The capsule is provenance for trace-indexed prompt "
+                    "splicing and exact-key cache pairing. It is not an "
+                    "environment snapshot and no restore claim is made."
                 ),
                 (
                     "Eligibility is therefore valid only while the shared "
@@ -378,12 +517,72 @@ def evaluate_target(
     )
 
 
+def evaluate_target(
+    *,
+    trace_path: Path,
+    replay_path: Path,
+    scorer_path: Path,
+) -> dict[str, Any]:
+    try:
+        return _evaluate_target_strict(
+            trace_path=trace_path,
+            replay_path=replay_path,
+            scorer_path=scorer_path,
+        )
+    except (ArtifactIntegrityError, json.JSONDecodeError):
+        raise
+    except (IndexError, KeyError, TypeError, ValueError, RuntimeError) as error:
+        native = load_trace_records(trace_path)
+        audit = audit_trace_file(trace_path)
+        if len(native) != 1:
+            raise ValueError(
+                "cannot materialize a target negative from a nonsingleton trace"
+            ) from error
+        raw_trace = native[0]
+        task = ((raw_trace.get("task") or {}).get("data") or {})
+        calls = tuple(audit.calls)
+        return sign_payload(
+            {
+                "schema_version": 2,
+                "analysis": "stage-d-target-eligibility",
+                "trace_id": raw_trace.get("id"),
+                "example_id": task.get("example_id"),
+                "paper_id": task.get("paper_id"),
+                "answer_type": task.get("answer_type"),
+                "root_calls": sum(
+                    call.agent_depth == 0 for call in calls
+                ),
+                "child_calls": sum(
+                    call.agent_depth == 1 for call in calls
+                ),
+                "eligible": False,
+                "informative": False,
+                "joint_eligible_and_informative": False,
+                "reason": f"{type(error).__name__}: {error}",
+                "deterministic_negative": True,
+            }
+        )
+
+
 def aggregate_support(records: list[dict[str, Any]]) -> dict[str, Any]:
     if len(records) != 64:
         raise ValueError("support aggregation requires exactly 64 rollouts")
-    ids = [str(record.get("trace_id")) for record in records]
-    if len(set(ids)) != 64:
-        raise ValueError("support trace IDs must be unique")
+    slot_ids = [str(record.get("slot_id")) for record in records]
+    if len(set(slot_ids)) != 64:
+        raise ValueError("support slot IDs must be unique")
+    paper_ids = [str(record.get("paper_id")) for record in records]
+    if len(set(paper_ids)) != 64:
+        raise ValueError("power audit requires 64 unique papers")
+    if not all(_signature_valid(record) for record in records):
+        raise ValueError("one or more power-slot signatures are invalid")
+    initialization_hashes = {
+        str(record.get("selected_initialization_sha256"))
+        for record in records
+    }
+    if len(initialization_hashes) != 1 or len(
+        next(iter(initialization_hashes))
+    ) != 64:
+        raise ValueError("selected initialization hash must be common")
     eligible = sum(record.get("eligible") is True for record in records)
     informative = sum(
         record.get("informative") is True for record in records
@@ -392,6 +591,31 @@ def aggregate_support(records: list[dict[str, Any]]) -> dict[str, Any]:
         record.get("joint_eligible_and_informative") is True
         for record in records
     )
+    child_counts = [int(record.get("child_calls", 0)) for record in records]
+    root_counts = [int(record.get("root_calls", 0)) for record in records]
+    p95_index = math.ceil(0.95 * len(records)) - 1
+    checks = {
+        "64_unique_papers_one_seed_each": (
+            len(set(paper_ids)) == 64
+            and {int(record["replicate"]) for record in records} == {0}
+        ),
+        "all_episode_seed_plans_exact": all(
+            record.get("seed_contract") is True for record in records
+        ),
+        "all_answer_strata_present": {
+            str(record.get("answer_type")) for record in records
+        }
+        == {"abstractive", "extractive", "yes_no"},
+        "one_selected_initialization": len(initialization_hashes) == 1,
+        "median_root_calls_exactly_2": statistics.median(root_counts) == 2,
+        "median_child_calls_in_1_2": (
+            1 <= statistics.median(child_counts) <= 2
+        ),
+        "p95_child_calls_at_most_2": (
+            sorted(child_counts)[p95_index] <= 2
+        ),
+        "joint_successes_at_least_58": joint >= 58,
+    }
     return sign_payload(
         {
             "schema_version": 1,
@@ -407,6 +631,13 @@ def aggregate_support(records: list[dict[str, Any]]) -> dict[str, Any]:
                 informative / eligible if eligible else 0.0
             ),
             "joint_probability": joint / 64,
-            "passes": joint >= 58,
+            "selected_initialization_sha256": next(
+                iter(initialization_hashes)
+            ),
+            "median_root_calls": statistics.median(root_counts),
+            "median_child_calls": statistics.median(child_counts),
+            "p95_child_calls": sorted(child_counts)[p95_index],
+            "checks": checks,
+            "passes": all(checks.values()),
         }
     )

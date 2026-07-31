@@ -22,6 +22,10 @@ from redco.analysis.empirical_branch_replay import (  # noqa: E402
     _clean_action_text,
     _token_hash,
 )
+from redco.integrations.signed_subprocess import (  # noqa: E402
+    atomic_write_json,
+    sign_payload,
+)
 from redco.integrations.verifiers_trace import (  # noqa: E402
     extract_policy_calls,
 )
@@ -83,8 +87,36 @@ def main() -> None:
     )
 
     scored_pairs = []
+    scored_originals = []
     all_distinct = True
     all_changed = True
+    for original in replay.get("regenerated_originals") or []:
+        token_ids = tuple(
+            int(token_id)
+            for token_id in original["downstream_generation"]["token_ids"]
+        )
+        text = _clean_action_text(client.detokenize(token_ids))
+        parsed = parse_evidence(text)
+        score = score_exact_spans(paper, parsed.spans, reference)
+        scored_originals.append(
+            {
+                "target_call_index": int(original["target_call_index"]),
+                "target_node_id": original["target_node_id"],
+                "continuation_seed": int(original["continuation_seed"]),
+                "terminal_token_sha256": _token_hash(token_ids),
+                "terminal_text_sha256": hashlib.sha256(
+                    text.encode("utf-8")
+                ).hexdigest(),
+                "parseable": parsed.parseable,
+                "all_predicted_spans_verbatim": score[
+                    "all_predicted_spans_verbatim"
+                ],
+                "parsed_spans": list(parsed.spans),
+                "precision": score["precision"],
+                "recall": score["recall"],
+                "f1": score["f1"],
+            }
+        )
     for pair in replay.get("pairs") or []:
         target_index = int(pair["target_call_index"])
         target = calls[target_index]
@@ -110,6 +142,9 @@ def main() -> None:
                     text.encode("utf-8")
                 ).hexdigest(),
                 "parseable": parsed.parseable,
+                "all_predicted_spans_verbatim": score[
+                    "all_predicted_spans_verbatim"
+                ],
                 "parsed_spans": list(parsed.spans),
                 "precision": score["precision"],
                 "recall": score["recall"],
@@ -119,20 +154,23 @@ def main() -> None:
         all_distinct = all_distinct and distinct
         all_changed = all_changed and changed
 
-    result = {
-        "schema_version": 1,
-        "scope": (
-            "offline deterministic scorer plumbing for shared paired terminal "
-            "actions; not independent full-vs-sliced reward equivalence"
-        ),
-        "source_trace_id": trace.get("id"),
-        "all_alternatives_distinct_from_original": all_distinct,
-        "all_downstream_prompts_changed": all_changed,
-        "pairs": scored_pairs,
-    }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    if not scored_pairs or not all_distinct or not all_changed:
+    result = sign_payload(
+        {
+            "schema_version": 2,
+            "scope": (
+                "offline deterministic scorer plumbing for shared paired "
+                "terminal actions; not independent full-vs-sliced reward "
+                "equivalence"
+            ),
+            "source_trace_id": trace.get("id"),
+            "regenerated_originals": scored_originals,
+            "all_alternatives_distinct_from_original": all_distinct,
+            "all_downstream_prompts_changed": all_changed,
+            "pairs": scored_pairs,
+        }
+    )
+    atomic_write_json(args.output, result)
+    if not scored_pairs:
         raise SystemExit("fixture scorer plumbing failed")
 
 
