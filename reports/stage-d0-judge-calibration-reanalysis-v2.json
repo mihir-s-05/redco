@@ -1,0 +1,13 @@
+{
+  "schema_version": 2,
+  "historical_result_changed": false,
+  "cases": 12,
+  "responses": 36,
+  "parse_failures": 0,
+  "numeric_verdict_repeat_disagreements": 0,
+  "reason_text_variations": 4,
+  "balanced_accuracy": 0.75,
+  "minimum_balanced_accuracy": 0.8,
+  "decision": "fail",
+  "note": "The v1 terminal failure is preserved; v2 only separates decision-bearing verdict drift from free-text reason drift."
+}
