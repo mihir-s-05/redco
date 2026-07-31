@@ -1,0 +1,128 @@
+{
+  "analysis": "stage-d0-scaffold-support-preregistration-audit-v4-10",
+  "checks": {
+    "budget_arithmetic_exact": true,
+    "distinct_successor_frozen_before_request": true,
+    "eager_config_is_exactly_one_field": true,
+    "eager_tail_is_pre_request_and_request_tail_unchanged": true,
+    "https_transfer_and_uv_only": true,
+    "inner_has_only_three_named_hunks": true,
+    "one_final_deployment_and_no_automatic_repair": true,
+    "pinned_prime_maps_eager_to_vllm": true,
+    "runtime_ledgers_required": true,
+    "runtime_path_contract_exact_across_wrapper_protocol_and_preflight": true,
+    "scientific_symmetry_and_claim_scope_frozen": true,
+    "source_hashes_exact": true,
+    "timeout_and_lifetime_cap_bounded": true,
+    "v4_9_failure_signed_outcome_independent_and_zero_requests": true,
+    "wrapper_proves_live_eager_before_any_request": true
+  },
+  "passes": true,
+  "protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v4-10.json",
+  "protocol_sha256": "3709246858a5e3d1815289f40e990c780cdefcec29cc7695536c54c80aa74b76",
+  "recomputed_remaining_envelope_usd": 43.328574,
+  "schema_version": 1,
+  "signed_payload_sha256": "87ad7743eb6d445fe53eab4f565e6e42e1fb70f5fca55371bd37ab56f85fca52",
+  "source_results": {
+    "configs/stage-d/stage-d0-scaffold-inference-sft-v4-eager.toml": {
+      "actual": "f858984e69efcb06c159b03daf5202525c859e08e28b26261a3e97e463662a7a",
+      "expected": "f858984e69efcb06c159b03daf5202525c859e08e28b26261a3e97e463662a7a",
+      "passes": true
+    },
+    "configs/stage-d/stage-d0-scaffold-inference-sft-v4.toml": {
+      "actual": "123e2ec911fccd85e1cdd8a462c52344d2c94155d4347442b577db1c5b140adc",
+      "expected": "123e2ec911fccd85e1cdd8a462c52344d2c94155d4347442b577db1c5b140adc",
+      "passes": true
+    },
+    "external/prime-rl/packages/prime-rl-configs/src/prime_rl/configs/inference.py": {
+      "actual": "d70d6c3d08578b5249039a14b924edd7e6645984b625cd88b52d11388b3cb267",
+      "expected": "d70d6c3d08578b5249039a14b924edd7e6645984b625cd88b52d11388b3cb267",
+      "passes": true
+    },
+    "external/prime-rl/src/prime_rl/inference/vllm/server.py": {
+      "actual": "29cac23abcca8bb6e4e792241ee502c8265e9fcd3f659cf09500536e78c4aeb9",
+      "expected": "29cac23abcca8bb6e4e792241ee502c8265e9fcd3f659cf09500536e78c4aeb9",
+      "passes": true
+    },
+    "external/prime-rl/src/prime_rl/inference/vllm/worker/filesystem.py": {
+      "actual": "1817e325682ea968c4dc61da3b1c04b0b4e1e7896ee762ad4c9c2baef2f720e7",
+      "expected": "1817e325682ea968c4dc61da3b1c04b0b4e1e7896ee762ad4c9c2baef2f720e7",
+      "passes": true
+    },
+    "reports/stage-d0-scaffold-support-v4-10-eager-tail-audit.json": {
+      "actual": "148eff63880b874ef8d1349de479de6b55c28b1cc8c43ee3255cec420d376fa7",
+      "expected": "148eff63880b874ef8d1349de479de6b55c28b1cc8c43ee3255cec420d376fa7",
+      "passes": true
+    },
+    "reports/stage-d0-scaffold-support-v4-10-inner-runner-audit.json": {
+      "actual": "a2260aec34430f7df1fbacd209541e2482390ad943c89764974c4e1942c6e849",
+      "expected": "a2260aec34430f7df1fbacd209541e2482390ad943c89764974c4e1942c6e849",
+      "passes": true
+    },
+    "reports/stage-d0-scaffold-support-v4-8-transfer-overlay-audit.json": {
+      "actual": "a0ae3da6466f6743d4ed6358ba2b1bdc3bf3974c47acb650b819e02e4c13a457",
+      "expected": "a0ae3da6466f6743d4ed6358ba2b1bdc3bf3974c47acb650b819e02e4c13a457",
+      "passes": true
+    },
+    "reports/stage-d0-scaffold-support-v4-9-attempt-1-2026-07-31.json": {
+      "actual": "b6bdde55bfdfed96681c3f745d139f604b0daea0954a37a85c120f4ddcd2d2cc",
+      "expected": "b6bdde55bfdfed96681c3f745d139f604b0daea0954a37a85c120f4ddcd2d2cc",
+      "passes": true
+    },
+    "reports/stage-d0-scaffold-v4-10-eager-config-audit.json": {
+      "actual": "1a8a792b8b78d7c62b9af658d90a6a89092feacd24ef3aacf317b94e77372c7f",
+      "expected": "1a8a792b8b78d7c62b9af658d90a6a89092feacd24ef3aacf317b94e77372c7f",
+      "passes": true
+    },
+    "scripts/audit_signed_json_equivalence_v4_9.py": {
+      "actual": "05ac7648671638ec1d33b08f080057cf1a39c99267f89c9239d80205b1e755e2",
+      "expected": "05ac7648671638ec1d33b08f080057cf1a39c99267f89c9239d80205b1e755e2",
+      "passes": true
+    },
+    "scripts/audit_stage_d0_scaffold_support_preregistration_v4_10.py": {
+      "actual": "bf48f66273a7556e0c93e8a00376776a95b7d646a0e883c97693752923d7b11e",
+      "expected": "bf48f66273a7556e0c93e8a00376776a95b7d646a0e883c97693752923d7b11e",
+      "passes": true
+    },
+    "scripts/audit_stage_d_v4_10_eager_config.py": {
+      "actual": "f1e65fb5d6e3ccbcbc4ec3e8d0d1ed55c9fe21b8b38d79a2981be686c60e4eef",
+      "expected": "f1e65fb5d6e3ccbcbc4ec3e8d0d1ed55c9fe21b8b38d79a2981be686c60e4eef",
+      "passes": true
+    },
+    "scripts/generate_stage_d_v4_10_eager_tail.py": {
+      "actual": "d79f11d59b9e217e09ecd158d86a5565db7cdad05e9b9c8d631586cac93bf7ec",
+      "expected": "d79f11d59b9e217e09ecd158d86a5565db7cdad05e9b9c8d631586cac93bf7ec",
+      "passes": true
+    },
+    "scripts/generate_stage_d_v4_10_inner_runner.py": {
+      "actual": "1daa7f391c8f26437ca16b36f5e93f17831d1e7d59d266a832a1f8ff935be3c0",
+      "expected": "1daa7f391c8f26437ca16b36f5e93f17831d1e7d59d266a832a1f8ff935be3c0",
+      "passes": true
+    },
+    "scripts/preflight_stage_d_runtime_paths_v4_8.sh": {
+      "actual": "0f9efad1514669735a5026076e25a72a067439641b2991763dca8a3a9f947a10",
+      "expected": "0f9efad1514669735a5026076e25a72a067439641b2991763dca8a3a9f947a10",
+      "passes": true
+    },
+    "scripts/run_stage_d0_scaffold_support_v4_10.sh": {
+      "actual": "47ec1b43d6aeb3e6a34debc1be64b5681d6a9f059553d5d3e07073fd531bdc3a",
+      "expected": "47ec1b43d6aeb3e6a34debc1be64b5681d6a9f059553d5d3e07073fd531bdc3a",
+      "passes": true
+    },
+    "scripts/run_stage_d0_scaffold_support_v4_6.sh": {
+      "actual": "e4f8923a3b1dc40ccd2442fe7766cd6df00638df974ebcdc7e90da59cf469849",
+      "expected": "e4f8923a3b1dc40ccd2442fe7766cd6df00638df974ebcdc7e90da59cf469849",
+      "passes": true
+    },
+    "scripts/run_stage_d0_scaffold_support_v4_7.sh": {
+      "actual": "cdc470b0044349cab5c60abf04245e6322797f6547c46b29c1a97851109accd8",
+      "expected": "cdc470b0044349cab5c60abf04245e6322797f6547c46b29c1a97851109accd8",
+      "passes": true
+    },
+    "scripts/test_stage_d_v4_10_runtime_contract.ps1": {
+      "actual": "80a961701be1904a32a0a3d185f7fa236134f0f964e12305e1ad6fc073e59661",
+      "expected": "80a961701be1904a32a0a3d185f7fa236134f0f964e12305e1ad6fc073e59661",
+      "passes": true
+    }
+  }
+}

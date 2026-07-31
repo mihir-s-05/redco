@@ -1,0 +1,31 @@
+{
+  "analysis": "stage-d-v4-10-eager-config",
+  "checks": {
+    "all_other_toml_fields_equal": true,
+    "exactly_one_added_value": true,
+    "exactly_one_diff_hunk": true,
+    "exactly_one_removed_value": true,
+    "parent_is_not_eager": true,
+    "successor_is_eager": true
+  },
+  "eager": "configs/stage-d/stage-d0-scaffold-inference-sft-v4-eager.toml",
+  "eager_sha256": "f858984e69efcb06c159b03daf5202525c859e08e28b26261a3e97e463662a7a",
+  "parent": "configs/stage-d/stage-d0-scaffold-inference-sft-v4.toml",
+  "parent_sha256": "123e2ec911fccd85e1cdd8a462c52344d2c94155d4347442b577db1c5b140adc",
+  "passes": true,
+  "schema_version": 1,
+  "signed_payload_sha256": "087dc4f9aa52b033ce8b9640f3df87da0a39ece72b1d5998fc5ad70b30bb0585",
+  "unified_diff": [
+    "--- configs/stage-d/stage-d0-scaffold-inference-sft-v4.toml",
+    "+++ configs/stage-d/stage-d0-scaffold-inference-sft-v4-eager.toml",
+    "@@ -22,7 +22,7 @@",
+    " max_model_len = 4096",
+    " trust_remote_code = false",
+    " dtype = \"auto\"",
+    "-enforce_eager = false",
+    "+enforce_eager = true",
+    " tool_call_parser = \"hermes\"",
+    " reasoning_parser = \"None\"",
+    " "
+  ]
+}
