@@ -1,0 +1,24 @@
+{
+  "analysis": "stage-d-successor-funded-conservative-envelope",
+  "campaign": {
+    "cost_ceiling_usd": 31.817874413104192,
+    "episode_equivalents": 1728,
+    "seconds": 76362.89859145007
+  },
+  "checks": {
+    "episode_equivalent_arithmetic_exact": true,
+    "full_envelope_fits_wallet": true,
+    "observed_resource_is_nonspot_2x48gb_at_or_below_cap": true,
+    "resource_not_selected_or_reserved": true,
+    "zero_active_resources_at_observation": true
+  },
+  "decision": "The funding blocker is cleared for protocol preparation. Live work remains blocked on the scientific and engineering preconditions listed in the amendment.",
+  "headroom_after_full_envelope_usd": 3.622025586895809,
+  "noncampaign_ceiling_usd": 7.5,
+  "passes": true,
+  "reserve_usd": 4.0,
+  "schema_version": 1,
+  "signed_payload_sha256": "d46aeaebfbb9fa2e3041f0b9a419e796a6b1ae6708ff119c3b036a5b5fe209ab",
+  "total_envelope_with_reserve_usd": 43.31787441310419,
+  "wallet_usd": 46.9399
+}
