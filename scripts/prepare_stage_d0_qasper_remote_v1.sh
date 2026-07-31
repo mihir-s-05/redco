@@ -29,6 +29,7 @@ if ! test -d "$workspace/redco/external/prime-rl/.git"; then
     "$workspace/redco/external/prime-rl"
 fi
 git -C "$workspace/redco/external/prime-rl" checkout "$prime_commit"
+git config --global url."https://github.com/".insteadOf git@github.com:
 git -C "$workspace/redco/external/prime-rl" submodule set-url \
   deps/renderers https://github.com/PrimeIntellect-ai/renderers.git
 git -C "$workspace/redco/external/prime-rl" submodule set-url \
