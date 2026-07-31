@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d0-scaffold-support-v4-7-3-final-redeployment-hardware",
+  "status": "frozen_before_final_bounded_redeployment",
+  "scientific_commit": "fcd0ef05556f45827650e5a9d26c2fe4ac50e6ef",
+  "environment_repair_commit": "ecc17eaddb7f0e99e5f0e00caf09aa75c6e788be",
+  "controlling_protocol": "configs/stage-d/stage-d0-scaffold-support-preregistration-v4-7.json",
+  "controlling_protocol_sha256": "e4ba378f1db5c2f61f8e170f598c3c256a8704ca7530ee61922492a2c72b96ab",
+  "environment_repair": "configs/stage-d/stage-d0-scaffold-support-environment-repair-v4-7-2.json",
+  "environment_repair_sha256": "c3a8c81e307298c3867a027daac8110429e31bf283e8755a449cc6adce24871c",
+  "observed_at_utc": "2026-07-31T07:34:25.4390011Z",
+  "pre_provisioning_state": {
+    "active_pods": 0,
+    "persistent_disks": 0,
+    "wallet_usd": 45.9788,
+    "attempt_1_cost_usd": 0.0956
+  },
+  "selected_resource": {
+    "availability_id": "03c728",
+    "cloud_id": "gpu_1x_6000_ada",
+    "gpu_type": "RTX6000Ada 48GB",
+    "gpu_count": 1,
+    "provider": "massedcompute",
+    "location": "US",
+    "security": "datacenter",
+    "stock_status": "Available",
+    "price_usd_per_hour": 0.75,
+    "vcpus": 12,
+    "memory_gb": 72,
+    "ephemeral_disk_gb": 350,
+    "spot_or_preemptible": false
+  },
+  "selection_justification": "The same resource remains the cheapest genuinely available qualifying non-spot 1x48GB listing and remains below the frozen 1.00 USD/hour ceiling.",
+  "pod": {
+    "name": "redco-stage-d0-scaffold-support-v4-7-repair",
+    "image": "ubuntu_22_cuda_12",
+    "persistent_storage": false,
+    "maximum_count": 1,
+    "ssh_key": "C:/Users/mihir/.ssh/id_rsa",
+    "ssh_rule": "Verify noninteractively before sync or model work; terminate immediately if authentication fails."
+  },
+  "attempt_rule": {
+    "this_is_the_one_and_only_bounded_redeployment": true,
+    "no_further_environment_repair_or_redeployment": true,
+    "precreate_and_probe_only_the_two_frozen_workspace_paths": true,
+    "reuse_the_clean_verifiers_bootstrap": true,
+    "unchanged_scientific_fields": "all"
+  }
+}
