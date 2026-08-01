@@ -32,7 +32,10 @@ from redco.analysis.stage_d_scientific_branch_group import (
     SeedCorrespondenceMap,
     run_scientific_branch_group,
 )
-from redco.analysis.stage_d_spawn_provenance import PolicyEventAddress
+from redco.analysis.stage_d_spawn_provenance import (
+    EventSeedScheduler,
+    PolicyEventAddress,
+)
 from redco.contracts import ActualEvaluationCost, canonical_json
 
 MASTER_SEED = "durable-master"
@@ -249,6 +252,8 @@ def _complete_scientific_artifact(
             action=action,
             continuation_replicate=continuation_replicate,
         )
+        context = writer.put_evidence(f"execution-context-{arm_id}".encode())
+        writer.bind_execution_context(attempt, context_sha256=context)
         request = writer.put_evidence(f"execution-request-{arm_id}".encode())
         call = writer.mark_execution_model_call_started(
             attempt,
@@ -692,6 +697,62 @@ def test_duplicate_candidate_slot_and_execution_replicate_are_rejected(tmp_path:
             continuation_replicate=1,
         )
     writer.seal()
+
+
+def test_execution_cannot_dispatch_or_finish_without_a_frozen_context(
+    tmp_path: Path,
+) -> None:
+    writer = _create(tmp_path / "ledger")
+    recorded, matched, _, _ = _commit(writer)
+    qa_evidence = writer.put_evidence(b"qa")
+    writer.record_reconstruction_qa(
+        group_id="group-1",
+        target_id="target-0",
+        recorded_action=recorded,
+        passed=True,
+        report_sha256=qa_evidence,
+        actual_cost=ActualEvaluationCost(cpu_seconds=0.1, wall_seconds=0.1),
+    )
+    attempt = writer.begin_execution(
+        group_id="group-1",
+        target_id="target-0",
+        arm_id="arm-0",
+        action=recorded,
+        continuation_replicate=1,
+    )
+    request = writer.put_evidence(b"request")
+    scheduled = EventSeedScheduler(
+        MASTER_SEED,
+        "rollout-1",
+        "target-0",
+        1,
+    ).paired_continuation_seed(
+        matched,
+        committed_address=matched,
+    )
+    with pytest.raises(LedgerError, match="context must be bound"):
+        writer.mark_execution_model_call_started(
+            attempt,
+            address=matched,
+            scheduled_seed=scheduled,
+            request_sha256=request,
+        )
+    score = writer.put_evidence(b"score")
+    with pytest.raises(LedgerError, match="context must be bound"):
+        writer.finish_execution(
+            attempt,
+            outcome_kind=OutcomeKind.RUNTIME_EXCEPTION,
+            scored_reward=0.0,
+            scorer_evidence_sha256=score,
+            latency_seconds=0.0,
+            dollars=0.0,
+            judge_calls=0,
+            cpu_seconds=0.0,
+            gpu_seconds=0.0,
+            wall_seconds=0.0,
+            storage_bytes=0,
+        )
+    writer.close()
 
 
 def test_concurrent_single_use_batch_claim_has_one_winner(tmp_path: Path) -> None:

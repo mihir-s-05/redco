@@ -267,6 +267,18 @@ class StageDReceiptLedger:
         return self._ledger_id
 
     @property
+    def genesis_binding(self) -> GenesisBinding:
+        """Return the immutable run binding anchored by the genesis record."""
+        body = _body(self._records[0])
+        return GenesisBinding(
+            preregistration_sha256=str(body["preregistration_sha256"]),
+            source_sha256=str(body["source_sha256"]),
+            runtime_sha256=str(body["runtime_sha256"]),
+            config_sha256=str(body["config_sha256"]),
+            master_seed_sha256=str(body["master_seed_sha256"]),
+        )
+
+    @property
     def record_count(self) -> int:
         return len(self._records)
 
@@ -806,8 +818,37 @@ class StageDReceiptLedger:
             "action": action,
             "calls": [],
             "in_flight": None,
+            "context_sha256": None,
         }
         return attempt
+
+    @_writer_transaction
+    def bind_execution_context(
+        self,
+        attempt: ExecutionAttempt,
+        *,
+        context_sha256: str,
+    ) -> None:
+        """Anchor the exact supervisor dispatch context before worker execution."""
+        state = self._execution_state(attempt)
+        self._require_evidence(context_sha256)
+        if state["context_sha256"] is not None:
+            raise LedgerError("execution context is already bound")
+        if state["calls"] or state["in_flight"] is not None:
+            raise LedgerError("execution context must precede downstream model calls")
+        self._append_event(
+            "execution_context_bound",
+            {
+                "attempt_id": attempt.attempt_id,
+                "group_id": attempt.group_id,
+                "target_id": attempt.target_id,
+                "arm_id": attempt.arm_id,
+                "continuation_replicate": attempt.continuation_replicate,
+                "context_sha256": context_sha256,
+            },
+            evidence_refs=(context_sha256,),
+        )
+        state["context_sha256"] = context_sha256
 
     @_writer_transaction
     def mark_execution_model_call_started(
@@ -820,6 +861,8 @@ class StageDReceiptLedger:
     ) -> ModelCallAttempt:
         state = self._execution_state(attempt)
         self._require_evidence(request_sha256)
+        if state["context_sha256"] is None:
+            raise LedgerError("execution context must be bound before model dispatch")
         if state["in_flight"] is not None:
             raise LedgerError("one execution model call is already in flight")
         if any(call["address"] == address for call in state["calls"]):
@@ -907,6 +950,8 @@ class StageDReceiptLedger:
     ) -> bytes:
         state = self._execution_state(attempt)
         self._require_evidence(scorer_evidence_sha256)
+        if state["context_sha256"] is None:
+            raise LedgerError("execution context must be bound before its outcome")
         if state["in_flight"] is not None:
             raise LedgerError("cannot finish with a model call in flight")
         if not isinstance(outcome_kind, OutcomeKind):
@@ -1439,6 +1484,7 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
     candidate_attempt_slots: set[tuple[str, str, int]] = set()
     execution_attempts: dict[str, dict[str, Any]] = {}
     execution_attempt_slots: set[tuple[str, str, str, int]] = set()
+    bound_execution_contexts: set[str] = set()
     starts: dict[str, dict[str, Any]] = {}
     completed: set[str] = set()
     finished_candidates: set[str] = set()
@@ -1527,6 +1573,8 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
                 ]
                 if len(matching) != 1 or matching[0] in finished_executions:
                     raise LedgerPoisoned("execution receipt lacks one unique attempt")
+                if matching[0] not in bound_execution_contexts:
+                    raise LedgerPoisoned("execution receipt lacks a frozen context binding")
                 expected_calls = {
                     call_id
                     for call_id, start in starts.items()
@@ -1597,6 +1645,32 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
                 raise LedgerPoisoned("duplicate execution attempt")
             execution_attempts[attempt_id] = event
             execution_attempt_slots.add(execution_key)
+        elif kind == "execution_context_bound":
+            event = _event(body)
+            attempt_id = event.get("attempt_id")
+            attempt = (
+                execution_attempts.get(attempt_id)
+                if isinstance(attempt_id, str)
+                else None
+            )
+            if (
+                attempt is None
+                or attempt_id in bound_execution_contexts
+                or not _is_sha256(event.get("context_sha256"))
+                or any(start["attempt_id"] == attempt_id for start in starts.values())
+                or any(
+                    event.get(name) != attempt.get(name)
+                    for name in (
+                        "group_id",
+                        "target_id",
+                        "arm_id",
+                        "continuation_replicate",
+                    )
+                )
+            ):
+                raise LedgerPoisoned("execution context binding is invalid or late")
+            assert isinstance(attempt_id, str)
+            bound_execution_contexts.add(attempt_id)
         elif kind == "model_call_started":
             event = _event(body)
             call_id = event["call_id"]
@@ -1611,7 +1685,10 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
                 )
                 or (
                     attempt_kind == "execution"
-                    and attempt_id not in execution_attempts
+                    and (
+                        attempt_id not in execution_attempts
+                        or attempt_id not in bound_execution_contexts
+                    )
                 )
                 or (
                     attempt_kind == "recorded_action"
@@ -1636,6 +1713,8 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
         raise LedgerPoisoned("ledger has a dangling candidate attempt")
     if set(execution_attempts) != finished_executions:
         raise LedgerPoisoned("ledger has a dangling execution attempt")
+    if set(execution_attempts) != bound_execution_contexts:
+        raise LedgerPoisoned("execution attempt lacks one frozen context binding")
     if set(starts) != completed:
         raise LedgerPoisoned("ledger has a dangling model_call_started record")
     started_recorded_actions = {
