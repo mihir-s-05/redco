@@ -74,7 +74,7 @@ def classify_child_consumption(
             else "surfaced_only_outside_parent_turn"
         )
     else:
-        classification = "hidden_state_only"
+        classification = "no_serialized_surface_observed"
 
     return {
         "call_index": child_call_index,
@@ -227,8 +227,8 @@ def analyze(trace_path: Path) -> dict[str, Any]:
                     "final root tool-response message."
                 ),
                 "observed_violation": (
-                    "The multi-turn IPython trace contains hidden, escaped, and "
-                    "duplicate/aliased child results."
+                    "The multi-turn IPython trace contains absent serialized "
+                    "surfaces, escaped values, and duplicate/aliased child results."
                 ),
                 "disposition": (
                     "Use structured child-result provenance or event/state-aware "

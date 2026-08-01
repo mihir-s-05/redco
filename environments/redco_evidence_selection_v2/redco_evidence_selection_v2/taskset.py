@@ -136,6 +136,7 @@ class EvidenceSelectionConfig(vf.TasksetConfig):
         "forced_trace_fixture",
         "fewshot_scaffold_v2",
         "fewshot_fixture_v3",
+        "fewshot_fixture_v4",
     ] = "natural"
     policy_checkpoint_id: str = BASE_POLICY_CHECKPOINT
     scaffold_prompt_path: Path | None = None
@@ -171,6 +172,7 @@ class EvidenceSelectionTaskset(
             if self.config.prompt_profile in (
                 "fewshot_scaffold_v2",
                 "fewshot_fixture_v3",
+                "fewshot_fixture_v4",
             ):
                 system = ALIGNED_SYSTEM_V2
             else:
@@ -178,11 +180,13 @@ class EvidenceSelectionTaskset(
             if self.config.prompt_profile in (
                 "forced_trace_fixture",
                 "fewshot_fixture_v3",
+                "fewshot_fixture_v4",
             ):
                 system += FORCED_TRACE_FIXTURE
             if self.config.prompt_profile in (
                 "fewshot_scaffold_v2",
                 "fewshot_fixture_v3",
+                "fewshot_fixture_v4",
             ):
                 if (
                     self.config.scaffold_prompt_path is None

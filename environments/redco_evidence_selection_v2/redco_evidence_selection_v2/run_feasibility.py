@@ -225,6 +225,7 @@ def parse_args() -> argparse.Namespace:
             "forced_trace_fixture",
             "fewshot_scaffold_v2",
             "fewshot_fixture_v3",
+            "fewshot_fixture_v4",
         ),
         default="natural",
     )

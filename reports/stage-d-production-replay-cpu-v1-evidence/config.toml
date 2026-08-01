@@ -1,0 +1,91 @@
+model = "Qwen/Qwen3-4B-Instruct-2507"
+num_tasks = 1
+num_rollouts = 1
+shuffle = false
+max_concurrent = 1
+verbose = false
+rich = false
+server = false
+push = false
+output_dir = "/home/mihir/.cache/redco/stage-d-production.dGcTPt/work/production"
+
+[env]
+id = ""
+
+[env.taskset]
+id = "redco-evidence-selection-v2"
+dataset_path = "/home/mihir/.cache/redco/stage-d-production.dGcTPt/work/fixture.jsonl"
+dataset_sha256 = "cf799558cb1db412121c2619b6c90d177e041daaf2a9e9f71d1cd62f615f3f95"
+split = "event_replay_regression"
+prompt_profile = "fewshot_fixture_v4"
+policy_checkpoint_id = "Qwen/Qwen3-4B-Instruct-2507@cdbee75f17c01a7cc42f958dc650907174af0554"
+scaffold_prompt_path = "/mnt/c/Users/mihir/Documents/redco/configs/stage-d/stage-d0-scaffold-fewshot-v4.txt"
+scaffold_prompt_sha256 = "b27653e90f52a20f26ac79e3d0569275e9ba0ed2b07abbe06f060dd2486aee73"
+
+[env.taskset.task]
+judges = []
+
+[env.timeout]
+
+[env.retries]
+max_retries = 0
+include = []
+exclude = []
+
+[env.interception]
+type = "elastic"
+multiplex = 32
+
+[env.agent]
+max_total_tokens = 8192
+
+[env.agent.harness]
+id = "rlm"
+forward_env = [
+    "RLM_FORCE_TOOL_CHOICE_REQUIRED",
+]
+version = "56218f33796ecbe465445bc43948886354fde196"
+max_depth = 1
+skills = []
+
+[env.agent.harness.runtime]
+type = "subprocess"
+
+[env.agent.harness.env]
+
+[env.agent.timeout]
+setup = 900.0
+rollout = 900.0
+finalize = 60.0
+scoring = 60.0
+
+[env.agent.retries]
+max_retries = 0
+include = []
+exclude = []
+
+[pool]
+type = "elastic"
+multiplex = 128
+
+[args]
+
+[extra_env_kwargs]
+
+[client]
+base_url = "http://127.0.0.1:42941/v1"
+api_key_var = "VLLM_API_KEY"
+type = "train"
+pool_size = 1
+renderer_model_name = "Qwen/Qwen3-4B-Instruct-2507"
+
+[client.headers]
+
+[client.renderer]
+name = "auto"
+
+[sampling]
+temperature = 0.7
+top_p = 1.0
+max_tokens = 768
+seed = 1

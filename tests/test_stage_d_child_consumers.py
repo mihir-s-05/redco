@@ -23,7 +23,7 @@ def _classify(
 def test_classifies_exact_escaped_hidden_and_duplicate_surfaces() -> None:
     assert _classify("alpha", "['alpha']", "") == "exact_surface"
     assert _classify("a\nb", "['a\\nb']", "") == "escaped_surface"
-    assert _classify("hidden", "[]", "") == "hidden_state_only"
+    assert _classify("hidden", "[]", "") == "no_serialized_surface_observed"
     assert (
         _classify("same", "[]", "['same']", (1, 4))
         == "duplicate_alias_elsewhere"
@@ -44,4 +44,3 @@ def test_diagnostic_does_not_confuse_exact_text_with_escaped_form() -> None:
     )
     assert report["parent_tool_exact_count"] == 1
     assert report["parent_tool_escaped_repr_count"] == 0
-
