@@ -1,0 +1,104 @@
+output_dir = "/workspace/redco/runs/stage-d/e2-4b-live-v1"
+matmul_precision = "high"
+max_steps = 1
+enable_router_replay = false
+dist_timeout_seconds = 1800
+max_concurrent_runs = 1
+enable_token_export = true
+
+[model]
+name = "/workspace/redco/.cache/models/qwen3-4b-instruct-2507-cdbee75f"
+trust_remote_code = false
+seq_len = 8
+attn = "auto"
+fsdp_cpu_offload = false
+optim_cpu_offload = false
+reshard_after_forward = true
+dp_replicate = 1
+ep = 1
+ep_comm_backend = "torch"
+cp = 1
+cp_style = "ring"
+impl = "auto"
+optimization_dtype = "float32"
+reduce_dtype = "float32"
+moe_router_dtype = "float32"
+fused_lm_head_token_chunk_size = "disabled"
+
+[model.compile]
+fullgraph = false
+
+[model.ac]
+mode = "full"
+freq = 1
+targets = ["norm"]
+
+[model.lora]
+rank = 8
+alpha = 16.0
+dropout = 0.0
+target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+modules_to_save = []
+
+[tokenizer]
+name = "/workspace/redco/.cache/models/qwen3-4b-instruct-2507-cdbee75f"
+trust_remote_code = false
+
+[data]
+
+[loss]
+type = "custom"
+import_path = "prime_rl.trainer.rl.redco_loss.clean_decision_loss"
+
+[loss.kwargs]
+kl_tau = 0.0
+
+[optim]
+lr = 1e-5
+weight_decay = 0.0
+max_norm = 1.0
+type = "adamw"
+betas1 = 0.9
+betas2 = 0.999
+
+[scheduler]
+type = "constant"
+
+[ckpt]
+skip_gather_master_weights = false
+weights_only = true
+keep_last = 1
+skip_progress = false
+skip_scheduler = false
+skip_dataloader = false
+skip_optimizer = false
+
+[ckpt.weights]
+save_sharded = false
+save_format = "safetensors"
+save_adapter_separately = true
+adapter_only = true
+
+[weight_broadcast]
+type = "filesystem"
+save_sharded = false
+save_format = "safetensors"
+
+[rollout_transport]
+type = "filesystem"
+
+[log]
+level = "info"
+vf_level = "info"
+json_logging = false
+log_data = false
+interval = 1.0
+ranks_filter = [0]
+
+[file_monitor]
+filename = "metrics.jsonl"
+
+[gc]
+interval = 1
+
+[env_vars]

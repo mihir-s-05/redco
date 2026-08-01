@@ -1,0 +1,30 @@
+output_dir = "/workspace/redco/runs/stage-d/e2-4b-live-v1/run_default"
+max_steps = 1
+seq_len = 8
+batch_size = 8
+group_size = 4
+max_off_policy_steps = 0
+
+[model]
+name = "/workspace/redco/.cache/models/qwen3-4b-instruct-2507-cdbee75f"
+trust_remote_code = false
+
+[model.lora]
+rank = 8
+alpha = 16.0
+
+[tokenizer]
+name = "/workspace/redco/.cache/models/qwen3-4b-instruct-2507-cdbee75f"
+trust_remote_code = false
+
+[renderer]
+name = "default"
+
+[algo]
+type = "grpo"
+
+[weight_broadcast]
+type = "filesystem"
+
+[rollout_transport]
+type = "filesystem"

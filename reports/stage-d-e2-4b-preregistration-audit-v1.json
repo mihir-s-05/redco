@@ -1,0 +1,1 @@
+{"analysis":"stage-d-e2-4b-preregistration-audit-v1","audit_signature":"f7c206ef50365e8442081f84fb25fe341a4ba4fa7a379ba8f9504c164ff36b9a","decision":"pass","failures":[],"protocol":"configs/stage-d/stage-d-e2-4b-bridge-preregistration-v1.json","protocol_sha256":"4b3ff3aaca5354a19363a3e54c29d87ca3e3db7522c5a9d16d62f1db6a7bc767","schema_version":1,"source_hash_count":17}

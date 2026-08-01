@@ -1,0 +1,78 @@
+diff --git a/src/prime_rl/trainer/rl/token_export.py b/src/prime_rl/trainer/rl/token_export.py
+--- a/src/prime_rl/trainer/rl/token_export.py
++++ b/src/prime_rl/trainer/rl/token_export.py
+@@ -56,6 +56,9 @@ class TokenExporter:
+         file_key = (run_id, export_step, self.rank)
+ 
+         start = 0
++        rl_normalizers = micro_batch.get("rl_normalizers")
++        if rl_normalizers is not None and len(rl_normalizers) != len(sequence_lengths):
++            raise ValueError("Token export RL normalizers lost sequence alignment")
+         for micro_sequence_idx, length in enumerate(sequence_lengths):
+             raw_end = start + length
+             end = _trim_padding(columns, start, raw_end)
+@@ -71,6 +74,11 @@ class TokenExporter:
+                         "export_sequence_idx": self._sequences_by_file.get(file_key, 0),
+                         "run_id": run_id,
+                         "env_name": _first_non_empty(columns["env_names"][start:end]),
++                        "rl_normalizer": (
++                            None
++                            if rl_normalizers is None
++                            else float(rl_normalizers[micro_sequence_idx])
++                        ),
+                         **_slice_columns(columns, start, end),
+                     },
+                     run_id,
+@@ -158,6 +166,7 @@ def _export_columns(
+         "loss_mask": _tensor_to_bools(micro_batch["loss_mask"]),
+         "advantages": _tensor_to_floats(micro_batch["advantages"]),
+         "inference_logprobs": _tensor_to_floats(micro_batch["inference_logprobs"]),
++        "temperatures": _tensor_to_floats(micro_batch["temperatures"]),
+         "trainer_logprobs": _tensor_to_floats(trainer_logprobs),
+         "entropy": _tensor_to_floats(model_output["entropy"]),
+         "mismatch_kl": _optional_tensor_to_floats(export_tensors["mismatch_kl"], seq_len),
+diff --git a/src/prime_rl/trainer/rl/train.py b/src/prime_rl/trainer/rl/train.py
+--- a/src/prime_rl/trainer/rl/train.py
++++ b/src/prime_rl/trainer/rl/train.py
+@@ -255,6 +255,11 @@ def train(config: TrainerConfig):
+         f"Starting from step {progress.step} (total_tokens={progress.total_tokens}, total_samples={progress.total_samples})"
+     )
+ 
++    live_update_gate_enabled = bool(
++        os.environ.get("REDCO_LIVE_UPDATE_BINDING")
++        or os.environ.get("REDCO_LIVE_UPDATE_RECEIPTS")
++    )
++
+     # Set up the data loader (Optionally, use a fake data loader for debugging)
+     logger.info(f"Initializing data loader ({config.data})")
+     if config.data.fake:
+@@ -628,8 +633,29 @@ def train(config: TrainerConfig):
+
+         zero_grad_ratio = get_zero_gradient_ratio(model.parameters(), parallel_dims.dp_replicate)
+
++        # The bounded live gate is deliberately started only after Prime has
++        # discovered the run, parsed the batch, and produced its gradient.
++        live_update_gate = None
++        if live_update_gate_enabled:
++            from redco.analysis.stage_d_live_update import start_live_update_gate
++
++            live_update_gate = start_live_update_gate(
++                model,
++                optimizer,
++                world_size=world.world_size,
++                rank=world.rank,
++                max_steps=config.max_steps,
++            )
++
+         # Update the model parameters
+         optimizer.step()
++        if live_update_gate is not None:
++            if grad_norm is None:
++                raise ValueError("bounded live update requires a recorded gradient norm")
++            live_update_gate.record_optimizer_step(
++                optimizer_step=progress.step,
++                gradient_l2=float(grad_norm.item()),
++            )
+         optimizer.zero_grad()
+ 
+         # Update learning rate scheduler
