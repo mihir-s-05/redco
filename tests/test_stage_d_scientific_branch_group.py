@@ -83,10 +83,15 @@ def _conformance() -> bytes:
     return canonical_json(payload)
 
 
-def _request(seed: int, *, temperature: float = 0.7) -> dict[str, object]:
+def _request(
+    seed: int,
+    *,
+    temperature: float = 0.7,
+    prompt_content: str = "q",
+) -> dict[str, object]:
     return {
         "model": "model@commit",
-        "messages": [{"role": "user", "content": "q"}],
+        "messages": [{"role": "user", "content": prompt_content}],
         "tools": [],
         "parallel_tool_calls": False,
         "tool_choice": "auto",
@@ -112,7 +117,12 @@ def _request(seed: int, *, temperature: float = 0.7) -> dict[str, object]:
     }
 
 
-def _key(seed: int, *, temperature: float = 0.7) -> ExactActionKey:
+def _key(
+    seed: int,
+    *,
+    temperature: float = 0.7,
+    prompt_content: str = "q",
+) -> ExactActionKey:
     return ExactActionKey.build(
         checkpoint_id="model@commit",
         base_model_manifest=b"base",
@@ -122,15 +132,28 @@ def _key(seed: int, *, temperature: float = 0.7) -> ExactActionKey:
         sampler_conformance_manifest=_conformance(),
         action_selection_policy="direct_single_sample",
         transport_retry_policy="fail_before_action_no_resample",
-        request=_request(seed, temperature=temperature),
+        request=_request(
+            seed,
+            temperature=temperature,
+            prompt_content=prompt_content,
+        ),
         prompt_token_ids=(10, 11),
         render_prompt=lambda _: (10, 11),
     )
 
 
-def _action(seed: int, *, temperature: float = 0.7) -> BehaviorAction:
+def _action(
+    seed: int,
+    *,
+    temperature: float = 0.7,
+    prompt_content: str = "q",
+) -> BehaviorAction:
     return BehaviorAction.build(
-        key=_key(seed, temperature=temperature),
+        key=_key(
+            seed,
+            temperature=temperature,
+            prompt_content=prompt_content,
+        ),
         action_token_ids=(20, 2),
         behavior_logprobs=(-0.2, -0.1),
         raw_transport_message={"role": "assistant", "content": "duplicate"},
@@ -149,6 +172,8 @@ class Fixture:
     spec: BranchGroupSpec
     matched: PolicyEventAddress
     dynamic: PolicyEventAddress
+    prompt_content: str
+    temperature: float
 
 
 def _fixture(
@@ -156,9 +181,15 @@ def _fixture(
     target_ordinal: int = 0,
     branch_count: int = 4,
     continuation_replicates: int = 1,
+    prompt_content: str = "q",
+    temperature: float = 0.7,
 ) -> Fixture:
     store = TrustedReceiptStore()
-    recorded = _action(17)
+    recorded = _action(
+        17,
+        prompt_content=prompt_content,
+        temperature=temperature,
+    )
     target = PolicyEventAddress(1, "root/child", 0, 0)
     master_seed = "master"
     prior_chain = store.chain
@@ -210,6 +241,8 @@ def _fixture(
         BranchGroupSpec(commitment, recorded, correspondence, master_seed),
         matched,
         dynamic,
+        prompt_content,
+        temperature,
     )
 
 
@@ -248,7 +281,11 @@ def _sampler(fixture: Fixture) -> tuple[list[tuple[int, int]], CandidateSampler]
     ) -> CandidateSubmission:
         assert reference_key == fixture.spec.recorded_action.key
         calls.append((action_slot, action_seed))
-        action = _action(action_seed)
+        action = _action(
+            action_seed,
+            prompt_content=fixture.prompt_content,
+            temperature=fixture.temperature,
+        )
         receipt = fixture.store.issue(
             "candidate_action_inference",
             {
