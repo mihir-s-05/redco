@@ -24,6 +24,10 @@ from redco.analysis.stage_d_collection import (
 )
 from redco.analysis.stage_d_protocol_manifest import StageDProtocolManifest
 from redco.analysis.stage_d_receipt_ledger import StageDReceiptLedger
+from redco.analysis.stage_d_rlm_runtime import (
+    load_stage_d_rlm_runtime,
+    verify_stage_d_env_rlm_harnesses,
+)
 from redco.analysis.stage_d_source_artifacts import StageDSourceArtifactStore
 from redco.analysis.stage_d_source_contracts import SourceRollout
 
@@ -77,6 +81,11 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--plan-sha256", required=True)
     parser.add_argument("--plan-output", type=Path, required=True)
     parser.add_argument("--receipt-output", type=Path, required=True)
+    parser.add_argument("--dependency-stack", type=Path, required=True)
+    parser.add_argument("--rlm-archive", type=Path, required=True)
+    parser.add_argument("--uv-binary", type=Path, required=True)
+    parser.add_argument("--uv-cache-archive", type=Path, required=True)
+    parser.add_argument("--rlm-launcher", type=Path, required=True)
     parser.add_argument("--recover", action="store_true")
     return parser.parse_args()
 
@@ -312,6 +321,19 @@ async def _run(args: argparse.Namespace) -> None:
         ),
     )
     config = _authenticated_config(args, protocol)
+    dependency_stack, rlm_bundle = load_stage_d_rlm_runtime(
+        protocol=protocol,
+        dependency_stack_path=args.dependency_stack,
+        archive_path=args.rlm_archive,
+        uv_path=args.uv_binary,
+        cache_archive_path=args.uv_cache_archive,
+        launcher_path=args.rlm_launcher,
+    )
+    verify_stage_d_env_rlm_harnesses(
+        config.env,
+        manifest=dependency_stack,
+        bundle=rlm_bundle,
+    )
     _verify_unforced_root_tool_choice(config)
     _env, authenticated_plan = _materialize_authenticated_plan(
         config,

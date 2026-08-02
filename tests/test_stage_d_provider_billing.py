@@ -36,7 +36,9 @@ def _entry() -> ProviderDeploymentBilling:
             rate_micro_usd_per_hour=rate,
             billed_duration_milliseconds=duration,
         ),
+        provider_charge_status="reported",
         provider_charge_micro_usd=1_111_111,
+        provider_charge_unavailable_reason=None,
         provider_receipt_sha256=_digest(b"deployment receipt"),
     )
 
@@ -53,6 +55,7 @@ def _billing() -> tuple[StageDProviderBilling, dict[str, bytes]]:
         entry.rate_duration_estimate_micro_usd,
         40_000_000,
         38_999_999,
+        1_000_001,
         _digest(before),
         _digest(after),
     )
@@ -95,3 +98,52 @@ def test_billing_rejects_duplicate_attempts_and_float_currency() -> None:
         replace(billing, deployments=(billing.deployments[0], billing.deployments[0]))
     with pytest.raises(ValueError, match="integer"):
         replace(billing.deployments[0], provider_charge_micro_usd=1.5)  # type: ignore[arg-type]
+
+
+def test_provider_charge_can_be_typed_unavailable_without_becoming_zero() -> None:
+    entry = replace(
+        _entry(),
+        provider_charge_status="unavailable",
+        provider_charge_micro_usd=None,
+        provider_charge_unavailable_reason="provider API omitted the finalized charge",
+    )
+    before = b"wallet before"
+    after = b"wallet after"
+    billing = StageDProviderBilling(
+        "USD",
+        (entry,),
+        None,
+        entry.rate_duration_estimate_micro_usd,
+        40_000_000,
+        38_999_999,
+        1_000_001,
+        _digest(before),
+        _digest(after),
+    )
+    assert StageDProviderBilling.from_bytes(billing.to_bytes()) == billing
+
+
+def test_pre_provision_terminal_billing_can_have_zero_deployments() -> None:
+    before = b"wallet before"
+    after = b"wallet after"
+    billing = StageDProviderBilling(
+        "USD",
+        (),
+        0,
+        0,
+        40_000_000,
+        40_000_000,
+        0,
+        _digest(before),
+        _digest(after),
+    )
+    billing.verify_receipts({_digest(before): before, _digest(after): after})
+
+
+def test_billing_rejects_duplicate_receipt_digests() -> None:
+    billing, _ = _billing()
+    with pytest.raises(ValueError, match="receipt digests are duplicated"):
+        replace(
+            billing,
+            wallet_after_receipt_sha256=billing.wallet_before_receipt_sha256,
+        )

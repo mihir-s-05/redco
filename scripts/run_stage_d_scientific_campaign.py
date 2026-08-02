@@ -18,6 +18,10 @@ from redco.analysis.stage_d_receipt_ledger import (
     StageDReceiptLedger,
     inspect_ledger,
 )
+from redco.analysis.stage_d_rlm_runtime import (
+    load_stage_d_rlm_runtime,
+    verify_stage_d_env_rlm_harnesses,
+)
 from redco.analysis.stage_d_scientific_branch_group import (
     BranchGroupSpec,
     PreActionTargetCommitment,
@@ -48,6 +52,11 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--artifact-output", type=Path, required=True)
     parser.add_argument("--episode-output", type=Path, required=True)
     parser.add_argument("--master-seed", required=True)
+    parser.add_argument("--dependency-stack", type=Path, required=True)
+    parser.add_argument("--rlm-archive", type=Path, required=True)
+    parser.add_argument("--uv-binary", type=Path, required=True)
+    parser.add_argument("--uv-cache-archive", type=Path, required=True)
+    parser.add_argument("--rlm-launcher", type=Path, required=True)
     parser.add_argument("--recover-zero-call", action="store_true")
     parser.add_argument("--supervisor-evidence", type=Path)
     parser.add_argument("--repair-archive", type=Path)
@@ -168,6 +177,19 @@ def _run(args: argparse.Namespace) -> None:
     from verifiers.v1.dialects import parse_tools
 
     config = EvalConfig.model_validate(raw_config)
+    dependency_stack, rlm_bundle = load_stage_d_rlm_runtime(
+        protocol=protocol,
+        dependency_stack_path=args.dependency_stack,
+        archive_path=args.rlm_archive,
+        uv_path=args.uv_binary,
+        cache_archive_path=args.uv_cache_archive,
+        launcher_path=args.rlm_launcher,
+    )
+    verify_stage_d_env_rlm_harnesses(
+        config.env,
+        manifest=dependency_stack,
+        bundle=rlm_bundle,
+    )
     if config.num_tasks != 1 or config.num_rollouts != 1 or config.max_concurrent != 1:
         raise ValueError("scientific runner base config must be one-by-one")
     if config.resume is not None or config.server or config.push:

@@ -59,6 +59,11 @@ from redco.analysis.stage_d_protocol_manifest import (
     StageDPolicyIdentity,
     StageDProtocolManifest,
 )
+from redco.analysis.stage_d_provider_billing import (
+    ProviderDeploymentBilling,
+    StageDProviderBilling,
+    rate_duration_estimate_micro_usd,
+)
 from redco.analysis.stage_d_receipt_ledger import (
     GenesisBinding,
     LedgerError,
@@ -92,6 +97,12 @@ from redco.analysis.stage_d_spawn_provenance import (
     PolicyEventAddress,
     SpawnScope,
     derive_child_lineage,
+)
+from redco.analysis.stage_d_terminalization import (
+    StageDCleanupEvidence,
+    StageDDecisionOutcome,
+    StageDDecisionVector,
+    StageDTerminalSeal,
 )
 from redco.analysis.stage_d_three_arm_bridge import (
     ArmName,
@@ -1803,7 +1814,7 @@ def test_campaign_transaction_reconstructs_after_single_terminal_seal(
         protocol_manifest_sha256=protocol.manifest_sha256,
         handoff_policy_sha256=_sha256(b"bounded handoff policy"),
     )
-    with pytest.raises(RuntimeError, match="out of order"):
+    with pytest.raises(RuntimeError, match="arbitrary report commits are disabled"):
         handoff.commit_report(
             report_bytes=b"premature report",
             decision_evidence_bytes=b"premature decision",
@@ -2063,15 +2074,114 @@ def test_campaign_transaction_reconstructs_after_single_terminal_seal(
         )
         == evaluation_adoption
     )
-    report_record = handoff.commit_report(
-        report_bytes=b"frozen Stage D report",
-        decision_evidence_bytes=b"frozen Stage D decision",
-        billing_evidence_bytes=b"frozen Stage D billing",
+    economic_metrics = b"frozen Stage D economic metrics"
+    credit_metrics = b"frozen Stage D credit metrics"
+    decisions = StageDDecisionVector(
+        StageDDecisionOutcome(
+            "positive",
+            protocol.decision_rule_sha256,
+            _sha256(economic_metrics),
+            None,
+        ),
+        StageDDecisionOutcome(
+            "indeterminate",
+            protocol.decision_rule_sha256,
+            _sha256(credit_metrics),
+            "paired interval crossed the frozen boundary",
+        ),
     )
-    assert report_record == handoff.inspect().report_record_sha256
-    seal_bytes = handoff.seal()
+    wallet_before = b"Prime wallet before"
+    wallet_after = b"Prime wallet after"
+    provider_receipt = b"Prime deployment receipt"
+    duration = 3_600_000
+    provider_entry = ProviderDeploymentBilling(
+        attempt_id="stage-d-production-001",
+        phase="evaluation",
+        provider="prime-intellect",
+        resource_id="resource-001",
+        location="us-west",
+        gpu_type="L40S",
+        gpu_count=2,
+        pricing_type="on-demand",
+        started_unix_milliseconds=1_000_000,
+        ended_unix_milliseconds=4_600_000,
+        billed_duration_milliseconds=duration,
+        rate_micro_usd_per_hour=2_000_000,
+        rate_duration_estimate_micro_usd=rate_duration_estimate_micro_usd(
+            rate_micro_usd_per_hour=2_000_000,
+            billed_duration_milliseconds=duration,
+        ),
+        provider_charge_status="reported",
+        provider_charge_micro_usd=2_000_000,
+        provider_charge_unavailable_reason=None,
+        provider_receipt_sha256=_sha256(provider_receipt),
+    )
+    billing = StageDProviderBilling(
+        currency="USD",
+        deployments=(provider_entry,),
+        total_provider_charge_micro_usd=2_000_000,
+        total_rate_duration_estimate_micro_usd=2_000_000,
+        wallet_before_micro_usd=40_000_000,
+        wallet_after_micro_usd=38_000_000,
+        wallet_delta_micro_usd=2_000_000,
+        wallet_before_receipt_sha256=_sha256(wallet_before),
+        wallet_after_receipt_sha256=_sha256(wallet_after),
+    )
+    cleanup_receipts = {
+        _sha256(value): value
+        for value in (b"pod terminated", b"zero persistent disks", b"cgroup empty")
+    }
+    cleanup = StageDCleanupEvidence(
+        "terminated",
+        "zero-confirmed",
+        "contained-empty",
+        tuple(sorted(cleanup_receipts)),
+    )
+    seal_bytes = handoff.finalize_terminal(
+        terminal_status="completed",
+        terminal_phase="evaluation",
+        termination_code="success",
+        decisions=decisions,
+        decision_evidence={
+            _sha256(economic_metrics): economic_metrics,
+            _sha256(credit_metrics): credit_metrics,
+        },
+        billing=billing,
+        billing_receipts={
+            _sha256(wallet_before): wallet_before,
+            _sha256(wallet_after): wallet_after,
+            _sha256(provider_receipt): provider_receipt,
+        },
+        cleanup=cleanup,
+        cleanup_receipts=cleanup_receipts,
+        evaluation_ledger=evaluation_ledger,
+        evaluation_completion_bytes=evaluation_completion.to_bytes(),
+    )
+    assert StageDTerminalSeal.from_bytes(seal_bytes).terminal_status == "completed"
     assert handoff.inspect().sealed
-    assert handoff.seal() == seal_bytes
+    assert (
+        handoff.finalize_terminal(
+            terminal_status="completed",
+            terminal_phase="evaluation",
+            termination_code="success",
+            decisions=decisions,
+            decision_evidence={
+                _sha256(economic_metrics): economic_metrics,
+                _sha256(credit_metrics): credit_metrics,
+            },
+            billing=billing,
+            billing_receipts={
+                _sha256(wallet_before): wallet_before,
+                _sha256(wallet_after): wallet_after,
+                _sha256(provider_receipt): provider_receipt,
+            },
+            cleanup=cleanup,
+            cleanup_receipts=cleanup_receipts,
+            evaluation_ledger=evaluation_ledger,
+            evaluation_completion_bytes=evaluation_completion.to_bytes(),
+        )
+        == seal_bytes
+    )
     assert tuple(arm for arm, _ in bundle.prime_rollout_paths) == arms
     assert (
         StageDCampaignStore(bundle.root).persist(

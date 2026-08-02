@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -18,6 +19,7 @@ BillingPhase = Literal[
     "repair",
 ]
 PricingType = Literal["on-demand", "spot"]
+ProviderChargeStatus = Literal["reported", "unavailable"]
 _PHASES = {
     "setup",
     "source",
@@ -27,6 +29,7 @@ _PHASES = {
     "repair",
 }
 _PRICING_TYPES = {"on-demand", "spot"}
+_CHARGE_STATUSES = {"reported", "unavailable"}
 
 
 def _sha256(value: object, name: str) -> str:
@@ -79,7 +82,9 @@ class ProviderDeploymentBilling:
     billed_duration_milliseconds: int
     rate_micro_usd_per_hour: int
     rate_duration_estimate_micro_usd: int
-    provider_charge_micro_usd: int
+    provider_charge_status: ProviderChargeStatus
+    provider_charge_micro_usd: int | None
+    provider_charge_unavailable_reason: str | None
     provider_receipt_sha256: str
 
     def __post_init__(self) -> None:
@@ -106,7 +111,16 @@ class ProviderDeploymentBilling:
         )
         if self.rate_duration_estimate_micro_usd != expected_estimate:
             raise ValueError("provider rate-duration estimate differs")
-        _integer(self.provider_charge_micro_usd, "provider charge")
+        if self.provider_charge_status not in _CHARGE_STATUSES:
+            raise ValueError("provider charge status is invalid")
+        if self.provider_charge_status == "reported":
+            _integer(self.provider_charge_micro_usd, "provider charge")
+            if self.provider_charge_unavailable_reason is not None:
+                raise ValueError("reported provider charge has an unavailable reason")
+        else:
+            if self.provider_charge_micro_usd is not None:
+                raise ValueError("unavailable provider charge has a numeric value")
+            _text(self.provider_charge_unavailable_reason, "provider charge unavailable reason")
         _sha256(self.provider_receipt_sha256, "provider receipt")
 
     def to_payload(self) -> dict[str, object]:
@@ -124,7 +138,9 @@ class ProviderDeploymentBilling:
             "billed_duration_milliseconds": self.billed_duration_milliseconds,
             "rate_micro_usd_per_hour": self.rate_micro_usd_per_hour,
             "rate_duration_estimate_micro_usd": self.rate_duration_estimate_micro_usd,
+            "provider_charge_status": self.provider_charge_status,
             "provider_charge_micro_usd": self.provider_charge_micro_usd,
+            "provider_charge_unavailable_reason": self.provider_charge_unavailable_reason,
             "provider_receipt_sha256": self.provider_receipt_sha256,
         }
 
@@ -144,7 +160,9 @@ class ProviderDeploymentBilling:
             "billed_duration_milliseconds",
             "rate_micro_usd_per_hour",
             "rate_duration_estimate_micro_usd",
+            "provider_charge_status",
             "provider_charge_micro_usd",
+            "provider_charge_unavailable_reason",
             "provider_receipt_sha256",
         }
         if not isinstance(value, dict) or set(value) != fields:
@@ -156,22 +174,32 @@ class ProviderDeploymentBilling:
 class StageDProviderBilling:
     currency: Literal["USD"]
     deployments: tuple[ProviderDeploymentBilling, ...]
-    total_provider_charge_micro_usd: int
+    total_provider_charge_micro_usd: int | None
     total_rate_duration_estimate_micro_usd: int
     wallet_before_micro_usd: int
     wallet_after_micro_usd: int
+    wallet_delta_micro_usd: int
     wallet_before_receipt_sha256: str
     wallet_after_receipt_sha256: str
 
     def __post_init__(self) -> None:
-        if self.currency != "USD" or not self.deployments:
-            raise ValueError("provider billing currency or deployment roster differs")
+        if self.currency != "USD":
+            raise ValueError("provider billing currency differs")
         attempt_ids = tuple(item.attempt_id for item in self.deployments)
         if len(set(attempt_ids)) != len(attempt_ids):
             raise ValueError("provider billing deployment attempts are duplicated")
         if attempt_ids != tuple(sorted(attempt_ids)):
             raise ValueError("provider billing attempts must use deterministic order")
-        expected_charge = sum(item.provider_charge_micro_usd for item in self.deployments)
+        reported_charges = tuple(
+            item.provider_charge_micro_usd
+            for item in self.deployments
+            if item.provider_charge_status == "reported"
+        )
+        expected_charge = (
+            sum(value for value in reported_charges if value is not None)
+            if len(reported_charges) == len(self.deployments)
+            else None
+        )
         expected_estimate = sum(item.rate_duration_estimate_micro_usd for item in self.deployments)
         if (
             self.total_provider_charge_micro_usd != expected_charge
@@ -180,14 +208,25 @@ class StageDProviderBilling:
             raise ValueError("provider billing totals differ from deployment entries")
         _integer(self.wallet_before_micro_usd, "wallet before")
         _integer(self.wallet_after_micro_usd, "wallet after")
+        if self.wallet_delta_micro_usd != (
+            self.wallet_before_micro_usd - self.wallet_after_micro_usd
+        ):
+            raise ValueError("provider billing wallet delta differs")
         _sha256(self.wallet_before_receipt_sha256, "wallet-before receipt")
         _sha256(self.wallet_after_receipt_sha256, "wallet-after receipt")
+        receipt_sha256s = (
+            self.wallet_before_receipt_sha256,
+            self.wallet_after_receipt_sha256,
+            *(item.provider_receipt_sha256 for item in self.deployments),
+        )
+        if len(set(receipt_sha256s)) != len(receipt_sha256s):
+            raise ValueError("provider billing receipt digests are duplicated")
 
     def to_bytes(self) -> bytes:
         return canonical_json(
             {
-                "schema_version": 1,
-                "domain": "redco-stage-d-provider-billing-v1",
+                "schema_version": 2,
+                "domain": "redco-stage-d-provider-billing-v2",
                 "currency": self.currency,
                 "deployments": [item.to_payload() for item in self.deployments],
                 "total_provider_charge_micro_usd": self.total_provider_charge_micro_usd,
@@ -196,6 +235,7 @@ class StageDProviderBilling:
                 ),
                 "wallet_before_micro_usd": self.wallet_before_micro_usd,
                 "wallet_after_micro_usd": self.wallet_after_micro_usd,
+                "wallet_delta_micro_usd": self.wallet_delta_micro_usd,
                 "wallet_before_receipt_sha256": self.wallet_before_receipt_sha256,
                 "wallet_after_receipt_sha256": self.wallet_after_receipt_sha256,
             }
@@ -216,14 +256,15 @@ class StageDProviderBilling:
             "total_rate_duration_estimate_micro_usd",
             "wallet_before_micro_usd",
             "wallet_after_micro_usd",
+            "wallet_delta_micro_usd",
             "wallet_before_receipt_sha256",
             "wallet_after_receipt_sha256",
         }
         if (
             not isinstance(payload, dict)
             or set(payload) != fields
-            or payload.get("schema_version") != 1
-            or payload.get("domain") != "redco-stage-d-provider-billing-v1"
+            or payload.get("schema_version") != 2
+            or payload.get("domain") != "redco-stage-d-provider-billing-v2"
             or not isinstance(payload.get("deployments"), list)
             or canonical_json(payload) != value
         ):
@@ -235,11 +276,12 @@ class StageDProviderBilling:
             payload["total_rate_duration_estimate_micro_usd"],
             payload["wallet_before_micro_usd"],
             payload["wallet_after_micro_usd"],
+            payload["wallet_delta_micro_usd"],
             payload["wallet_before_receipt_sha256"],
             payload["wallet_after_receipt_sha256"],
         )
 
-    def verify_receipts(self, receipt_bytes: dict[str, bytes]) -> None:
+    def verify_receipts(self, receipt_bytes: Mapping[str, bytes]) -> None:
         expected = {
             self.wallet_before_receipt_sha256,
             self.wallet_after_receipt_sha256,
@@ -253,6 +295,7 @@ class StageDProviderBilling:
 
 
 __all__ = [
+    "ProviderChargeStatus",
     "ProviderDeploymentBilling",
     "StageDProviderBilling",
     "rate_duration_estimate_micro_usd",

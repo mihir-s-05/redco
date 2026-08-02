@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 from redco.analysis.stage_d_campaign_store import verify_campaign_bundle
 from redco.analysis.stage_d_checkpoint_evidence import StageDCheckpointManifest
@@ -32,7 +33,18 @@ from redco.analysis.stage_d_evaluation_contracts import (
 from redco.analysis.stage_d_evaluation_ledger import StageDEvaluationLedger
 from redco.analysis.stage_d_objective_binding import ArmName
 from redco.analysis.stage_d_protocol_manifest import StageDProtocolManifest
+from redco.analysis.stage_d_provider_billing import StageDProviderBilling
 from redco.analysis.stage_d_runtime_bundle import verify_evaluation_runtime_bundle
+from redco.analysis.stage_d_terminalization import (
+    HandoffCoordinator,
+    StageDCleanupEvidence,
+    StageDDecisionVector,
+    TerminalPhase,
+    TerminalStatus,
+    TerminationCode,
+    finalize_stage_d,
+    verify_stage_d_terminal_seal,
+)
 from redco.analysis.stage_d_trainer_supervisor import StageDTrainerRunLedger
 from redco.analysis.stage_d_training_completion import StageDTrainingCompletion
 from redco.contracts import canonical_json
@@ -113,6 +125,7 @@ class StageDHandoffSnapshot:
     evaluation_authorization_sha256: str | None
     evaluation_completion_sha256: str | None
     report_record_sha256: str | None
+    terminal_seal_sha256: str | None
     sealed: bool
     head_sha256: str
     record_count: int
@@ -166,7 +179,10 @@ class StageDHandoffCoordinator:
         if root.is_symlink() or (root.exists() and not root.is_dir()):
             raise FileExistsError("handoff root is not a regular directory")
         root.mkdir(parents=True, mode=0o700, exist_ok=True)
-        if any(item.name not in {"records", "evidence", "writer.lock"} for item in root.iterdir()):
+        if any(
+            item.name not in {"records", "evidence", "writer.lock", "terminal_seal.json"}
+            for item in root.iterdir()
+        ):
             raise FileExistsError("handoff root contains unknown state")
         coordinator = cls(root, fault_hook=fault_hook)
         coordinator.records.mkdir(exist_ok=True)
@@ -282,6 +298,24 @@ class StageDHandoffCoordinator:
             report is None or events[-1][1]["report_record_sha256"] != report[1]
         ):
             raise ValueError("handoff seal differs from its report")
+        terminal_path = self.root / "terminal_seal.json"
+        terminal_sha256 = None
+        if terminal_path.exists():
+            if terminal_path.is_symlink() or not terminal_path.is_file():
+                raise ValueError("handoff terminal seal is absent or symbolic")
+            if events[-1][0] == "seal":
+                raise ValueError("handoff has both legacy and typed terminal seals")
+            terminal_bytes = terminal_path.read_bytes()
+            verify_stage_d_terminal_seal(
+                cast(HandoffCoordinator, self),
+                terminal_bytes,
+                preregistration_sha256=genesis["preregistration_sha256"],
+                protocol_manifest_sha256=genesis["protocol_manifest_sha256"],
+                handoff_policy_sha256=genesis["handoff_policy_sha256"],
+                handoff_head_sha256=digests[-1],
+                handoff_record_count=len(records),
+            )
+            terminal_sha256 = sha256(terminal_bytes)
         return StageDHandoffSnapshot(
             genesis["preregistration_sha256"],
             genesis["protocol_manifest_sha256"],
@@ -294,7 +328,8 @@ class StageDHandoffCoordinator:
             None if authorization is None else authorization[0]["evaluation_authorization_sha256"],
             None if evaluation is None else evaluation[0]["evaluation_completion_sha256"],
             None if report is None else report[1],
-            events[-1][0] == "seal",
+            terminal_sha256,
+            events[-1][0] == "seal" or terminal_sha256 is not None,
             digests[-1],
             len(records),
             events,
@@ -665,12 +700,38 @@ class StageDHandoffCoordinator:
         decision_evidence_bytes: bytes,
         billing_evidence_bytes: bytes,
     ) -> str:
-        event = {
-            "report_sha256": self._put_evidence(report_bytes),
-            "decision_evidence_sha256": self._put_evidence(decision_evidence_bytes),
-            "billing_evidence_sha256": self._put_evidence(billing_evidence_bytes),
-        }
-        return self._transition("report_committed", event, requires="evaluation_adopted")
+        del report_bytes, decision_evidence_bytes, billing_evidence_bytes
+        raise RuntimeError("arbitrary report commits are disabled; use finalize_terminal")
+
+    def finalize_terminal(
+        self,
+        *,
+        terminal_status: TerminalStatus,
+        terminal_phase: TerminalPhase,
+        termination_code: TerminationCode,
+        decisions: StageDDecisionVector,
+        decision_evidence: Mapping[str, bytes],
+        billing: StageDProviderBilling,
+        billing_receipts: Mapping[str, bytes],
+        cleanup: StageDCleanupEvidence,
+        cleanup_receipts: Mapping[str, bytes],
+        evaluation_ledger: StageDEvaluationLedger | None = None,
+        evaluation_completion_bytes: bytes | None = None,
+    ) -> bytes:
+        return finalize_stage_d(
+            cast(HandoffCoordinator, self),
+            terminal_status=terminal_status,
+            terminal_phase=terminal_phase,
+            termination_code=termination_code,
+            decisions=decisions,
+            decision_evidence=decision_evidence,
+            billing=billing,
+            billing_receipts=billing_receipts,
+            cleanup=cleanup,
+            cleanup_receipts=cleanup_receipts,
+            evaluation_ledger=evaluation_ledger,
+            evaluation_completion_bytes=evaluation_completion_bytes,
+        )
 
     def seal(self) -> bytes:
         with exclusive_lock(self.lock_path):
