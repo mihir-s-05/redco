@@ -165,11 +165,15 @@ class StageDPrimeRuntimeGate:
     objective_authorization_sha256: str
     batch_authorization_sha256: str
     ledger_seal_sha256: str
+    expected_pre_model_sha256: str | None = None
+    base_model_manifest_sha256: str | None = None
     trainer_run_ledger: StageDTrainerRunLedger | None = None
     launch_id: str | None = None
+    _initialization_verified: bool = False
     _batch_verified: bool = False
     _optimizer_started: bool = False
     _optimizer_completed: bool = False
+    _post_model_sha256: str | None = None
 
     def verify_distributed(self) -> None:
         torch_dist = importlib.import_module("torch.distributed")
@@ -181,12 +185,38 @@ class StageDPrimeRuntimeGate:
             self.objective_authorization_sha256,
             self.batch_authorization_sha256,
             self.ledger_seal_sha256,
+            self.expected_pre_model_sha256,
+            self.base_model_manifest_sha256,
         )
         world_size = int(torch_dist.get_world_size())
-        gathered: list[tuple[str, str, str, str, str] | None] = [None] * world_size
+        gathered: list[tuple[str, str, str, str, str, str | None, str | None] | None] = [
+            None
+        ] * world_size
         torch_dist.all_gather_object(gathered, identity)
         if gathered != [identity] * world_size:
             raise ValueError("trainer ranks disagree on Stage D objective or batch evidence")
+
+    def verify_initialization(self) -> None:
+        """Prove every arm loaded the exact frozen LoRA pre-model state."""
+        if self._initialization_verified:
+            raise ValueError("Stage D initialization was verified twice")
+        if self.expected_pre_model_sha256 is None or self.base_model_manifest_sha256 is None:
+            raise ValueError("Stage D initialization identity is absent")
+        from redco.analysis.stage_d_live_update import exported_adapter_state_sha256
+
+        observed = exported_adapter_state_sha256(
+            base_snapshot_manifest_sha256=self.base_model_manifest_sha256
+        )
+        torch_dist = importlib.import_module("torch.distributed")
+        gathered: list[str | None] = [None] * int(torch_dist.get_world_size())
+        torch_dist.all_gather_object(gathered, observed)
+        if gathered != [self.expected_pre_model_sha256] * len(gathered):
+            raise ValueError("Stage D loaded state differs from the frozen shared initialization")
+        self._record_supervisor(
+            "mark_initialization_verified",
+            observed_pre_model_sha256=observed,
+        )
+        self._initialization_verified = True
 
     def verify_consumed_micro_batches(
         self,
@@ -195,6 +225,8 @@ class StageDPrimeRuntimeGate:
         trainer_step: int,
         process_group: Any,
     ) -> None:
+        if not self._initialization_verified:
+            raise ValueError("Stage D batch arrived before initialization verification")
         if self._batch_verified:
             raise ValueError("Stage D runtime gate observed a second training batch")
         if trainer_step != self.batch.trainer_step:
@@ -230,12 +262,33 @@ class StageDPrimeRuntimeGate:
             raise ValueError("Stage D optimizer completion is out of order")
         if trainer_step != self.batch.trainer_step:
             raise ValueError("Stage D optimizer completed at a different trainer step")
-        self._record_supervisor("mark_optimizer_completed", trainer_step=trainer_step)
+        if self.base_model_manifest_sha256 is None:
+            raise ValueError("Stage D post-update state lacks its base-model identity")
+        from redco.analysis.stage_d_live_update import exported_adapter_state_sha256
+
+        observed = exported_adapter_state_sha256(
+            base_snapshot_manifest_sha256=self.base_model_manifest_sha256
+        )
+        torch_dist = importlib.import_module("torch.distributed")
+        gathered: list[str | None] = [None] * int(torch_dist.get_world_size())
+        torch_dist.all_gather_object(gathered, observed)
+        if gathered != [observed] * len(gathered):
+            raise ValueError("Stage D ranks disagree on the post-update model state")
+        self._record_supervisor(
+            "mark_optimizer_completed",
+            trainer_step=trainer_step,
+            post_model_sha256=observed,
+        )
+        self._post_model_sha256 = observed
         self._optimizer_completed = True
 
     def verify_finished(self) -> None:
         """Reject a nominally successful trainer exit that consumed no sealed batch."""
-        if not self._batch_verified or not self._optimizer_completed:
+        if (
+            not self._batch_verified
+            or not self._optimizer_completed
+            or self._post_model_sha256 is None
+        ):
             raise ValueError("Stage D trainer exited without one complete sealed update")
 
     def _record_supervisor(self, method: str, **payload: object) -> None:
@@ -292,6 +345,8 @@ def verify_captured_prime_objective(
     ledger_seal_sha256: str,
     trainer_run_ledger: StageDTrainerRunLedger | None = None,
     launch_id: str | None = None,
+    expected_pre_model_sha256: str | None = None,
+    base_model_manifest_sha256: str | None = None,
 ) -> tuple[StageDPrimeRuntimeGate, Any, Any]:
     """Authorize the parsed in-process config against batch and preregistration."""
     if capture.trainer_toml_path.read_bytes() != capture.trainer_toml_bytes:
@@ -338,6 +393,8 @@ def verify_captured_prime_objective(
             expected_authorization_sha256,
             batch_authorization_sha256,
             ledger_seal_sha256,
+            expected_pre_model_sha256,
+            base_model_manifest_sha256,
             trainer_run_ledger,
             launch_id,
         ),

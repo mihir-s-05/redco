@@ -742,16 +742,16 @@ def test_contract_refactor_golden_bytes_and_hashes_are_frozen() -> None:
     )
     assert [(_sha256(source.to_bytes()), source.source_sha256) for source in sources] == [
         (
-            "24bda6d0da03c6054bb41b068549382c278adb9331a4ada5937c5939f85d12b0",
-            "b8d90fb02cab38cc007f5d33bcdd78f6568f24dc091461b725be9e68a6fbc530",
+            "a64c109ac8a47ce358a4148e1e9f31137dda34c16a05bb79f8422c26380d3acd",
+            "45c4e7555d4966aa8cd4acf13f164860e634a837522deb3766fe1ac98348aa0e",
         ),
         (
-            "69b2c65556af2d087a804af4fe9991d1155e0b8fcf23d6386b8b7ce55fe01d23",
-            "ec83007b4e29f9868012d3654241cba41fc3ba1d6852f234f949c54ad6784779",
+            "a8a3975348fba945434044dc0518fef695705e0e4fb15b80dbf3d5f49aede7a9",
+            "466a4818ea32e1da44249d69b07d80a9e4d670f956a905e30c5c9d827ffa7bdc",
         ),
         (
-            "8b3b295f745edc862043a2b966b2527422d31733e7996dd471c55dcc711a6cf2",
-            "5c01f6d441ce75222a9c66472015a5279a4955fd30d1b7810356318b1dd57e14",
+            "76cbefbf5f9fa9d4ed045d22605725aca1dbba16494d3ce37f6d7039d9ebce66",
+            "7810777b8184f7f4e8255a678281d15f3f30def837793194a4e25e2da426f05f",
         ),
     ]
     assert {
@@ -763,21 +763,21 @@ def test_contract_refactor_golden_bytes_and_hashes_are_frozen() -> None:
         )
     } == {
         "stock": (
-            "e6f85eea4c7884f32ffd3f0a2a4cc37e1a8223ebaab1a13113d09da736c1eaa2",
-            "0ad51a410f2a7747a3a2fb374834966cfd5b2c7693bb7f37ea89b8ee476e38cf",
+            "7970cc2636f00a1cfcad1d673bcad90b1c7b85142eb1117bc54d28806895abd1",
+            "76ea80a8dca9a45b1970e5868ccca0c5cfe38fd342b8499af748f8f192461c16",
         ),
         "branch-global": (
-            "652b0e3277237018f9bcf6d66515280c3dca1c6882f7a53fcf06de2b551ab04d",
-            "5224424e2ae0a37997d7f176293f33c181ea4eb962b7fe3093462774287ccc4b",
+            "4ddc5e5e9d0c5297d1782d03a5bfbc5e6ed1832a4f216512a3a537079e97069b",
+            "4d6b4cac5fbb612a584e44f52c5bc8ce8995985a26ec9becf2651ccfabed9fee",
         ),
         "local": (
-            "46e2163df815d30c1bdd42112966e55745a250ef89f20fa7a4c5e0c9ec9f73a1",
-            "aa27ab403ac9a6ed26fd204c513e82fe7ccc93c0663ed811ea8bc06f08f445f2",
+            "a3ee1ff3bd75e3b500e8aa392c89967f63dfb99705c3db86899aeefdf0545414",
+            "ef8ea60fd6deca4122dd8afbc316e47634ed238ddf99b2e2991e32208844f4a0",
         ),
     }
     assert (
         compiled.common_branch_layout_sha256
-        == "e193ac9102013141435ae96d0b2a85d6e8ee827bea0af019fa15334578a35034"
+        == "c3ca667adee4fdc2ab3595f7a3b74f9c1bf245bbba94562a91add83d417a8f3d"
     )
 
 
@@ -1256,6 +1256,7 @@ def test_runtime_gate_gathers_two_dp_shards_and_skips_valid_dummy_padding(
         "b" * 64,
         "c" * 64,
     )
+    gate._initialization_verified = True
     gate.verify_consumed_micro_batches(
         local_microbatches,
         trainer_step=1,
@@ -1282,6 +1283,7 @@ def test_runtime_gate_rejects_malformed_dummy_padding(
         "b" * 64,
         "c" * 64,
     )
+    gate._initialization_verified = True
     with pytest.raises(ValueError, match="dummy padding has nonzero advantages"):
         gate.verify_consumed_micro_batches(
             [_dummy_tensor_microbatch(batch.records[0], nonzero_advantage=True)],
@@ -1315,6 +1317,7 @@ def test_runtime_gate_rejects_trailing_or_overrun_tensor_streams(
         "b" * 64,
         "c" * 64,
     )
+    gate._initialization_verified = True
     with pytest.raises(ValueError, match="misaligned or trailing"):
         gate.verify_consumed_micro_batches(
             [microbatch],
@@ -1373,6 +1376,7 @@ def test_actual_prime_tensor_conversion_passes_single_use_runtime_gate(
         "b" * 64,
         "c" * 64,
     )
+    gate._initialization_verified = True
     process_group = _install_fake_distributed(monkeypatch)
     gate.verify_consumed_micro_batches(
         tensor_micro_batches,
@@ -1515,6 +1519,7 @@ def test_runtime_gate_checks_the_actual_tensor_microbatch_once(
         "b" * 64,
         "c" * 64,
     )
+    gate._initialization_verified = True
     process_group = _install_fake_distributed(monkeypatch)
     gate.verify_consumed_micro_batches(
         [microbatch],

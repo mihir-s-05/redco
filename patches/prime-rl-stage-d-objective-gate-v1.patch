@@ -20,7 +20,16 @@ index 5f8f5f2e..0c5ac080 100644
      # Configurable to support ROCm/AMD GPUs where reduced precision
      # matmul corrupts softmax over large vocabularies. Override via config
      # (e.g. matmul_precision = "highest") on ROCm.
-@@ -320,6 +322,12 @@ def train(config: TrainerConfig):
+@@ -250,5 +252,7 @@ def train(config: TrainerConfig):
+         # The checkpoint finished step ``checkpoint_step``; resume training at the next step.
+         progress.step += 1
+         logger.info(f"Resuming training from checkpoint step {checkpoint_step}")
+-
++    if redco_runtime_gate is not None:
++        redco_runtime_gate.verify_initialization()
++
+     logger.info(
+@@ -320,6 +324,12 @@ def train(config: TrainerConfig):
          logger.debug("Loading batch")
          load_data_start_time = time.perf_counter()
          micro_batches = dataloader.get_batch()
@@ -32,8 +41,8 @@ index 5f8f5f2e..0c5ac080 100644
 +            )
          load_data_time = time.perf_counter() - load_data_start_time
          logger.debug(f"Loaded batch in {load_data_time:.2f} seconds")
- 
-@@ -650,15 +658,19 @@ def train(config: TrainerConfig):
+
+@@ -650,15 +660,19 @@ def train(config: TrainerConfig):
          # Update the model parameters
 +        if redco_runtime_gate is not None:
 +            redco_runtime_gate.before_optimizer_step(trainer_step=progress.step)

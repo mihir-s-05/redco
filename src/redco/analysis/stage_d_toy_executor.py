@@ -503,6 +503,10 @@ class DurableCandidateSampler:
         if response.action.key.request != canonical_json(request):
             raise ValueError("candidate gateway did not execute the ledgered exact request")
         response_sha256 = self._writer.put_evidence(response.raw_response)
+        self._writer.mark_candidate_response_observed(
+            attempt,
+            response_sha256=response_sha256,
+        )
         receipt = self._writer.complete_candidate_call(
             attempt,
             action=response.action,
@@ -777,6 +781,11 @@ class ToySubprocessArmExecutor:
                             "continuation gateway did not execute the ledgered schedule"
                         )
                     response_sha256 = self._writer.put_evidence(continuation.raw_response)
+                    self._writer.mark_execution_response_observed(
+                        attempt,
+                        call,
+                        response_sha256=response_sha256,
+                    )
                     self._writer.complete_execution_model_call(
                         attempt,
                         call,

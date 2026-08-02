@@ -14,7 +14,10 @@ from redco.integrations.signed_subprocess import verify_signed_payload
 
 SCHEMA_VERSION = 1
 EXACT_ACTION_KEY_PREPARED_SCHEMA_VERSION = 2
-_DOMAIN = "redco-stage-d-behavior-action-v1"
+BEHAVIOR_ACTION_SCHEMA_VERSION = 2
+_LEGACY_BEHAVIOR_DOMAIN = "redco-stage-d-behavior-action-v1"
+_BEHAVIOR_DOMAIN = "redco-stage-d-behavior-action-v2"
+_KEY_DOMAIN = _LEGACY_BEHAVIOR_DOMAIN
 _TRANSPORT_FIELDS = {
     "model",
     "messages",
@@ -500,6 +503,71 @@ class ExactActionKey:
         )
         return self
 
+    @classmethod
+    def resample_prepared(
+        cls,
+        reference: ExactActionKey,
+        *,
+        seed: int,
+        cache_salt: str,
+    ) -> ExactActionKey:
+        """Change only the randomized draw address of a frozen prepared policy state."""
+        if type(reference) is not ExactActionKey or reference.schema_version != (
+            EXACT_ACTION_KEY_PREPARED_SCHEMA_VERSION
+        ):
+            raise ValueError("candidate resampling requires a prepared exact action key")
+        _exact_int(seed, "seed")
+        if not isinstance(cache_salt, str) or not cache_salt:
+            raise ValueError("candidate cache salt must be nonempty")
+        payload = reference.to_payload()
+        request = cast(dict[str, Any], payload["request"])
+        sampler = cast(dict[str, Any], payload["sampler_config"])
+        engine = cast(dict[str, Any], payload["prepared_engine_request"])
+        engine_sampling = engine.get("sampling_params")
+        if not isinstance(engine_sampling, dict):
+            raise ValueError("prepared candidate engine request lacks sampling params")
+        extra_body = request.get("extra_body")
+        if not isinstance(extra_body, dict):
+            raise ValueError("prepared application request lacks extra_body")
+        request["seed"] = seed
+        extra_body["cache_salt"] = cache_salt
+        sampler["seed"] = seed
+        engine_sampling["seed"] = seed
+        if "cache_salt" in engine:
+            engine["cache_salt"] = cache_salt
+        elif "cache_salt" in engine_sampling:
+            engine_sampling["cache_salt"] = cache_salt
+        else:
+            raise ValueError("prepared candidate engine request lacks cache salt")
+        payload["sampler_config_sha256"] = _sha256(canonical_json(sampler))
+        payload["request_sha256"] = _sha256(canonical_json(request))
+        payload["prepared_engine_request_sha256"] = _sha256(canonical_json(engine))
+        candidate = cls.from_payload(
+            payload,
+            render_prompt=lambda _: reference.prompt_token_ids,
+        )
+        before = reference.to_payload()
+        after = candidate.to_payload()
+        for value in (before, after):
+            cast(dict[str, Any], value["request"])["seed"] = 0
+            request_extra = cast(dict[str, Any], value["request"])["extra_body"]
+            if not isinstance(request_extra, dict):
+                raise ValueError("prepared application request lacks extra_body")
+            request_extra["cache_salt"] = "*"
+            cast(dict[str, Any], value["sampler_config"])["seed"] = 0
+            prepared = cast(dict[str, Any], value["prepared_engine_request"])
+            cast(dict[str, Any], prepared["sampling_params"])["seed"] = 0
+            if "cache_salt" in prepared:
+                prepared["cache_salt"] = "*"
+            else:
+                cast(dict[str, Any], prepared["sampling_params"])["cache_salt"] = "*"
+            value["sampler_config_sha256"] = "*"
+            value["request_sha256"] = "*"
+            value["prepared_engine_request_sha256"] = "*"
+        if before != after:
+            raise ValueError("candidate resampling changed fields beyond seed and cache salt")
+        return candidate
+
     @property
     def sampler(self) -> ResolvedSamplerConfig:
         request = json.loads(self.request)
@@ -692,7 +760,7 @@ class ExactActionKey:
 
     @property
     def digest(self) -> str:
-        return _sha256(canonical_json({"domain": _DOMAIN, "key": self.to_payload()}))
+        return _sha256(canonical_json({"domain": _KEY_DOMAIN, "key": self.to_payload()}))
 
 
 TerminationKind = Literal["eos", "max_tokens", "tool_calls"]
@@ -712,6 +780,7 @@ class BehaviorAction:
     raw_transport_message_sha256: str
     parse_status: Literal["valid", "malformed"]
     parse_error: str | None
+    request_id: str
     finish_reason: str
     prompt_tokens: int
     completion_tokens: int
@@ -732,6 +801,7 @@ class BehaviorAction:
         termination_kind: TerminationKind,
         eos_token_id: int | None,
         encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], Sequence[int]],
+        request_id: str | None = None,
     ) -> BehaviorAction:
         if type(key) is not ExactActionKey:
             raise ValueError("key must be a validated ExactActionKey")
@@ -761,6 +831,25 @@ class BehaviorAction:
             raise ExactActionMismatch("typed message does not round-trip to action tokens")
         if not isinstance(finish_reason, str) or not finish_reason:
             raise ValueError("finish_reason must be nonempty")
+        if request_id is None:
+            resolved_request_id = "redco-fixture-" + _sha256(
+                canonical_json(
+                    {
+                        "key": key.digest,
+                        "action_token_ids": action,
+                        "behavior_logprobs": logprobs,
+                    }
+                )
+            )[:24]
+        elif (
+            not isinstance(request_id, str)
+            or not request_id
+            or len(request_id) > 512
+            or not request_id.isprintable()
+        ):
+            raise ValueError("request_id must be a nonempty printable string")
+        else:
+            resolved_request_id = request_id
         prompt_usage = _exact_int(prompt_tokens, "prompt_tokens")
         completion_usage = _exact_int(completion_tokens, "completion_tokens")
         if prompt_usage != len(key.prompt_token_ids) or completion_usage != len(action):
@@ -790,7 +879,7 @@ class BehaviorAction:
         action_bytes = canonical_json(action)
         logprob_bytes = canonical_json(logprobs)
         for name, value in {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": BEHAVIOR_ACTION_SCHEMA_VERSION,
             "key": key,
             "action_token_ids": action,
             "action_token_ids_sha256": _sha256(action_bytes),
@@ -800,6 +889,7 @@ class BehaviorAction:
             "raw_transport_message_sha256": _sha256(message_bytes),
             "parse_status": parse_status,
             "parse_error": parse_error,
+            "request_id": resolved_request_id,
             "finish_reason": finish_reason,
             "prompt_tokens": prompt_usage,
             "completion_tokens": completion_usage,
@@ -816,7 +906,7 @@ class BehaviorAction:
         return value
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "key": self.key.to_payload(),
             "action_token_ids": list(self.action_token_ids),
@@ -833,12 +923,21 @@ class BehaviorAction:
             "termination_kind": self.termination_kind,
             "eos_token_id": self.eos_token_id,
         }
+        if self.schema_version == BEHAVIOR_ACTION_SCHEMA_VERSION:
+            payload["request_id"] = self.request_id
+        elif self.schema_version != SCHEMA_VERSION:
+            raise ValueError("unsupported behavior action schema")
+        return payload
 
     def to_bytes(self) -> bytes:
         return canonical_json(
             {
-                "schema_version": SCHEMA_VERSION,
-                "domain": _DOMAIN,
+                "schema_version": self.schema_version,
+                "domain": (
+                    _BEHAVIOR_DOMAIN
+                    if self.schema_version == BEHAVIOR_ACTION_SCHEMA_VERSION
+                    else _LEGACY_BEHAVIOR_DOMAIN
+                ),
                 "action": self.to_payload(),
                 "digest": self.digest,
             }
@@ -858,11 +957,12 @@ class BehaviorAction:
         if not isinstance(envelope, dict) or canonical_json(envelope) != payload:
             raise ValueError("serialized action must be canonical JSON")
         _strict_keys(envelope, {"schema_version", "domain", "action", "digest"}, "action")
-        if (
-            type(envelope["schema_version"]) is not int
-            or envelope["schema_version"] != SCHEMA_VERSION
-            or envelope["domain"] != _DOMAIN
-        ):
+        schema_version = envelope["schema_version"]
+        expected_domain = {
+            SCHEMA_VERSION: _LEGACY_BEHAVIOR_DOMAIN,
+            BEHAVIOR_ACTION_SCHEMA_VERSION: _BEHAVIOR_DOMAIN,
+        }.get(schema_version)
+        if type(schema_version) is not int or envelope["domain"] != expected_domain:
             raise ValueError("unsupported behavior action envelope")
         action_payload = envelope["action"]
         if not isinstance(action_payload, dict):
@@ -884,6 +984,8 @@ class BehaviorAction:
             "termination_kind",
             "eos_token_id",
         }
+        if schema_version == BEHAVIOR_ACTION_SCHEMA_VERSION:
+            expected.add("request_id")
         _strict_keys(action_payload, expected, "behavior action")
         key_payload = action_payload["key"]
         message = action_payload["raw_transport_message"]
@@ -900,7 +1002,10 @@ class BehaviorAction:
             termination_kind=action_payload["termination_kind"],
             eos_token_id=action_payload["eos_token_id"],
             encode_action=encode_action,
+            request_id=action_payload.get("request_id"),
         )
+        if schema_version == SCHEMA_VERSION:
+            object.__setattr__(action, "schema_version", SCHEMA_VERSION)
         if canonical_json(action.to_payload()) != canonical_json(action_payload):
             raise ValueError("stored behavior action fields or hashes disagree")
         if envelope["digest"] != action.digest:
@@ -909,7 +1014,17 @@ class BehaviorAction:
 
     @property
     def digest(self) -> str:
-        return _sha256(canonical_json({"domain": _DOMAIN, "action": self.to_payload()}))
+        domain = (
+            _BEHAVIOR_DOMAIN
+            if self.schema_version == BEHAVIOR_ACTION_SCHEMA_VERSION
+            else _LEGACY_BEHAVIOR_DOMAIN
+        )
+        payload = self.to_payload()
+        if self.schema_version == BEHAVIOR_ACTION_SCHEMA_VERSION:
+            # The request ID remains authenticated transport evidence in to_bytes(),
+            # but is not part of the sampled scientific behavior identity.
+            payload.pop("request_id")
+        return _sha256(canonical_json({"domain": domain, "action": payload}))
 
 
 def _strict_typed_message(value: Mapping[str, Any]) -> dict[str, Any]:

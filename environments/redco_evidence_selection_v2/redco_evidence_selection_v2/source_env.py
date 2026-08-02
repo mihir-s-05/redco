@@ -15,6 +15,7 @@ from pydantic import model_validator
 
 from redco.analysis.stage_d_collection import derive_source_episode_seed_and_salt
 from redco.analysis.stage_d_live_observer import (
+    StageDForwardDirectiveObserver,
     StageDObserverIdentity,
     StageDObserverProtocol,
     StageDPreparedCallObserver,
@@ -23,6 +24,11 @@ from redco.analysis.stage_d_live_observer import (
 from redco.analysis.stage_d_receipt_ledger import (
     GenesisBinding,
     StageDReceiptLedger,
+)
+from redco.analysis.stage_d_runtime_isolation import (
+    StageDIsolatedRuntimeContract,
+    build_pre_action_runtime_snapshot,
+    run_isolated_runtime_preflight,
 )
 from redco.analysis.stage_d_source_artifacts import StageDSourceArtifactStore
 from redco.analysis.stage_d_source_contracts import SourceRollout
@@ -36,6 +42,7 @@ from redco_evidence_selection_v2.taskset import (
     EvidenceSelectionConfig,
     EvidenceSelectionData,
     EvidenceSelectionTaskset,
+    prepare_isolated_workspace,
 )
 
 
@@ -53,8 +60,19 @@ class StageDSourceTask(vf.Task[StageDSourceData]):
 
     async def setup(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
         del trace
-        await runtime.run(["mkdir", "-p", WORKDIR], {})
-        await runtime.write(CONTEXT_PATH, self.data.paper.encode("utf-8"))
+        if self.data.network_allow == []:
+            await prepare_isolated_workspace(runtime, self.data.paper.encode("utf-8"))
+        else:
+            await runtime.run(["mkdir", "-p", WORKDIR], {})
+            await runtime.write(CONTEXT_PATH, self.data.paper.encode("utf-8"))
+
+    async def pre_generation(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
+        if self.data.network_allow != []:
+            return
+        if self.tool_servers():
+            raise RuntimeError("Stage-D task exposes colocated model-callable servers")
+        report = await run_isolated_runtime_preflight(runtime)
+        trace.info["stage_d_isolated_runtime_preflight"] = json.loads(report)
 
     def _score(self, trace: vf.Trace) -> dict[str, float]:
         return score_evidence_reply(
@@ -160,6 +178,7 @@ class StageDSourceEnvConfig(vf.SingleAgentEnvConfig):
     source_sha256: str
     runtime_sha256: str
     config_sha256: str
+    protocol_manifest_sha256: str | None = None
     checkpoint_id: str
     base_model_manifest_path: Path
     base_model_manifest_sha256: str
@@ -176,6 +195,8 @@ class StageDSourceEnvConfig(vf.SingleAgentEnvConfig):
     branch_count: int
     continuation_replicates: int
     failure_reward: float
+    frozen_workspace_manifest_path: Path | None = None
+    frozen_workspace_manifest_sha256: str | None = None
     root_policy_turn_count: int = 2
     maximum_observed_root_policy_turn_count: int = 4
     child_parent_lineage: str = "root"
@@ -223,6 +244,21 @@ class StageDSourceEnvConfig(vf.SingleAgentEnvConfig):
             raise ValueError("adapter manifest path and hash must be supplied together")
         if self.adapter_manifest_sha256 is not None and len(self.adapter_manifest_sha256) != 64:
             raise ValueError("adapter manifest hash must be SHA-256")
+        if self.protocol_manifest_sha256 is not None and len(
+            self.protocol_manifest_sha256
+        ) != 64:
+            raise ValueError("protocol manifest hash must be SHA-256")
+        isolated = self.taskset.isolated_runtime_image is not None
+        if isolated != (self.frozen_workspace_manifest_path is not None) or isolated != (
+            self.frozen_workspace_manifest_sha256 is not None
+        ):
+            raise ValueError(
+                "isolated source runtime requires one frozen workspace manifest"
+            )
+        if self.frozen_workspace_manifest_sha256 is not None and len(
+            self.frozen_workspace_manifest_sha256
+        ) != 64:
+            raise ValueError("workspace manifest hash must be SHA-256")
         return self
 
 
@@ -266,11 +302,14 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
             raise
 
     def _start_after_worker_lease(self) -> None:
+        if self.config.protocol_manifest_sha256 is None:
+            raise ValueError("Stage-D source collection lacks its protocol manifest")
         binding = GenesisBinding(
             preregistration_sha256=self.config.preregistration_sha256,
             source_sha256=self.config.source_sha256,
             runtime_sha256=self.config.runtime_sha256,
             config_sha256=self.config.config_sha256,
+            protocol_manifest_sha256=self.config.protocol_manifest_sha256,
             master_seed_sha256=_sha256(self.config.master_seed.encode("utf-8")),
         )
         if self.config.ledger_path.exists():
@@ -436,7 +475,7 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
         trace: vf.Trace,
         agent_config: vf.AgentConfig,
         client: vf.Client,
-    ) -> StageDPreparedCallObserver:
+    ) -> StageDForwardDirectiveObserver:
         from verifiers.v1.clients.train import TrainClient
 
         if self._failed or self._ledger is None or self._identity is None:
@@ -491,27 +530,78 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
             base_model_manifest_sha256=self.config.base_model_manifest_sha256,
         )
         self._producers[trace.id] = producer
-        return StageDPreparedCallObserver(
-            producer=producer,
-            trace_id=trace.id,
-            identity=self._identity,
-            protocol=StageDObserverProtocol(
-                branch_count=self.config.branch_count,
-                continuation_replicates=self.config.continuation_replicates,
-                failure_reward=self.config.failure_reward,
-                root_policy_turn_count=self.config.root_policy_turn_count,
-                maximum_observed_root_policy_turn_count=(
-                    self.config.maximum_observed_root_policy_turn_count
+        return StageDForwardDirectiveObserver(
+            StageDPreparedCallObserver(
+                producer=producer,
+                trace_id=trace.id,
+                identity=self._identity,
+                protocol=StageDObserverProtocol(
+                    branch_count=self.config.branch_count,
+                    continuation_replicates=self.config.continuation_replicates,
+                    failure_reward=self.config.failure_reward,
+                    root_policy_turn_count=self.config.root_policy_turn_count,
+                    maximum_observed_root_policy_turn_count=(
+                        self.config.maximum_observed_root_policy_turn_count
+                    ),
+                    child_parent_event=parent,
+                    parent_tool_call_slot=self.config.parent_tool_call_slot,
                 ),
-                child_parent_event=parent,
-                parent_tool_call_slot=self.config.parent_tool_call_slot,
+                runtime_snapshot=self._runtime_snapshot(task, agent_config),
+                encode_action=lambda request, message, prompt_token_ids: (
+                    client.encode_assistant_action(
+                        request,
+                        message,
+                        model=str(agent_config.model),
+                        prompt_token_ids=prompt_token_ids,
+                    )
+                ),
             ),
-            encode_action=lambda request, message, prompt_token_ids: client.encode_assistant_action(
-                request,
-                message,
-                model=str(agent_config.model),
-                prompt_token_ids=prompt_token_ids,
-            ),
+            pre_forward_guard=lambda: self._require_runtime_preflight(trace),
+        )
+
+    def _require_runtime_preflight(self, trace: vf.Trace) -> None:
+        if self.config.taskset.isolated_runtime_image is None:
+            return
+        preflight = trace.info.get("stage_d_isolated_runtime_preflight")
+        if not isinstance(preflight, dict) or preflight.get("domain") != (
+            "redco-stage-d-isolated-runtime-preflight-v1"
+        ):
+            raise RuntimeError("Stage-D source call bypassed runtime preflight")
+
+    def _runtime_snapshot(self, task: vf.Task, agent_config: Any) -> bytes:
+        image = self.config.taskset.isolated_runtime_image
+        if image is None:
+            return canonical_json(
+                {
+                    "schema_version": 1,
+                    "domain": "redco-stage-d-legacy-runtime-binding-v1",
+                    "runtime_sha256": self.config.runtime_sha256,
+                }
+            )
+        if not isinstance(task.data, StageDSourceData):
+            raise TypeError("isolated runtime snapshot requires source task data")
+        manifest_path = self.config.frozen_workspace_manifest_path
+        manifest_sha256 = self.config.frozen_workspace_manifest_sha256
+        assert manifest_path is not None and manifest_sha256 is not None
+        manifest_bytes = self._manifest(
+            manifest_path,
+            manifest_sha256,
+            "frozen workspace",
+        )
+        manifest = json.loads(manifest_bytes)
+        if not isinstance(manifest, dict):
+            raise ValueError("frozen workspace manifest must be a JSON object")
+        runtime = agent_config.harness.runtime.model_dump(
+            mode="json",
+            exclude_none=False,
+        )
+        return build_pre_action_runtime_snapshot(
+            contract=StageDIsolatedRuntimeContract(image),
+            runtime_config=runtime,
+            task_data=task.data.model_dump(mode="json", exclude_none=False),
+            task_config=task.config.model_dump(mode="json", exclude_none=False),
+            paper=task.data.paper.encode("utf-8"),
+            frozen_workspace_manifest=manifest,
         )
 
     def verified_completed_sources(self) -> tuple[SourceRollout, ...]:

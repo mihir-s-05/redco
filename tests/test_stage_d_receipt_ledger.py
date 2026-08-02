@@ -8,7 +8,7 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -38,6 +38,10 @@ from redco.analysis.stage_d_spawn_provenance import (
     PolicyEventAddress,
 )
 from redco.analysis.stage_d_three_arm_bridge import DecisionProvenance
+from redco.analysis.stage_d_zero_call_recovery import (
+    _install_or_verify_archive,
+    recover_or_open_scientific_ledger,
+)
 from redco.contracts import ActualEvaluationCost, canonical_json
 
 MASTER_SEED = "durable-master"
@@ -53,6 +57,7 @@ def _binding() -> GenesisBinding:
         source_sha256="2" * 64,
         runtime_sha256="3" * 64,
         config_sha256="4" * 64,
+        protocol_manifest_sha256="5" * 64,
         master_seed_sha256=_sha256(MASTER_SEED.encode()),
     )
 
@@ -254,6 +259,7 @@ def _complete_scientific_artifact(
         writer.mark_candidate_model_call_started(attempt, request_sha256=request)
         action = _action(action_seed)
         response = writer.put_evidence(action.to_bytes())
+        writer.mark_candidate_response_observed(attempt, response_sha256=response)
         receipt = writer.complete_candidate_call(
             attempt,
             action=action,
@@ -286,6 +292,11 @@ def _complete_scientific_artifact(
             request_sha256=request,
         )
         response = writer.put_evidence(f"execution-response-{arm_id}".encode())
+        writer.mark_execution_response_observed(
+            attempt,
+            call,
+            response_sha256=response,
+        )
         writer.complete_execution_model_call(
             attempt,
             call,
@@ -947,7 +958,9 @@ def test_zero_call_receipt_is_minted_only_before_start(tmp_path: Path) -> None:
         supervisor_evidence_sha256=supervisor,
     )
     value = writer(receipt, receipt_kind="zero_call_infrastructure_failure")
-    assert value["scientific_model_calls"] == 0
+    assert value["attempt_model_calls"] == 0
+    assert value["attempt_overrides"] == 0
+    assert value["repair_sequence"] == 0
     assert value["attempt_ordinal"] == 0
     assert value["successor_permitted"] is True
     assert value["ledger_offset"] > json.loads(commitment)["ledger_offset"]
@@ -977,6 +990,302 @@ def test_zero_call_receipt_is_minted_only_before_start(tmp_path: Path) -> None:
     reopened.seal()
 
 
+def test_zero_call_execution_failure_resumes_once_without_scientific_activity(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "ledger"
+    writer = _create(root)
+    recorded, _, _, _ = _commit(writer)
+    qa = writer.put_evidence(b"qa")
+    writer.record_reconstruction_qa(
+        group_id="group-1",
+        target_id="target-0",
+        recorded_action=recorded,
+        passed=True,
+        report_sha256=qa,
+        actual_cost=ActualEvaluationCost(),
+    )
+    attempt = writer.begin_execution(
+        group_id="group-1",
+        target_id="target-0",
+        arm_id="arm-0",
+        action=recorded,
+        continuation_replicate=1,
+    )
+    context = writer.put_evidence(b"dispatch context")
+    writer.bind_execution_context(attempt, context_sha256=context)
+    writer.mark_execution_dispatched(attempt)
+    supervisor = writer.put_evidence(b"docker unavailable before policy activity")
+    receipt = writer.record_zero_call_execution_failure(
+        attempt,
+        reason="docker unavailable",
+        supervisor_evidence_sha256=supervisor,
+    )
+    value = writer(receipt, receipt_kind="zero_call_execution_failure")
+    assert value["attempt_ordinal"] == 0
+    assert value["attempt_model_calls"] == 0
+    assert value["attempt_overrides"] == 0
+    assert value["repair_sequence"] == 0
+    assert value["successor_permitted"] is True
+    writer.close()
+
+    reopened = StageDReceiptLedger(root, master_seed=MASTER_SEED)
+    repair = reopened.begin_execution(
+        group_id="group-1",
+        target_id="target-0",
+        arm_id="arm-0",
+        action=recorded,
+        continuation_replicate=1,
+    )
+    assert repair.attempt_ordinal == 1
+    context = reopened.put_evidence(b"successor dispatch context")
+    reopened.bind_execution_context(repair, context_sha256=context)
+    reopened.mark_execution_dispatched(repair)
+    score = reopened.put_evidence(b"terminal score")
+    reopened.finish_execution(
+        repair,
+        outcome_kind=OutcomeKind.TERMINAL_WITHOUT_DOWNSTREAM,
+        scored_reward=0.0,
+        scorer_evidence_sha256=score,
+        latency_seconds=0.0,
+        dollars=0.0,
+        judge_calls=0,
+        cpu_seconds=0.0,
+        gpu_seconds=0.0,
+        wall_seconds=0.0,
+        storage_bytes=0,
+    )
+    reopened.seal()
+
+
+def test_reopen_recovers_hard_exit_before_candidate_model_call(tmp_path: Path) -> None:
+    root = tmp_path / "candidate-hard-exit"
+    writer = _create(root)
+    recorded, _, _, _ = _commit(writer)
+    qa = writer.put_evidence(b"qa")
+    writer.record_reconstruction_qa(
+        group_id="group-1",
+        target_id="target-0",
+        recorded_action=recorded,
+        passed=True,
+        report_sha256=qa,
+        actual_cost=ActualEvaluationCost(),
+    )
+    writer.begin_candidate_attempt(
+        group_id="group-1",
+        target_id="target-0",
+        action_slot=1,
+    )
+    writer.close()
+
+    scan = inspect_ledger(root, allow_repairable_zero_call=True)
+    assert scan.status == "active-repairable-zero-call"
+    assert scan.repairable_attempt is not None
+    recovered = StageDReceiptLedger.recover_zero_call_failure(
+        root,
+        master_seed=MASTER_SEED,
+        reason="worker hard-exited before POST",
+        supervisor_evidence=b"verified dead worker",
+    )
+    successor = recovered.begin_candidate_attempt(
+        group_id="group-1",
+        target_id="target-0",
+        action_slot=1,
+    )
+    assert successor.attempt_ordinal == 1
+    recovered.close()
+
+
+@pytest.mark.parametrize(
+    ("finish", "expected_status"),
+    [(False, "poisoned"), (True, "active-clean")],
+)
+def test_candidate_post_kill_boundary_is_evidenced_or_atomically_complete(
+    tmp_path: Path,
+    finish: bool,
+    expected_status: str,
+) -> None:
+    root = tmp_path / f"candidate-post-kill-{finish}"
+    writer = _create(root)
+    recorded, _, _, _ = _commit(writer)
+    qa = writer.put_evidence(b"qa")
+    writer.record_reconstruction_qa(
+        group_id="group-1",
+        target_id="target-0",
+        recorded_action=recorded,
+        passed=True,
+        report_sha256=qa,
+        actual_cost=ActualEvaluationCost(),
+    )
+    writer.close()
+    script = """
+import os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[2])
+from test_stage_d_receipt_ledger import MASTER_SEED, _action
+from redco.analysis.stage_d_receipt_ledger import StageDReceiptLedger
+w = StageDReceiptLedger(Path(sys.argv[1]), master_seed=MASTER_SEED)
+a = w.begin_candidate_attempt(group_id='group-1', target_id='target-0', action_slot=1)
+r = w.put_evidence(b'candidate-request')
+w.mark_candidate_model_call_started(a, request_sha256=r)
+action = _action(a.action_seed)
+response = w.put_evidence(b'exact-provider-response')
+w.mark_candidate_response_observed(a, response_sha256=response)
+if sys.argv[3] == 'finish':
+    w.complete_candidate_call(a, action=action, response_sha256=response)
+os._exit(0)
+"""
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            script,
+            str(root),
+            str(Path(__file__).parent),
+            "finish" if finish else "kill",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    scan = inspect_ledger(root)
+    assert scan.status == expected_status
+    response_records = [
+        record
+        for path in sorted((root / "records").glob("*.json"))
+        if (record := json.loads(path.read_bytes()))["record_kind"]
+        == "model_call_response_observed"
+    ]
+    assert len(response_records) == 1
+    response_digest = _sha256(b"exact-provider-response")
+    assert response_records[0]["body"]["evidence_refs"] == [response_digest]
+    assert (root / "evidence" / response_digest).read_bytes() == b"exact-provider-response"
+    if finish:
+        reopened = StageDReceiptLedger(root, master_seed=MASTER_SEED)
+        recovered = reopened.completed_candidate_evidence(
+            group_id="group-1",
+            target_id="target-0",
+            action_slot=1,
+        )
+        assert recovered is not None
+        reopened.close()
+
+
+def test_zero_call_archive_and_ledger_recovery_are_crash_idempotent(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "ledger"
+    writer = _create(root)
+    recorded, _, _, _ = _commit(writer)
+    writer.record_reconstruction_qa(
+        group_id="group-1",
+        target_id="target-0",
+        recorded_action=recorded,
+        passed=True,
+        report_sha256=writer.put_evidence(b"qa"),
+        actual_cost=ActualEvaluationCost(),
+    )
+    writer.begin_candidate_attempt(
+        group_id="group-1",
+        target_id="target-0",
+        action_slot=1,
+    )
+    writer.close()
+    evidence = tmp_path / "supervisor.bin"
+    evidence.write_bytes(b"verified dead worker")
+    episode_output = tmp_path / "episode-output"
+    episode_output.mkdir()
+    (episode_output / "partial.json").write_bytes(b"partial")
+    archive = tmp_path / "repair-archive"
+    scan = inspect_ledger(root, allow_repairable_zero_call=True)
+    assert scan.repairable_attempt is not None
+
+    # Simulate a hard exit after the archive transaction but before ledger repair.
+    _install_or_verify_archive(
+        archive=archive,
+        episode_output=episode_output,
+        repairable_attempt=dict(scan.repairable_attempt),
+        supervisor_evidence_sha256=_sha256(evidence.read_bytes()),
+    )
+    assert not episode_output.exists()
+    recovered = recover_or_open_scientific_ledger(
+        ledger_root=root,
+        master_seed=MASTER_SEED,
+        recover_requested=True,
+        supervisor_evidence_path=evidence,
+        repair_archive=archive,
+        episode_output=episode_output,
+    )
+    recovered.close()
+
+    # Simulate another hard exit after ledger repair; the same command only verifies.
+    reopened = recover_or_open_scientific_ledger(
+        ledger_root=root,
+        master_seed=MASTER_SEED,
+        recover_requested=True,
+        supervisor_evidence_path=evidence,
+        repair_archive=archive,
+        episode_output=episode_output,
+    )
+    reopened.close()
+    final = inspect_ledger(root)
+    failures = [
+        receipt
+        for (kind, _), receipt in final.receipts.items()
+        if kind == "zero_call_infrastructure_failure"
+    ]
+    assert len(failures) == 1
+    assert (archive / "episode-output" / "partial.json").read_bytes() == b"partial"
+
+
+def test_reopen_recovers_hard_exit_after_zero_activity_execution_dispatch(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "execution-hard-exit"
+    writer = _create(root)
+    recorded, _, _, _ = _commit(writer)
+    qa = writer.put_evidence(b"qa")
+    writer.record_reconstruction_qa(
+        group_id="group-1",
+        target_id="target-0",
+        recorded_action=recorded,
+        passed=True,
+        report_sha256=qa,
+        actual_cost=ActualEvaluationCost(),
+    )
+    attempt = writer.begin_execution(
+        group_id="group-1",
+        target_id="target-0",
+        arm_id="arm-0",
+        action=recorded,
+        continuation_replicate=1,
+    )
+    context = writer.put_evidence(b"dispatch context")
+    writer.bind_execution_context(attempt, context_sha256=context)
+    writer.mark_execution_dispatched(attempt)
+    writer.close()
+
+    scan = inspect_ledger(root, allow_repairable_zero_call=True)
+    assert scan.status == "active-repairable-zero-call"
+    assert scan.repairable_attempt is not None
+    recovered = StageDReceiptLedger.recover_zero_call_failure(
+        root,
+        master_seed=MASTER_SEED,
+        reason="worker hard-exited before scientific activity",
+        supervisor_evidence=b"verified dead worker",
+    )
+    successor = recovered.begin_execution(
+        group_id="group-1",
+        target_id="target-0",
+        arm_id="arm-0",
+        action=recorded,
+        continuation_replicate=1,
+    )
+    assert successor.attempt_ordinal == 1
+    recovered.close()
+
+
 def test_duplicate_candidate_slot_and_execution_replicate_are_rejected(tmp_path: Path) -> None:
     root = tmp_path / "ledger"
     writer = _create(root)
@@ -995,6 +1304,38 @@ def test_duplicate_candidate_slot_and_execution_replicate_are_rejected(tmp_path:
             action=artifact.recorded_action,
             continuation_replicate=1,
         )
+    writer.seal()
+
+
+def test_execution_ledger_binds_cache_salt_to_structural_seed(tmp_path: Path) -> None:
+    root = tmp_path / "ledger"
+    writer = _create(root)
+    _complete_scientific_artifact(writer)
+    starts = []
+    for path in sorted((root / "records").iterdir()):
+        record = json.loads(path.read_bytes())
+        if record["record_kind"] != "model_call_started":
+            continue
+        event = record["body"]["event"]
+        if event["attempt_kind"] == "execution":
+            starts.append(event)
+    assert starts
+    for event in starts:
+        address = PolicyEventAddress(
+            event["address"]["depth"],
+            event["address"]["lineage"],
+            event["address"]["session_call_ordinal"],
+            event["address"]["turn"],
+            event["address"]["call_kind"],
+        )
+        scheduled = EventSeedScheduler(
+            MASTER_SEED,
+            "rollout-1",
+            "target-0",
+            1,
+        ).paired_continuation_seed(address, committed_address=address)
+        assert event["seed"] == scheduled.seed
+        assert event["cache_salt"] == scheduled.cache_salt
     writer.seal()
 
 
@@ -1089,6 +1430,378 @@ def test_execution_cannot_dispatch_or_finish_without_a_frozen_context(
         storage_bytes=0,
     )
     writer.seal()
+
+
+def test_replay_override_is_committed_before_delivery_and_must_be_acknowledged(
+    tmp_path: Path,
+) -> None:
+    writer = _create(tmp_path / "ledger")
+    recorded, _, _, _ = _commit(writer)
+    target = PolicyEventAddress(1, "root/child", 0, 0)
+    qa = writer.put_evidence(b"qa")
+    writer.record_reconstruction_qa(
+        group_id="group-1",
+        target_id="target-0",
+        recorded_action=recorded,
+        passed=True,
+        report_sha256=qa,
+        actual_cost=ActualEvaluationCost(cpu_seconds=0.1, wall_seconds=0.1),
+    )
+    attempt = writer.begin_execution(
+        group_id="group-1",
+        target_id="target-0",
+        arm_id="arm-0",
+        action=recorded,
+        continuation_replicate=1,
+    )
+    context = writer.put_evidence(b"context")
+    writer.bind_execution_context(attempt, context_sha256=context)
+    writer.mark_execution_dispatched(attempt)
+    request = writer.put_evidence(b"prepared request")
+    response = writer.put_evidence(b"raw engine response")
+    ticket = writer.commit_execution_override(
+        attempt,
+        address=target,
+        action_digest=recorded.digest,
+        disposition="inject",
+        request_sha256=request,
+        response_content_sha256=response,
+        prompt_tokens=recorded.prompt_tokens,
+        completion_tokens=recorded.completion_tokens,
+        counts_toward_logical_cost=False,
+    )
+    score = writer.put_evidence(b"score")
+    with pytest.raises(LedgerError, match="undelivered"):
+        writer.finish_execution(
+            attempt,
+            outcome_kind=OutcomeKind.TERMINAL_WITHOUT_DOWNSTREAM,
+            scored_reward=0.0,
+            scorer_evidence_sha256=score,
+            latency_seconds=0.0,
+            dollars=0.0,
+            judge_calls=0,
+            cpu_seconds=0.0,
+            gpu_seconds=0.0,
+            wall_seconds=0.0,
+            storage_bytes=0,
+        )
+    typed = writer.put_evidence(b"typed response")
+    writer.mark_execution_override_delivered(
+        attempt,
+        ticket,
+        typed_response_sha256=typed,
+    )
+    with pytest.raises(LedgerError, match="already delivered"):
+        writer.mark_execution_override_delivered(
+            attempt,
+            ticket,
+            typed_response_sha256=typed,
+        )
+    writer.finish_execution(
+        attempt,
+        outcome_kind=OutcomeKind.TERMINAL_WITHOUT_DOWNSTREAM,
+        scored_reward=0.0,
+        scorer_evidence_sha256=score,
+        latency_seconds=0.0,
+        dollars=0.0,
+        judge_calls=0,
+        cpu_seconds=0.0,
+        gpu_seconds=0.0,
+        wall_seconds=0.0,
+        storage_bytes=0,
+    )
+    writer.seal()
+    assert inspect_ledger(tmp_path / "ledger").status == "sealed-valid"
+
+
+def test_crash_after_undelivered_override_is_one_time_zero_post_repairable(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "ledger"
+    writer = _create(root)
+    recorded, _, _, _ = _commit(writer)
+    target = PolicyEventAddress(1, "root/child", 0, 0)
+    qa = writer.put_evidence(b"qa")
+    writer.record_reconstruction_qa(
+        group_id="group-1",
+        target_id="target-0",
+        recorded_action=recorded,
+        passed=True,
+        report_sha256=qa,
+        actual_cost=ActualEvaluationCost(cpu_seconds=0.1, wall_seconds=0.1),
+    )
+    attempt = writer.begin_execution(
+        group_id="group-1",
+        target_id="target-0",
+        arm_id="arm-0",
+        action=recorded,
+        continuation_replicate=1,
+    )
+    context = writer.put_evidence(b"context")
+    writer.bind_execution_context(attempt, context_sha256=context)
+    writer.mark_execution_dispatched(attempt)
+    ticket = writer.commit_execution_override(
+        attempt,
+        address=target,
+        action_digest=recorded.digest,
+        disposition="inject",
+        request_sha256=writer.put_evidence(b"request"),
+        response_content_sha256=writer.put_evidence(b"response"),
+        prompt_tokens=recorded.prompt_tokens,
+        completion_tokens=recorded.completion_tokens,
+        counts_toward_logical_cost=False,
+    )
+    writer.close()
+
+    scan = inspect_ledger(root, allow_repairable_zero_call=True)
+    assert scan.status == "active-repairable-zero-call"
+    recovered = StageDReceiptLedger.recover_zero_call_failure(
+        root,
+        master_seed=MASTER_SEED,
+        reason="worker exited before typed override delivery",
+        supervisor_evidence=b"subprocess exit evidence",
+    )
+    failure = next(
+        receipt
+        for (kind, _), receipt in inspect_ledger(root).receipts.items()
+        if kind == "zero_call_execution_failure"
+    )
+    assert failure["attempt_overrides"] == 1
+    assert failure["discarded_override_ids"] == [ticket.override_id]
+    successor = recovered.begin_execution(
+        group_id="group-1",
+        target_id="target-0",
+        arm_id="arm-0",
+        action=recorded,
+        continuation_replicate=1,
+    )
+    assert successor.attempt_ordinal == 1
+
+
+def test_parallel_generated_calls_complete_out_of_order_and_seal(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "ledger"
+    writer = _create(root)
+    recorded, first_address, _, _ = _commit(writer)
+    qa = writer.put_evidence(b"qa")
+    writer.record_reconstruction_qa(
+        group_id="group-1",
+        target_id="target-0",
+        recorded_action=recorded,
+        passed=True,
+        report_sha256=qa,
+        actual_cost=ActualEvaluationCost(cpu_seconds=0.1, wall_seconds=0.1),
+    )
+    attempt = writer.begin_execution(
+        group_id="group-1",
+        target_id="target-0",
+        arm_id="arm-0",
+        action=recorded,
+        continuation_replicate=1,
+    )
+    writer.bind_execution_context(
+        attempt,
+        context_sha256=writer.put_evidence(b"context"),
+    )
+    writer.mark_execution_dispatched(attempt)
+    second_address = PolicyEventAddress(1, "root/parallel-child", 0, 0)
+    scheduler = EventSeedScheduler(MASTER_SEED, "rollout-1", "target-0", 1)
+    first = writer.mark_execution_model_call_started(
+        attempt,
+        address=first_address,
+        scheduled_seed=scheduler.exogenous_continuation_seed(
+            first_address,
+            action_arm="arm-0",
+        ),
+        request_sha256=writer.put_evidence(b"request:first"),
+    )
+    second = writer.mark_execution_model_call_started(
+        attempt,
+        address=second_address,
+        scheduled_seed=scheduler.exogenous_continuation_seed(
+            second_address,
+            action_arm="arm-0",
+        ),
+        request_sha256=writer.put_evidence(b"request:second"),
+    )
+    with pytest.raises(LedgerError, match="reuse a scientific event address"):
+        writer.mark_execution_model_call_started(
+            attempt,
+            address=first_address,
+            scheduled_seed=scheduler.exogenous_continuation_seed(
+                first_address,
+                action_arm="arm-0",
+            ),
+            request_sha256=writer.put_evidence(b"request:duplicate"),
+        )
+    second_response = writer.put_evidence(b"response:second")
+    writer.mark_execution_response_observed(
+        attempt,
+        second,
+        response_sha256=second_response,
+    )
+    writer.complete_execution_model_call(
+        attempt,
+        second,
+        prompt_tokens=3,
+        completion_tokens=2,
+        response_sha256=second_response,
+    )
+    first_response = writer.put_evidence(b"response:first")
+    writer.mark_execution_response_observed(
+        attempt,
+        first,
+        response_sha256=first_response,
+    )
+    writer.complete_execution_model_call(
+        attempt,
+        first,
+        prompt_tokens=4,
+        completion_tokens=1,
+        response_sha256=first_response,
+    )
+    writer.finish_execution(
+        attempt,
+        outcome_kind=OutcomeKind.SUCCESS,
+        scored_reward=0.5,
+        scorer_evidence_sha256=writer.put_evidence(b"score"),
+        latency_seconds=0.1,
+        dollars=0.0,
+        judge_calls=0,
+        cpu_seconds=0.1,
+        gpu_seconds=0.0,
+        wall_seconds=0.1,
+        storage_bytes=0,
+    )
+    writer.seal()
+    assert inspect_ledger(root).status == "sealed-valid"
+
+
+def test_crash_with_parallel_generated_calls_is_terminal(tmp_path: Path) -> None:
+    root = tmp_path / "ledger"
+    writer = _create(root)
+    recorded, first_address, _, _ = _commit(writer)
+    writer.record_reconstruction_qa(
+        group_id="group-1",
+        target_id="target-0",
+        recorded_action=recorded,
+        passed=True,
+        report_sha256=writer.put_evidence(b"qa"),
+        actual_cost=ActualEvaluationCost(cpu_seconds=0.1, wall_seconds=0.1),
+    )
+    attempt = writer.begin_execution(
+        group_id="group-1",
+        target_id="target-0",
+        arm_id="arm-0",
+        action=recorded,
+        continuation_replicate=1,
+    )
+    writer.bind_execution_context(
+        attempt,
+        context_sha256=writer.put_evidence(b"context"),
+    )
+    writer.mark_execution_dispatched(attempt)
+    scheduler = EventSeedScheduler(MASTER_SEED, "rollout-1", "target-0", 1)
+    for address in (
+        first_address,
+        PolicyEventAddress(1, "root/parallel-child", 0, 0),
+    ):
+        writer.mark_execution_model_call_started(
+            attempt,
+            address=address,
+            scheduled_seed=scheduler.exogenous_continuation_seed(
+                address,
+                action_arm="arm-0",
+            ),
+            request_sha256=writer.put_evidence(address.lineage.encode()),
+        )
+    writer.close()
+
+    scan = inspect_ledger(root)
+    assert scan.status == "poisoned"
+    assert "dangling" in str(scan.reason)
+
+
+def test_replayed_continuation_counts_logically_but_not_as_generated_cost(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "ledger"
+    writer = _create(root)
+    recorded, _, _, _ = _commit(writer)
+    target = PolicyEventAddress(1, "root/child", 0, 0)
+    qa = writer.put_evidence(b"qa")
+    writer.record_reconstruction_qa(
+        group_id="group-1",
+        target_id="target-0",
+        recorded_action=recorded,
+        passed=True,
+        report_sha256=qa,
+        actual_cost=ActualEvaluationCost(cpu_seconds=0.1, wall_seconds=0.1),
+    )
+    attempt = writer.begin_execution(
+        group_id="group-1",
+        target_id="target-0",
+        arm_id="arm-0",
+        action=recorded,
+        continuation_replicate=1,
+    )
+    writer.bind_execution_context(
+        attempt,
+        context_sha256=writer.put_evidence(b"context"),
+    )
+    writer.mark_execution_dispatched(attempt)
+
+    def replay(
+        address: PolicyEventAddress,
+        disposition: Literal["reuse", "inject"],
+        *,
+        logical: bool,
+    ) -> None:
+        ticket = writer.commit_execution_override(
+            attempt,
+            address=address,
+            action_digest=recorded.digest,
+            disposition=disposition,
+            request_sha256=writer.put_evidence(f"request:{address.lineage}".encode()),
+            response_content_sha256=writer.put_evidence(
+                f"response:{address.lineage}".encode()
+            ),
+            prompt_tokens=recorded.prompt_tokens,
+            completion_tokens=recorded.completion_tokens,
+            counts_toward_logical_cost=logical,
+        )
+        writer.mark_execution_override_delivered(
+            attempt,
+            ticket,
+            typed_response_sha256=writer.put_evidence(
+                f"typed:{address.lineage}".encode()
+            ),
+        )
+
+    replay(target, "inject", logical=False)
+    replay(PolicyEventAddress(1, "root/sibling", 0, 0), "reuse", logical=True)
+    receipt = writer.finish_execution(
+        attempt,
+        outcome_kind=OutcomeKind.SUCCESS,
+        scored_reward=0.5,
+        scorer_evidence_sha256=writer.put_evidence(b"score"),
+        latency_seconds=0.1,
+        dollars=0.0,
+        judge_calls=0,
+        cpu_seconds=0.1,
+        gpu_seconds=0.0,
+        wall_seconds=0.1,
+        storage_bytes=0,
+    )
+    payload = writer(receipt, receipt_kind="scientific_arm_execution")
+    assert payload["calls"] == []
+    assert len(payload["replayed_calls"]) == 2
+    assert payload["logical_cost"]["output_tokens"] == (
+        recorded.completion_tokens * 2
+    )
+    writer.seal()
+    assert inspect_ledger(root).status == "sealed-valid"
 
 
 def test_concurrent_single_use_batch_claim_has_one_winner(tmp_path: Path) -> None:

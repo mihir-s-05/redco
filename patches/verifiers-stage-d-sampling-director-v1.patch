@@ -1,0 +1,380 @@
+diff --git a/tests/test_rlm_structure_v2.py b/tests/test_rlm_structure_v2.py
+index dbaa783..8735a89 100644
+--- a/tests/test_rlm_structure_v2.py
++++ b/tests/test_rlm_structure_v2.py
+@@ -317,6 +317,63 @@ async def test_observed_success_is_replayed_without_reinvoking_observer() -> Non
+     ]
+
+
++async def test_sampling_director_prepares_application_and_client_from_same_config() -> None:
++    observed: dict[str, object] = {}
++
++    class Director:
++        def direct_sampling(self, context, sampling):
++            assert context["rlm"]["lineage"] == _sibling_headers(0)["X-RLM-Lineage"]
++            extra_body = dict(sampling.extra_body)
++            extra_body["cache_salt"] = "directed-salt"
++            return sampling.model_copy(
++                update={"seed": 9001, "extra_body": extra_body},
++                deep=True,
++            )
++
++    async def get_response(*args, **kwargs):
++        sampling = args[3]
++        observed["sampling"] = sampling.model_dump(mode="json", exclude_none=False)
++        observed["effective"] = kwargs["effective_request"]
++        return Response(
++            id="completion",
++            created=1,
++            model="test-model",
++            message=AssistantMessage(content="done"),
++            finish_reason="stop",
++            raw={"choices": [{"message": {"role": "assistant", "content": "done"}}]},
++        )
++
++    client = SimpleNamespace(get_response=AsyncMock(side_effect=get_response))
++    base = SamplingConfig(
++        temperature=0.2,
++        seed=7,
++        extra_body={"cache_salt": "base-salt"},
++    )
++    trace = Trace(task=TraceTask(type="DirectedTask", data=TaskData(prompt="hello")))
++    session = RolloutSession(
++        ModelContext("test-model", client, base),
++        trace,
++        sampling_director=Director(),
++    )
++    server = InterceptionServer()
++    server.sessions["secret"] = session
++    raw = json.dumps(
++        {"model": "ignored", "messages": [{"role": "user", "content": "hello"}]},
++        separators=(",", ":"),
++    ).encode()
++
++    await server.handle_request(_request(raw, _sibling_headers(0)), ChatDialect())
++
++    sampling = observed["sampling"]
++    effective = observed["effective"]
++    assert sampling["seed"] == effective["seed"] == 9001
++    assert sampling["extra_body"] == effective["extra_body"] == {
++        "cache_salt": "directed-salt"
++    }
++    assert base.seed == 7
++    assert base.extra_body == {"cache_salt": "base-salt"}
++
++
+ async def test_failed_observed_request_cannot_resample_on_sdk_retry() -> None:
+     observer = _Observer()
+     posts = 0
+diff --git a/verifiers/v1/agent.py b/verifiers/v1/agent.py
+index 934aca5..02882c4 100644
+--- a/verifiers/v1/agent.py
++++ b/verifiers/v1/agent.py
+@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, AsyncIterator
+ if TYPE_CHECKING:
+     from renderers.client import PreparedGenerateObserver
+
++    from verifiers.v1.sampling_director import PreparedSamplingDirector
++
+ from pydantic import SerializeAsAny, model_validator
+ from pydantic_config import BaseConfig
+
+@@ -51,6 +53,7 @@ from verifiers.v1.utils.compile import (
+ logger = logging.getLogger(__name__)
+
+ ObserverFactory = Callable[[Task, Trace], "PreparedGenerateObserver | None"]
++SamplingDirectorFactory = Callable[[Task, Trace], "PreparedSamplingDirector | None"]
+
+
+ class TimeoutConfig(BaseConfig):
+@@ -169,6 +172,7 @@ class Agent:
+         client: Client | None = None,
+         interception: Interception | None = None,
+         observer_factory: ObserverFactory | None = None,
++        sampling_director_factory: SamplingDirectorFactory | None = None,
+     ) -> None:
+         from verifiers.v1.loaders import harness_config_type, load_harness
+
+@@ -177,8 +181,10 @@ class Agent:
+                 "AgentConfig.model is unset; an Agent needs a pinned model "
+                 "(inside an env the run's own model fills it in)"
+             )
+-        if observer_factory is not None and config.retries.max_retries != 0:
+-            raise ValueError("prepared-call observation requires zero agent retries")
++        if (
++            observer_factory is not None or sampling_director_factory is not None
++        ) and config.retries.max_retries != 0:
++            raise ValueError("prepared-call control requires zero agent retries")
+         harness_config = config.harness
+         if harness_config is None:
+             harness_config = harness_config_type("bash")(id="bash")
+@@ -196,6 +202,7 @@ class Agent:
+         self.runtime_config: RuntimeConfig = self.harness.config.runtime
+         self.interception = interception
+         self.observer_factory = observer_factory
++        self.sampling_director_factory = sampling_director_factory
+         self.limits = RolloutLimits(
+             max_turns=config.max_turns,
+             max_input_tokens=config.max_input_tokens,
+@@ -385,6 +392,11 @@ class Agent:
+                 if self.observer_factory is None
+                 else lambda trace: self.observer_factory(task, trace)
+             ),
++            sampling_director_factory=(
++                None
++                if self.sampling_director_factory is None
++                else lambda trace: self.sampling_director_factory(task, trace)
++            ),
+         )
+
+     @asynccontextmanager
+@@ -430,12 +442,14 @@ class _EpisodeAgent(Agent):
+         on_discard: Callable[[Trace], None] | None,
+         warned_resources: set,
+         observer_factory: ObserverFactory | None = None,
++        sampling_director_factory: SamplingDirectorFactory | None = None,
+     ) -> None:
+         super().__init__(
+             config,
+             client=client,
+             interception=interception,
+             observer_factory=observer_factory,
++            sampling_director_factory=sampling_director_factory,
+         )
+         # Resource warnings dedupe env-wide, not per episode.
+         self._warned_resources = warned_resources
+@@ -492,6 +506,7 @@ def make_agent(
+     client: Client | None = None,
+     interception: Interception | None = None,
+     observer_factory: ObserverFactory | None = None,
++    sampling_director_factory: SamplingDirectorFactory | None = None,
+ ) -> Agent:
+     """The agent for a config; `client`/`interception` inject live resources to
+     borrow, everything else comes from the config."""
+@@ -500,6 +515,7 @@ def make_agent(
+         client=client,
+         interception=interception,
+         observer_factory=observer_factory,
++        sampling_director_factory=sampling_director_factory,
+     )
+
+
+diff --git a/verifiers/v1/env.py b/verifiers/v1/env.py
+index 61aef72..4b49db6 100644
+--- a/verifiers/v1/env.py
++++ b/verifiers/v1/env.py
+@@ -17,6 +17,8 @@ from typing import (
+ if TYPE_CHECKING:
+     from renderers.client import PreparedGenerateObserver
+
++    from verifiers.v1.sampling_director import PreparedSamplingDirector
++
+ from pydantic import SerializeAsAny, model_validator
+ from pydantic_config import BaseConfig
+
+@@ -337,6 +339,16 @@ class Env(ABC, Generic[ConfigT]):
+         """Observe a rollout with the exact resolved config and client it will use."""
+         return None
+
++    def prepared_sampling_director(
++        self,
++        task: Task,
++        trace: Trace,
++        agent_config: AgentConfig,
++        client: Client,
++    ) -> "PreparedSamplingDirector | None":
++        """Direct immutable per-call sampling before request preparation."""
++        return None
++
+     # --- machinery (the base owns everything below) -----------------------------
+
+     def _agent_harness(self, agent: AgentConfig) -> HarnessConfig:
+@@ -382,6 +394,17 @@ class Env(ABC, Generic[ConfigT]):
+                     resolved_client,
+                 )
+             )
++            sampling_director_factory = (
++                None
++                if type(self).prepared_sampling_director
++                is Env.prepared_sampling_director
++                else lambda task, trace: self.prepared_sampling_director(
++                    task,
++                    trace,
++                    resolved,
++                    resolved_client,
++                )
++            )
+             return _EpisodeAgent(
+                 resolved,
+                 client=resolved_client,
+@@ -395,6 +418,7 @@ class Env(ABC, Generic[ConfigT]):
+                 on_discard=on_discard,
+                 warned_resources=self._warned_resources,
+                 observer_factory=observer_factory,
++                sampling_director_factory=sampling_director_factory,
+             )
+
+         agents = Agents(self.config, make)
+diff --git a/verifiers/v1/interception/server.py b/verifiers/v1/interception/server.py
+index 65f1c0c..e8356eb 100644
+--- a/verifiers/v1/interception/server.py
++++ b/verifiers/v1/interception/server.py
+@@ -58,7 +58,14 @@ from verifiers.v1.rlm_provenance import (
+ )
+ from verifiers.v1.session import RolloutSession
+ from verifiers.v1.trace import Error, ModelCall, RLMCallStructure, TimeSpan
+-from verifiers.v1.types import FinishReason, Messages, Response, Tool, Usage
++from verifiers.v1.types import (
++    FinishReason,
++    Messages,
++    Response,
++    SamplingConfig,
++    Tool,
++    Usage,
++)
+
+ logger = logging.getLogger(__name__)
+
+@@ -467,25 +474,51 @@ class InterceptionServer(Interception):
+                     try:
+                         # What actually goes upstream: the native body with the rollout's model +
+                         # sampling imposed — recorded raw on the trace, per call.
+-                        upstream_request = dialect.apply_overrides(
+-                            body, session.ctx.model, session.ctx.sampling
+-                        )
++                        directed_sampling = session.ctx.sampling
+                         observer_context = None
+-                        if session.observer is not None:
++                        if (
++                            session.observer is not None
++                            or session.sampling_director is not None
++                        ):
+                             structure = _rlm_structure(headers)
+                             if structure is None:
+                                 raise ValueError(
+-                                    "prepared-call observation requires RLM provenance"
++                                    "prepared-call control requires RLM provenance"
+                                 )
+                             observer_context = {
+                                 "trace_id": session.trace.id,
+                                 "rlm": structure.model_dump(mode="json"),
+                             }
++                        if session.sampling_director is not None:
++                            assert observer_context is not None
++                            before = session.ctx.sampling.model_dump(
++                                mode="json", exclude_none=False
++                            )
++                            directed_sampling = (
++                                session.sampling_director.direct_sampling(
++                                    observer_context,
++                                    session.ctx.sampling,
++                                )
++                            )
++                            if not isinstance(directed_sampling, SamplingConfig):
++                                raise TypeError(
++                                    "prepared sampling director returned an invalid config"
++                                )
++                            after = session.ctx.sampling.model_dump(
++                                mode="json", exclude_none=False
++                            )
++                            if after != before:
++                                raise ValueError(
++                                    "prepared sampling director mutated the base config"
++                                )
++                        upstream_request = dialect.apply_overrides(
++                            body, session.ctx.model, directed_sampling
++                        )
+                         call_response = await session.ctx.client.get_response(
+                             dialect,
+                             body,
+                             session.ctx.model,
+-                            session.ctx.sampling,
++                            directed_sampling,
+                             headers=headers,
+                             session_id=session.trace.id,
+                             turn=turn,
+diff --git a/verifiers/v1/rollout.py b/verifiers/v1/rollout.py
+index 3e79548..5fec344 100644
+--- a/verifiers/v1/rollout.py
++++ b/verifiers/v1/rollout.py
+@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
+ if TYPE_CHECKING:
+     from renderers.client import PreparedGenerateObserver
+
++    from verifiers.v1.sampling_director import PreparedSamplingDirector
++
+ from verifiers import __version__
+ from verifiers.v1.clients import ModelContext
+ from verifiers.v1.decorators import discover_decorated, invoke
+@@ -107,6 +109,10 @@ class RolloutRun:
+         on_trace: Callable[[Trace], None] | None = None,
+         observer_factory: Callable[[Trace], "PreparedGenerateObserver | None"]
+         | None = None,
++        sampling_director_factory: Callable[
++            [Trace], "PreparedSamplingDirector | None"
++        ]
++        | None = None,
+     ) -> None:
+         self.task = task
+         self.harness = harness
+@@ -134,12 +140,18 @@ class RolloutRun:
+         if on_trace is not None:
+             on_trace(self.trace)
+         observer = observer_factory(self.trace) if observer_factory is not None else None
++        sampling_director = (
++            sampling_director_factory(self.trace)
++            if sampling_director_factory is not None
++            else None
++        )
+         self._session = RolloutSession(
+             ctx,
+             self.trace,
+             discover_decorated(task, "stop"),
+             limits or RolloutLimits(),
+             observer,
++            sampling_director,
+         )
+         self._stack = AsyncExitStack()
+         self._failed = False
+diff --git a/verifiers/v1/sampling_director.py b/verifiers/v1/sampling_director.py
+new file mode 100644
+index 0000000..9bbe8f0
+--- /dev/null
++++ b/verifiers/v1/sampling_director.py
+@@ -0,0 +1,16 @@
++"""Pure per-call sampling direction before request preparation."""
++
++from collections.abc import Mapping
++from typing import Any, Protocol
++
++from verifiers.v1.types import SamplingConfig
++
++
++class PreparedSamplingDirector(Protocol):
++    """Return an immutable call-specific sampling config from RLM provenance."""
++
++    def direct_sampling(
++        self,
++        observer_context: Mapping[str, Any],
++        sampling: SamplingConfig,
++    ) -> SamplingConfig: ...
+diff --git a/verifiers/v1/session.py b/verifiers/v1/session.py
+index fa1b566..bc0b429 100644
+--- a/verifiers/v1/session.py
++++ b/verifiers/v1/session.py
+@@ -23,6 +23,7 @@ if TYPE_CHECKING:
+
+     from verifiers.v1.errors import RolloutError
+     from verifiers.v1.mcp import Respond
++    from verifiers.v1.sampling_director import PreparedSamplingDirector
+
+ logger = logging.getLogger(__name__)
+
+@@ -70,6 +71,7 @@ class RolloutSession:
+     stops: list[Callable[[Trace], Awaitable[bool]]] = field(default_factory=list)
+     limits: RolloutLimits = field(default_factory=RolloutLimits)
+     observer: "PreparedGenerateObserver | None" = None
++    sampling_director: "PreparedSamplingDirector | None" = None
+     user: "Respond | None" = None
+     """A user simulator the rollout sets before the harness runs (see `verifiers.v1.mcp.user`).
+     When set, each model turn with no tool call is followed by the simulator's reply,

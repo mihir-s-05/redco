@@ -183,6 +183,19 @@ def behavior_law_digest(key: ExactActionKey) -> str:
     payload.pop("sampler_config_sha256")
     payload["request"] = request
     payload["sampler_config"] = sampler
+    prepared = payload.get("prepared_engine_request")
+    if isinstance(prepared, dict):
+        prepared = dict(prepared)
+        prepared_sampling = prepared.get("sampling_params")
+        if not isinstance(prepared_sampling, dict):
+            raise ValueError("prepared behavior law lacks sampling parameters")
+        prepared_sampling = dict(prepared_sampling)
+        prepared_sampling.pop("seed")
+        prepared.pop("cache_salt", None)
+        prepared_sampling.pop("cache_salt", None)
+        prepared["sampling_params"] = prepared_sampling
+        payload["prepared_engine_request"] = prepared
+        payload.pop("prepared_engine_request_sha256")
     return _sha256(canonical_json({"domain": "redco-behavior-law-v1", "key": payload}))
 
 
@@ -425,11 +438,15 @@ class CandidateSample:
                 "action_slot",
                 "action_seed",
                 "action_digest",
+                "action_evidence_sha256",
                 "behavior_law_sha256",
                 "selection_policy",
                 "sample_attempts",
                 "rejected_attempts",
                 "inference_call_id",
+                "prompt_tokens",
+                "completion_tokens",
+                "response_sha256",
             },
             "candidate receipt",
         )
@@ -442,12 +459,19 @@ class CandidateSample:
             or value["action_slot"] != action_slot
             or value["action_seed"] != action_seed
             or value["action_digest"] != submission.action.digest
+            or value["action_evidence_sha256"] != _sha256(
+                submission.action.to_bytes()
+            )
             or value["behavior_law_sha256"] != commitment.behavior_law_sha256
             or value["selection_policy"] != "direct_single_sample"
             or value["sample_attempts"] != 1
             or value["rejected_attempts"] != 0
+            or value["prompt_tokens"] != submission.action.prompt_tokens
+            or value["completion_tokens"] != submission.action.completion_tokens
         ):
             raise ValueError("candidate inference receipt violates the frozen sample contract")
+        _require_sha256(value["action_evidence_sha256"], "candidate action evidence")
+        _require_sha256(value["response_sha256"], "candidate raw response evidence")
         if behavior_law_digest(submission.action.key) != commitment.behavior_law_sha256:
             raise ValueError("candidate changed the behavior law")
         if submission.action.key.sampler.seed != action_seed:
@@ -476,6 +500,17 @@ class InferenceCallReceipt:
     scheduled_seed: ScheduledSeed
     prompt_tokens: int
     completion_tokens: int
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayedInferenceCallReceipt:
+    override_id: str
+    address: PolicyEventAddress
+    action_digest: str
+    disposition: Literal["reuse", "inject"]
+    prompt_tokens: int
+    completion_tokens: int
+    counts_toward_logical_cost: bool
 
 
 class BranchSeedOracle:
@@ -517,6 +552,7 @@ class BranchOutcome:
     calls: tuple[InferenceCallReceipt, ...]
     logical_cost: LogicalDeploymentCost
     actual_cost: ActualEvaluationCost
+    replayed_calls: tuple[ReplayedInferenceCallReceipt, ...] = ()
 
     @classmethod
     def from_receipt(
@@ -536,23 +572,26 @@ class BranchOutcome:
             receipt_kind="scientific_arm_execution",
             verifier=verifier,
         )
+        receipt_fields = {
+            "schema_version",
+            "receipt_kind",
+            "group_id",
+            "target_id",
+            "arm_id",
+            "action_digest",
+            "continuation_replicate",
+            "execution_id",
+            "outcome_kind",
+            "reward",
+            "calls",
+            "logical_cost",
+            "actual_non_token_cost",
+        }
+        if "replayed_calls" in value:
+            receipt_fields.add("replayed_calls")
         _strict_keys(
             value,
-            {
-                "schema_version",
-                "receipt_kind",
-                "group_id",
-                "target_id",
-                "arm_id",
-                "action_digest",
-                "continuation_replicate",
-                "execution_id",
-                "outcome_kind",
-                "reward",
-                "calls",
-                "logical_cost",
-                "actual_non_token_cost",
-            },
+            receipt_fields,
             "execution receipt",
         )
         if (
@@ -643,13 +682,80 @@ class BranchOutcome:
                     _exact_int(raw["completion_tokens"], "completion_tokens"),
                 )
             )
-        if kind is OutcomeKind.TERMINAL_WITHOUT_DOWNSTREAM and calls:
+        raw_replayed = value.get("replayed_calls", [])
+        if not isinstance(raw_replayed, list):
+            raise ValueError("execution replay calls must be a list")
+        replayed: list[ReplayedInferenceCallReceipt] = []
+        replay_ids: set[str] = set()
+        for index, raw in enumerate(raw_replayed):
+            if not isinstance(raw, dict):
+                raise ValueError("execution replay receipt must be an object")
+            _strict_keys(
+                raw,
+                {
+                    "override_id",
+                    "address",
+                    "action_digest",
+                    "disposition",
+                    "prompt_tokens",
+                    "completion_tokens",
+                    "counts_toward_logical_cost",
+                },
+                f"replayed_calls[{index}]",
+            )
+            override_id = raw["override_id"]
+            disposition = raw["disposition"]
+            counts = raw["counts_toward_logical_cost"]
+            action_digest = _require_sha256(
+                raw["action_digest"],
+                f"replayed_calls[{index}].action_digest",
+            )
+            if (
+                not isinstance(override_id, str)
+                or not override_id
+                or override_id in replay_ids
+                or disposition not in {"reuse", "inject"}
+                or type(counts) is not bool
+                or (disposition == "inject" and counts)
+                or (disposition == "inject" and action_digest != action.digest)
+            ):
+                raise ValueError("execution replay call violates the exact override contract")
+            replay_ids.add(override_id)
+            address = _address_from_payload(
+                raw["address"],
+                f"replayed_calls[{index}].address",
+            )
+            address_key = _address_key(address)
+            if address_key in local_addresses:
+                raise ValueError("generated and replayed calls reuse a scientific address")
+            local_addresses.add(address_key)
+            replayed.append(
+                ReplayedInferenceCallReceipt(
+                    override_id,
+                    address,
+                    action_digest,
+                    disposition,
+                    _exact_int(raw["prompt_tokens"], "prompt_tokens"),
+                    _exact_int(raw["completion_tokens"], "completion_tokens"),
+                    counts,
+                )
+            )
+        logical_replay_tokens = sum(
+            replay.completion_tokens
+            for replay in replayed
+            if replay.counts_toward_logical_cost
+        )
+        if kind is OutcomeKind.TERMINAL_WITHOUT_DOWNSTREAM and (
+            calls or logical_replay_tokens
+        ):
             raise ValueError("terminal-without-downstream outcome contains model calls")
-        if kind is OutcomeKind.SUCCESS and not calls:
+        if kind is OutcomeKind.SUCCESS and not calls and logical_replay_tokens == 0:
             raise ValueError("zero-call success must use terminal_without_downstream")
         logical = _logical_cost_from_payload(value["logical_cost"])
         generated_tokens = sum(call.completion_tokens for call in calls)
-        as_if_fresh_tokens = action.completion_tokens + generated_tokens
+        as_if_fresh_tokens = (
+            action.completion_tokens + generated_tokens + logical_replay_tokens
+        )
         if logical.output_tokens != as_if_fresh_tokens:
             raise ValueError(
                 "logical output tokens disagree with the as-if-fresh action and "
@@ -671,6 +777,7 @@ class BranchOutcome:
             tuple(calls),
             logical,
             actual,
+            tuple(replayed),
         )
 
     def to_payload(self) -> dict[str, Any]:
@@ -1003,12 +1110,21 @@ def run_scientific_branch_group(
     *,
     verifier: ReceiptVerifier,
     sample_candidate: CandidateSampler,
-    run_reconstruction_qa: Callable[[BranchGroupSpec], bytes],
+    run_reconstruction_qa: Callable[[BranchGroupSpec], bytes] | None,
     execute_arm: ArmExecutor,
+    prepare_artifact: Callable[[BranchGroupArtifact], None] | None = None,
+    reconstruction_qa_receipt: bytes | None = None,
 ) -> BranchGroupArtifact:
     spec = _revalidated_spec(spec, verifier=verifier)
+    if (run_reconstruction_qa is None) == (reconstruction_qa_receipt is None):
+        raise ValueError("supply exactly one reconstruction QA source")
+    if reconstruction_qa_receipt is None:
+        assert run_reconstruction_qa is not None
+        qa_receipt = run_reconstruction_qa(spec)
+    else:
+        qa_receipt = reconstruction_qa_receipt
     qa = ReconstructionQAResult.from_receipt(
-        run_reconstruction_qa(spec),
+        qa_receipt,
         verifier=verifier,
         commitment=spec.commitment,
         recorded_action=spec.recorded_action,
@@ -1033,7 +1149,7 @@ def run_scientific_branch_group(
             )
         except ZeroCallInfrastructureFailure as error:
             try:
-                _validate_zero_call_failure(
+                successor_permitted = _validate_zero_call_failure(
                     error.receipt,
                     verifier=verifier,
                     commitment=spec.commitment,
@@ -1044,9 +1160,9 @@ def run_scientific_branch_group(
                 raise NonRepairableCampaignAbort(
                     "candidate failure did not prove zero scientific model calls"
                 ) from verification_error
-            if candidates:
+            if not successor_permitted:
                 raise NonRepairableCampaignAbort(
-                    "zero-call failure occurred after candidate outcomes were observed"
+                    "the single zero-call successor was already consumed"
                 ) from error
             raise RepairableInfrastructureAbort(
                 f"candidate slot {slot} failed before a scientific model call"
@@ -1092,6 +1208,27 @@ def run_scientific_branch_group(
                     continuation_replicate=replicate,
                     seed_oracle=oracle,
                 )
+            except ZeroCallInfrastructureFailure as error:
+                try:
+                    successor_permitted = _validate_zero_call_execution_failure(
+                        error.receipt,
+                        verifier=verifier,
+                        commitment=spec.commitment,
+                        action=action,
+                        arm_id=arm_id,
+                        continuation_replicate=replicate,
+                    )
+                except Exception as verification_error:
+                    raise NonRepairableCampaignAbort(
+                        "execution failure did not prove zero scientific activity"
+                    ) from verification_error
+                if not successor_permitted:
+                    raise NonRepairableCampaignAbort(
+                        "the campaign-wide zero-call successor was already consumed"
+                    ) from error
+                raise RepairableInfrastructureAbort(
+                    f"{arm_id} replicate {replicate} failed before scientific activity"
+                ) from error
             except BaseException as error:
                 raise NonRepairableCampaignAbort(
                     "executor exception cannot prove the scientific failure denominator"
@@ -1113,13 +1250,21 @@ def run_scientific_branch_group(
                 ) from error
             arm_outcomes.append(outcome)
         outcomes_by_arm.append(tuple(arm_outcomes))
-    return _assemble(
+    artifact = _assemble(
         spec,
         qa,
         tuple(candidates),
         tuple(actions),
         tuple(outcomes_by_arm),
     )
+    if prepare_artifact is not None:
+        try:
+            prepare_artifact(artifact)
+        except BaseException as error:
+            raise RepairableInfrastructureAbort(
+                "artifact publish failed; durable primitive receipts remain reusable"
+            ) from error
+    return artifact
 
 
 def _assemble(
@@ -1174,7 +1319,14 @@ def _assemble(
             len(actions) * commitment.continuation_replicates
         ),
         actual_downstream_policy_calls=sum(len(outcome.calls) for outcome in all_outcomes),
-        logical_downstream_policy_calls=sum(len(outcome.calls) for outcome in all_outcomes),
+        logical_downstream_policy_calls=sum(
+            len(outcome.calls)
+            + sum(
+                replay.counts_toward_logical_cost
+                for replay in outcome.replayed_calls
+            )
+            for outcome in all_outcomes
+        ),
         actual_generated_tokens=(
             sum(candidate.action.completion_tokens for candidate in candidates)
             + sum(outcome.actual_cost.generated_tokens for outcome in all_outcomes)
@@ -1250,7 +1402,7 @@ def _validate_zero_call_failure(
     commitment: PreActionTargetCommitment,
     action_slot: int,
     action_seed: int,
-) -> None:
+) -> bool:
     value = _verified_receipt(
         receipt,
         receipt_kind="zero_call_infrastructure_failure",
@@ -1270,13 +1422,18 @@ def _validate_zero_call_failure(
             "action_seed",
             "attempt_ordinal",
             "attempt_id",
-            "scientific_model_calls",
+            "attempt_model_calls",
+            "attempt_overrides",
+            "prior_candidate_completions",
+            "prior_execution_completions",
+            "repair_sequence",
             "successor_permitted",
             "reason",
         },
         "zero-call failure receipt",
     )
     attempt_id = value["attempt_id"]
+    repair_sequence = _exact_int(value["repair_sequence"], "repair_sequence")
     if (
         value["ledger_id"] != commitment.ledger_id
         or _exact_int(value["ledger_offset"], "zero-call ledger_offset")
@@ -1286,15 +1443,98 @@ def _validate_zero_call_failure(
         or value["action_slot"] != action_slot
         or value["action_seed"] != action_seed
         or _exact_int(value["attempt_ordinal"], "attempt_ordinal") not in {0, 1}
-        or value["successor_permitted"] is not (value["attempt_ordinal"] == 0)
+        or value["successor_permitted"] is not (repair_sequence == 0)
         or not isinstance(attempt_id, str)
         or not attempt_id
-        or _exact_int(value["scientific_model_calls"], "scientific_model_calls") != 0
+        or _exact_int(value["attempt_model_calls"], "attempt_model_calls") != 0
+        or _exact_int(value["attempt_overrides"], "attempt_overrides") != 0
+        or _exact_int(
+            value["prior_candidate_completions"], "prior_candidate_completions"
+        )
+        < 0
+        or _exact_int(
+            value["prior_execution_completions"], "prior_execution_completions"
+        )
+        < 0
         or not isinstance(value["reason"], str)
         or not value["reason"]
     ):
         raise NonRepairableCampaignAbort("infrastructure receipt does not prove zero calls")
     _require_sha256(value["prior_chain_sha256"], "zero-call prior_chain_sha256")
+    return bool(value["successor_permitted"])
+
+
+def _validate_zero_call_execution_failure(
+    receipt: bytes,
+    *,
+    verifier: ReceiptVerifier,
+    commitment: PreActionTargetCommitment,
+    action: BehaviorAction,
+    arm_id: str,
+    continuation_replicate: int,
+) -> bool:
+    value = _verified_receipt(
+        receipt,
+        receipt_kind="zero_call_execution_failure",
+        verifier=verifier,
+    )
+    _strict_keys(
+        value,
+        {
+            "schema_version",
+            "receipt_kind",
+            "ledger_id",
+            "ledger_offset",
+            "prior_chain_sha256",
+            "group_id",
+            "target_id",
+            "arm_id",
+            "action_digest",
+            "continuation_replicate",
+            "attempt_ordinal",
+            "attempt_id",
+            "attempt_model_calls",
+            "attempt_overrides",
+            "prior_candidate_completions",
+            "prior_execution_completions",
+            "repair_sequence",
+            "successor_permitted",
+            "reason",
+        },
+        "zero-call execution failure receipt",
+    )
+    repair_sequence = _exact_int(value["repair_sequence"], "repair_sequence")
+    if (
+        value["ledger_id"] != commitment.ledger_id
+        or _exact_int(value["ledger_offset"], "zero-call ledger_offset")
+        <= commitment.ledger_offset
+        or value["group_id"] != commitment.group_id
+        or value["target_id"] != commitment.target_id
+        or value["arm_id"] != arm_id
+        or value["action_digest"] != action.digest
+        or value["continuation_replicate"] != continuation_replicate
+        or _exact_int(value["attempt_ordinal"], "attempt_ordinal") not in {0, 1}
+        or _exact_int(value["attempt_model_calls"], "attempt_model_calls") != 0
+        or _exact_int(value["attempt_overrides"], "attempt_overrides") != 0
+        or _exact_int(
+            value["prior_candidate_completions"], "prior_candidate_completions"
+        )
+        < 0
+        or _exact_int(
+            value["prior_execution_completions"], "prior_execution_completions"
+        )
+        < 0
+        or value["successor_permitted"] is not (repair_sequence == 0)
+        or not isinstance(value["attempt_id"], str)
+        or not value["attempt_id"]
+        or not isinstance(value["reason"], str)
+        or not value["reason"]
+    ):
+        raise NonRepairableCampaignAbort(
+            "infrastructure receipt does not prove zero execution activity"
+        )
+    _require_sha256(value["prior_chain_sha256"], "zero-call prior_chain_sha256")
+    return bool(value["successor_permitted"])
 
 
 def _receipt_bytes(value: object, name: str) -> bytes:

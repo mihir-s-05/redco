@@ -523,12 +523,36 @@ def adapter_file_state_sha256(
     return _model_sha256(tuple(values), base_snapshot_manifest_sha256)
 
 
+def loaded_peft_adapter_state_sha256(
+    model: Any,
+    *,
+    base_snapshot_manifest_sha256: str,
+) -> str:
+    """Hash the adapter tensors actually installed in a loaded PEFT model."""
+    _require_sha256(base_snapshot_manifest_sha256, "base_snapshot_manifest_sha256")
+    peft = importlib.import_module("peft")
+    state = peft.get_peft_model_state_dict(model)
+    if not isinstance(state, dict) or not state:
+        raise ValueError("loaded PEFT adapter state is empty")
+    return _model_sha256(
+        tuple(sorted((str(name), tensor) for name, tensor in state.items())),
+        base_snapshot_manifest_sha256,
+    )
+
+
+def exported_adapter_state_sha256(*, base_snapshot_manifest_sha256: str) -> str:
+    """Hash the currently loaded Prime LoRA state in the shared initialization domain."""
+    _require_sha256(base_snapshot_manifest_sha256, "base_snapshot_manifest_sha256")
+    return _model_sha256(
+        _exported_adapter_parameters(),
+        base_snapshot_manifest_sha256,
+    )
+
+
 def _exported_adapter_parameters() -> tuple[tuple[str, Any], ...]:
     runs = importlib.import_module("prime_rl.trainer.runs")
     state = runs.get_multi_run_manager().get_state_dict_for_run(0)
-    values = tuple(
-        sorted((f"base_model.model.{name}", tensor) for name, tensor in state.items())
-    )
+    values = tuple(sorted((f"base_model.model.{name}", tensor) for name, tensor in state.items()))
     if not values:
         raise ValueError("Prime exported adapter state is empty")
     return values
@@ -575,20 +599,26 @@ def _optimizer_sha256(optimizer: Any, named: tuple[tuple[str, Any], ...]) -> str
 
 def _update_tensor_hash(hasher: Any, name: str, tensor: Any) -> None:
     value = tensor.detach()
-    if hasattr(value, "to_local"):
+    if hasattr(value, "full_tensor"):
+        value = value.full_tensor()
+    elif hasattr(value, "to_local"):
         value = value.to_local()
     value = value.cpu().contiguous()
+    torch = importlib.import_module("torch")
+    if (value.is_floating_point() or value.is_complex()) and not bool(
+        torch.isfinite(value).all().item()
+    ):
+        raise ValueError(f"tensor state contains a non-finite value: {name}")
     hasher.update(
         canonical_json(
             {
                 "name": name,
                 "dtype": str(value.dtype),
-                "shape": list(tensor.shape),
+                "shape": list(value.shape),
                 "local_shape": list(value.shape),
             }
         )
     )
-    torch = importlib.import_module("torch")
     hasher.update(value.reshape(-1).view(torch.uint8).numpy().tobytes())
 
 

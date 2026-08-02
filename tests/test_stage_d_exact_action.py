@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import fields
 
@@ -117,6 +118,9 @@ def _key(**request_changes: object) -> ExactActionKey:
 
 
 def _prepared_key(**engine_changes: object) -> ExactActionKey:
+    request_extra_body = engine_changes.pop(
+        "request_extra_body", {"cache_salt": "exact"}
+    )
     engine: dict[str, object] = {
         "model": "model@commit",
         "token_ids": [10, 11],
@@ -142,7 +146,7 @@ def _prepared_key(**engine_changes: object) -> ExactActionKey:
         sampler_conformance_manifest=_conformance(),
         action_selection_policy="direct_single_sample",
         transport_retry_policy="fail_before_action_no_resample",
-        request=_request(),
+        request=_request(extra_body=request_extra_body),
         prompt_token_ids=(10, 11),
         prepared_engine_request=engine,
     )
@@ -350,6 +354,40 @@ def test_prepared_engine_request_is_bound_and_round_trips() -> None:
         ExactActionKey.from_payload(payload, render_prompt=lambda _: (10, 11))
 
 
+def test_prepared_resampling_changes_only_seed_salt_and_derived_hashes() -> None:
+    reference = _prepared_key(priority=7)
+    candidate = ExactActionKey.resample_prepared(
+        reference,
+        seed=9917,
+        cache_salt="candidate-9917",
+    )
+    request = json.loads(candidate.request)
+    sampler = json.loads(candidate.sampler_config)
+    engine = json.loads(candidate.prepared_engine_request or b"null")
+
+    assert request["seed"] == 9917
+    assert request["extra_body"] == {"cache_salt": "candidate-9917"}
+    assert sampler["seed"] == 9917
+    assert engine["sampling_params"]["seed"] == 9917
+    assert engine["cache_salt"] == "candidate-9917"
+    assert engine["priority"] == 7
+    assert candidate.prompt_token_ids == reference.prompt_token_ids
+    assert candidate.checkpoint_id == reference.checkpoint_id
+    assert candidate.tool_schema_sha256 == reference.tool_schema_sha256
+    assert candidate.sampler_config_sha256 != reference.sampler_config_sha256
+    assert candidate.request_sha256 != reference.request_sha256
+    assert candidate.prepared_engine_request_sha256 != (
+        reference.prepared_engine_request_sha256
+    )
+
+
+def test_prepared_resampling_rejects_legacy_keys_and_missing_salt() -> None:
+    with pytest.raises(ValueError, match="prepared"):
+        ExactActionKey.resample_prepared(_key(), seed=1, cache_salt="candidate")
+    with pytest.raises(ValueError, match="nonempty"):
+        ExactActionKey.resample_prepared(_prepared_key(), seed=1, cache_salt="")
+
+
 def test_prepared_engine_allows_only_disabled_parallel_tool_calls() -> None:
     assert _prepared_key().prepared_engine_request is not None
     sampling = {
@@ -502,7 +540,8 @@ def test_only_eos_included_max_tokens_and_tool_calls_are_authorized() -> None:
 def test_hashes_and_versioned_canonical_digest_bind_every_action_payload() -> None:
     action = _action()
     payload = action.to_payload()
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
+    assert json.loads(action.to_bytes())["domain"] == "redco-stage-d-behavior-action-v2"
     assert len(action.key.prompt_token_ids_sha256) == 64
     assert len(action.action_token_ids_sha256) == 64
     assert len(action.behavior_logprobs_sha256) == 64
@@ -521,14 +560,8 @@ def test_versioned_serialization_round_trips_and_rejects_unknown_or_corrupt_fiel
         )
         == action
     )
-    payload = action.to_payload()
-    payload["unknown"] = "rejected"
-    envelope = {
-        "schema_version": 1,
-        "domain": "redco-stage-d-behavior-action-v1",
-        "action": payload,
-        "digest": action.digest,
-    }
+    envelope = json.loads(action.to_bytes())
+    envelope["action"]["unknown"] = "rejected"
     with pytest.raises(ValueError, match="unknown"):
         BehaviorAction.from_bytes(
             canonical_json(envelope),
@@ -543,6 +576,39 @@ def test_versioned_serialization_round_trips_and_rejects_unknown_or_corrupt_fiel
             encode_action=lambda _request, _message: (20, 2),
             render_prompt=lambda _: (10, 11),
         )
+
+
+def test_legacy_v1_action_remains_byte_readable_without_claiming_live_request_id() -> None:
+    action = _action()
+    legacy_payload = action.to_payload()
+    legacy_payload["schema_version"] = 1
+    legacy_payload.pop("request_id")
+    legacy_digest = hashlib.sha256(
+        canonical_json(
+            {
+                "domain": "redco-stage-d-behavior-action-v1",
+                "action": legacy_payload,
+            }
+        )
+    ).hexdigest()
+    legacy = canonical_json(
+        {
+            "schema_version": 1,
+            "domain": "redco-stage-d-behavior-action-v1",
+            "action": legacy_payload,
+            "digest": legacy_digest,
+        }
+    )
+
+    restored = BehaviorAction.from_bytes(
+        legacy,
+        encode_action=lambda _request, _message: (20, 2),
+        render_prompt=lambda _: (10, 11),
+    )
+
+    assert restored.schema_version == 1
+    assert restored.request_id.startswith("redco-fixture-")
+    assert restored.to_bytes() == legacy
 
 
 def test_usage_must_match_exact_prompt_and_action_tokens() -> None:

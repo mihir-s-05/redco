@@ -116,6 +116,7 @@ class StageDPreparedCallObserver:
         trace_id: str,
         identity: StageDObserverIdentity,
         protocol: StageDObserverProtocol,
+        runtime_snapshot: bytes,
         encode_action: Callable[
             [Mapping[str, Any], Mapping[str, Any], tuple[int, ...]],
             tuple[int, ...],
@@ -127,6 +128,10 @@ class StageDPreparedCallObserver:
         self._trace_id = trace_id
         self._identity = identity
         self._protocol = protocol
+        self._runtime_snapshot = _canonical_object(
+            runtime_snapshot,
+            "frozen runtime snapshot",
+        )
         self._encode_action = encode_action
         self._root_turns: set[int] = set()
 
@@ -190,6 +195,7 @@ class StageDPreparedCallObserver:
                     "engine_request": engine,
                     "engine_headers": headers,
                     "observer_context": context,
+                    "frozen_runtime_snapshot": self._runtime_snapshot,
                 }
             )
             pending = self._producer.reserve_selected_child_policy_call(
@@ -222,6 +228,11 @@ class StageDPreparedCallObserver:
         finish_reason = getattr(response, "finish_reason", None)
         if tokens is None or usage is None or not isinstance(raw, dict):
             raise ValueError("typed prepared response lacks tokens, usage, or raw bytes")
+        if (
+            getattr(tokens, "routed_experts", None) is not None
+            or getattr(tokens, "kept_tokens", None) is not None
+        ):
+            raise ValueError("Stage-D source collection forbids token sidecars")
         action_token_ids = _integer_tuple(
             getattr(tokens, "completion_ids", None), "completion token IDs"
         )
@@ -239,6 +250,9 @@ class StageDPreparedCallObserver:
             getattr(usage, "completion_tokens", None), "completion usage"
         )
         message = _raw_message(raw)
+        request_id = raw.get("id")
+        if not isinstance(request_id, str) or not request_id:
+            raise ValueError("typed prepared response lacks its request ID")
         termination_kind, eos_token_id = self._termination(
             finish_reason,
             action_token_ids,
@@ -258,6 +272,7 @@ class StageDPreparedCallObserver:
                 typed_message,
                 ticket.action_key.prompt_token_ids,
             ),
+            request_id=request_id,
         )
         self._producer.complete_policy_call(ticket.pending, action=action)
 
@@ -324,6 +339,38 @@ class StageDPreparedCallObserver:
         if finish_reason != "stop" or action_token_ids[-1] != self._identity.eos_token_id:
             raise ValueError("prepared response has an unsupported termination")
         return "eos", self._identity.eos_token_id
+
+
+class StageDForwardDirectiveObserver:
+    """Adapt the source observer to the renderer's closed forward directive."""
+
+    def __init__(
+        self,
+        delegate: StageDPreparedCallObserver,
+        *,
+        pre_forward_guard: Callable[[], None] | None = None,
+    ) -> None:
+        self._delegate = delegate
+        self._pre_forward_guard = pre_forward_guard
+
+    async def before_forward(self, prepared: PreparedRequestLike) -> object:
+        from renderers.client import PreparedGenerateForward  # type: ignore[import-not-found]
+
+        if self._pre_forward_guard is not None:
+            self._pre_forward_guard()
+        ticket = await self._delegate.before_forward(prepared)
+        return PreparedGenerateForward(ticket)
+
+    async def after_response(self, ticket: object, response: object) -> None:
+        await self._delegate.after_response(ticket, response)
+
+    async def abort(
+        self,
+        ticket: object,
+        phase: AbortPhase,
+        error: BaseException,
+    ) -> None:
+        await self._delegate.abort(ticket, phase, error)
 
 
 def require_zero_retry_configuration(

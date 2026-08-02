@@ -1,0 +1,137 @@
+diff --git a/verifiers/v1/runtimes/docker/__init__.py b/verifiers/v1/runtimes/docker/__init__.py
+index ce61f02..17cd92f 100644
+--- a/verifiers/v1/runtimes/docker/__init__.py
++++ b/verifiers/v1/runtimes/docker/__init__.py
+@@ -48,6 +48,10 @@ class DockerConfig(BaseConfig):
+     block: list[str] = []
+     """URL origins or host patterns denied during execution. Block rules win over
+     `allow`; framework interception and MCP routes always remain reachable."""
++    execution_user: str | None = None
++    """Optional non-root uid:gid used only after trusted setup and network sealing."""
++    execution_home: str | None = None
++    """Private HOME paired with `execution_user` after trusted setup completes."""
+
+     @property
+     def network_isolated(self) -> bool:
+@@ -98,6 +102,15 @@ class DockerRuntime(Runtime):
+         self._stopped = False
+         self._setup_claimed = False
+         self._cut = False
++        self._execution_started = False
++        if (config.execution_user is None) != (config.execution_home is None):
++            raise ValueError(
++                "Docker execution_user and execution_home must be supplied together"
++            )
++        if config.execution_user is not None and not config.execution_user.strip():
++            raise ValueError("Docker execution_user must be nonempty")
++        if config.execution_home is not None and not config.execution_home.startswith("/"):
++            raise ValueError("Docker execution_home must be absolute")
+
+     async def start(self) -> None:
+         try:
+@@ -313,6 +326,7 @@ class DockerRuntime(Runtime):
+         if cut.exit_code != 0:
+             raise SandboxError(f"docker network cut failed: {cut.stderr.strip()}")
+         self._cut = True
++        self._execution_started = True
+
+     def _proxy_env(self) -> dict[str, str]:
+         if self._proxy is None:
+@@ -335,9 +349,24 @@ class DockerRuntime(Runtime):
+
+     async def run(self, argv: list[str], env: dict[str, str]) -> ProgramResult:
+         env = {**env, **(self._proxy_env() if self._cut else {})}
++        execution_args: list[str] = []
++        if self._execution_started and self.config.execution_user is not None:
++            assert self.config.execution_home is not None
++            execution_args = ["--user", self.config.execution_user]
++            env = {
++                **env,
++                "HOME": self.config.execution_home,
++                "XDG_CACHE_HOME": f"{self.config.execution_home}/.cache",
++            }
+         env_args = [arg for k, v in env.items() for arg in ("--env", f"{k}={v}")]
+         return await docker(
+-            "exec", *env_args, "--workdir", self.config.workdir, self._container, *argv
++            "exec",
++            *execution_args,
++            *env_args,
++            "--workdir",
++            self.config.workdir,
++            self._container,
++            *argv,
+         )
+
+     async def run_background(
+@@ -344,5 +358,7 @@ class DockerRuntime(Runtime):
+         self, argv: list[str], env: dict[str, str], log: str
+     ) -> None:
++        if self._execution_started:
++            raise SandboxError("background processes cannot start after the execution cut")
+         # Detached servers survive the cut, so they need the initially permissive proxy.
+         env = {**env, **self._proxy_env()}
+         env_args = [arg for k, v in env.items() for arg in ("--env", f"{k}={v}")]
+diff --git a/tests/test_stage_d_isolated_docker.py b/tests/test_stage_d_isolated_docker.py
+new file mode 100644
+index 0000000..468bf47
+--- /dev/null
++++ b/tests/test_stage_d_isolated_docker.py
+@@ -0,0 +1,58 @@
++from __future__ import annotations
++
++import asyncio
++
++import pytest
++
++import verifiers.v1.runtimes.docker as docker_module
++from verifiers.v1.runtimes.base import ProgramResult
++from verifiers.v1.runtimes.docker import DockerConfig, DockerRuntime
++
++
++def test_execution_identity_activates_only_after_setup(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    captured: list[tuple[str, ...]] = []
++
++    async def fake_docker(*args: str) -> ProgramResult:
++        captured.append(args)
++        return ProgramResult(0, "", "")
++
++    monkeypatch.setattr(docker_module, "docker", fake_docker)
++    runtime = DockerRuntime(
++        DockerConfig(
++            allow=[],
++            execution_user="65534:65534",
++            execution_home="/tmp/redco-agent",
++        )
++    )
++    runtime._container = "fixture"
++
++    asyncio.run(runtime.run(["id", "-u"], {}))
++    assert "--user" not in captured[-1]
++
++    runtime._cut = True
++    runtime._execution_started = True
++    asyncio.run(runtime.run(["id", "-u"], {}))
++    assert captured[-1][0:3] == ("exec", "--user", "65534:65534")
++    assert "HOME=/tmp/redco-agent" in captured[-1]
++    assert "XDG_CACHE_HOME=/tmp/redco-agent/.cache" in captured[-1]
++
++
++def test_execution_identity_requires_a_paired_absolute_home() -> None:
++    with pytest.raises(ValueError, match="supplied together"):
++        DockerRuntime(DockerConfig(execution_user="65534:65534"))
++    with pytest.raises(ValueError, match="absolute"):
++        DockerRuntime(
++            DockerConfig(
++                execution_user="65534:65534",
++                execution_home="relative",
++            )
++        )
++
++
++def test_background_process_cannot_start_after_execution_cut() -> None:
++    runtime = DockerRuntime(DockerConfig())
++    runtime._execution_started = True
++    with pytest.raises(docker_module.SandboxError, match="cannot start"):
++        asyncio.run(runtime.run_background(["sleep", "1"], {}, "/tmp/log"))

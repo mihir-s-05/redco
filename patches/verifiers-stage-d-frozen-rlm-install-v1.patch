@@ -1,0 +1,198 @@
+diff --git a/verifiers/v1/harnesses/rlm/harness.py b/verifiers/v1/harnesses/rlm/harness.py
+index 0b8f65e..4c2ad66 100644
+--- a/verifiers/v1/harnesses/rlm/harness.py
++++ b/verifiers/v1/harnesses/rlm/harness.py
+@@ -35,6 +35,13 @@ class RLMHarnessConfig(HarnessConfig):
+     """Trusted host path to an exact patched RLM source tar archive."""
+     checkout_archive_sha256: str | None = None
+     """SHA-256 of `checkout_archive_path`; both fields must be supplied together."""
++    checkout_uv_path: str | None = None
++    checkout_uv_sha256: str | None = None
++    checkout_cache_archive_path: str | None = None
++    checkout_cache_archive_sha256: str | None = None
++    checkout_uv_lock_sha256: str | None = None
++    checkout_launcher_path: str | None = None
++    checkout_launcher_sha256: str | None = None
+     max_depth: int = 0
+     """Recursion depth rlm may spawn sub-harnesses to (RLM_MAX_DEPTH)."""
+     skills: list[BuiltinSkill] = []
+@@ -48,20 +55,34 @@ class RLMHarnessConfig(HarnessConfig):
+
+     @model_validator(mode="after")
+     def validate_limits(self) -> "RLMHarnessConfig":
+-        if (self.checkout_archive_path is None) != (
+-            self.checkout_archive_sha256 is None
+-        ):
+-            raise ValueError("RLM checkout archive path and SHA-256 must be supplied together")
+-        if self.checkout_archive_path is not None:
+-            assert self.checkout_archive_sha256 is not None
+-            if (
+-                len(self.checkout_archive_sha256) != 64
+-                or any(
+-                    character not in "0123456789abcdef"
+-                    for character in self.checkout_archive_sha256
+-                )
++        bundle = (
++            self.checkout_archive_sha256,
++            self.checkout_uv_path,
++            self.checkout_uv_sha256,
++            self.checkout_cache_archive_path,
++            self.checkout_cache_archive_sha256,
++            self.checkout_uv_lock_sha256,
++            self.checkout_launcher_path,
++            self.checkout_launcher_sha256,
++        )
++        if self.checkout_archive_path is None:
++            if any(value is not None for value in bundle):
++                raise ValueError("RLM frozen install bundle must be supplied together")
++        elif any(value is None for value in bundle):
++            raise ValueError("RLM frozen install bundle must be supplied together")
++        else:
++            for digest in (
++                self.checkout_archive_sha256,
++                self.checkout_uv_sha256,
++                self.checkout_cache_archive_sha256,
++                self.checkout_uv_lock_sha256,
++                self.checkout_launcher_sha256,
+             ):
+-                raise ValueError("RLM checkout archive SHA-256 is invalid")
++                assert digest is not None
++                if len(digest) != 64 or any(
++                    character not in "0123456789abcdef" for character in digest
++                ):
++                    raise ValueError("RLM frozen install bundle SHA-256 is invalid")
+         value = self.summarize_at_tokens
+         if isinstance(value, tuple):
+             lo, hi = value
+@@ -105,23 +126,85 @@ class RLMHarness(Harness[RLMHarnessConfig]):
+             )
+         else:
+             assert self.config.checkout_archive_sha256 is not None
+-            archive = Path(self.config.checkout_archive_path).read_bytes()
+-            observed = hashlib.sha256(archive).hexdigest()
+-            if observed != self.config.checkout_archive_sha256:
+-                raise ValueError("patched RLM archive differs from its frozen SHA-256")
++            assert self.config.checkout_uv_path is not None
++            assert self.config.checkout_uv_sha256 is not None
++            assert self.config.checkout_cache_archive_path is not None
++            assert self.config.checkout_cache_archive_sha256 is not None
++            assert self.config.checkout_uv_lock_sha256 is not None
++            assert self.config.checkout_launcher_path is not None
++            assert self.config.checkout_launcher_sha256 is not None
++            assets = (
++                (
++                    "/tmp/redco-patched-rlm.tar",
++                    self.config.checkout_archive_path,
++                    self.config.checkout_archive_sha256,
++                ),
++                (
++                    "/tmp/redco-uv",
++                    self.config.checkout_uv_path,
++                    self.config.checkout_uv_sha256,
++                ),
++                (
++                    "/tmp/redco-uv-cache.tar.gz",
++                    self.config.checkout_cache_archive_path,
++                    self.config.checkout_cache_archive_sha256,
++                ),
++                (
++                    "/tmp/redco-rlm-wrapper",
++                    self.config.checkout_launcher_path,
++                    self.config.checkout_launcher_sha256,
++                ),
++            )
++            for remote, local, expected_sha256 in assets:
++                value = Path(local).read_bytes()
++                if hashlib.sha256(value).hexdigest() != expected_sha256:
++                    raise ValueError("RLM frozen install asset differs from its SHA-256")
++                await runtime.write(remote, value)
+             archive_path = "/tmp/redco-patched-rlm.tar"
+-            await runtime.write(archive_path, archive)
+             quoted_archive = shlex.quote(archive_path)
++            sentinel = ":".join(
++                (
++                    self.config.checkout_archive_sha256,
++                    self.config.checkout_uv_sha256,
++                    self.config.checkout_cache_archive_sha256,
++                    self.config.checkout_uv_lock_sha256,
++                    self.config.checkout_launcher_sha256,
++                )
++            )
++            quoted_sentinel = shlex.quote(sentinel)
+             install = (
+-                "rm -rf /tmp/rlm && mkdir -p /tmp/rlm && "
++                f"expected={quoted_sentinel}; "
++                f"if test -f {RLM_DIR}/install-sentinel && "
++                f"test \"$(cat {RLM_DIR}/install-sentinel)\" = \"$expected\" && "
++                f"echo {self.config.checkout_launcher_sha256} {RLM_BIN} | "
++                "sha256sum -c - >/dev/null; then :; else "
++                f"rm -rf /tmp/rlm /tmp/redco-uv-cache {RLM_DIR}/env "
++                f"{RLM_DIR}/bin {RLM_DIR}/install-sentinel && "
++                "mkdir -p /tmp/rlm /tmp/redco-uv-cache "
++                f"{RLM_DIR}/bin && "
+                 f"tar -xf {quoted_archive} -C /tmp/rlm && "
+-                "test -f /tmp/rlm/install.sh && "
+-                f"UV_INSTALL_DIR={RLM_DIR}/bin UV_TOOL_BIN_DIR={RLM_DIR}/bin "
+-                f"RLM_CHECKOUT_PATH=/tmp/rlm bash /tmp/rlm/install.sh && "
+-                f"rm -f {quoted_archive}"
++                f"echo {self.config.checkout_uv_lock_sha256} /tmp/rlm/uv.lock | "
++                "sha256sum -c - >/dev/null && "
++                "tar -xzf /tmp/redco-uv-cache.tar.gz -C /tmp/redco-uv-cache && "
++                "chmod 0555 /tmp/redco-uv && "
++                "UV_CACHE_DIR=/tmp/redco-uv-cache "
++                f"UV_PROJECT_ENVIRONMENT={RLM_DIR}/env /tmp/redco-uv sync "
++                "--project /tmp/rlm --frozen --offline --no-dev "
++                "--no-install-project --python python3 && "
++                f"install -m 0555 /tmp/redco-rlm-wrapper {RLM_BIN} && "
++                f"echo {self.config.checkout_launcher_sha256} {RLM_BIN} | "
++                "sha256sum -c - >/dev/null && "
++                f"printf %s \"$expected\" > {RLM_DIR}/.install-sentinel.pending && "
++                f"mv {RLM_DIR}/.install-sentinel.pending {RLM_DIR}/install-sentinel; fi; "
++                "rm -f /tmp/redco-uv /tmp/redco-uv-cache.tar.gz "
++                f"/tmp/redco-rlm-wrapper {quoted_archive}"
+             )
+         logger.info("rlm: ensuring rlm is installed (version=%s)", self.config.version)
+-        ensure = shlex.quote(f"[ -x {RLM_BIN} ] || ({install})")
++        ensure = shlex.quote(
++            install
++            if self.config.checkout_archive_path is not None
++            else f"[ -x {RLM_BIN} ] || ({install})"
++        )
+         guarded = f"mkdir -p {RLM_DIR} && flock {RLM_DIR}/install.lock sh -c {ensure}"
+         env = {**self.config.resolved_env, "RLM_HOME": RLM_HOME}
+         result = await runtime.run(["sh", "-c", guarded], env)
+diff --git a/tests/test_stage_d_patched_rlm_archive.py b/tests/test_stage_d_patched_rlm_archive.py
+index 320569d..e01d8d0 100644
+--- a/tests/test_stage_d_patched_rlm_archive.py
++++ b/tests/test_stage_d_patched_rlm_archive.py
+@@ -26,11 +26,29 @@ class _Runtime:
+ def test_exact_patched_archive_is_uploaded_before_install(tmp_path: Path) -> None:
+     archive = tmp_path / "rlm.tar"
+     archive.write_bytes(b"exact-patched-rlm")
++    uv = tmp_path / "uv"
++    uv.write_bytes(b"pinned-uv")
++    cache = tmp_path / "cache.tar.gz"
++    cache.write_bytes(b"offline-cache")
++    launcher = tmp_path / "rlm-wrapper"
++    launcher.write_bytes(b"frozen-wrapper")
+     config = RLMHarnessConfig(
+         checkout_archive_path=str(archive),
+         checkout_archive_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
++        checkout_uv_path=str(uv),
++        checkout_uv_sha256=hashlib.sha256(uv.read_bytes()).hexdigest(),
++        checkout_cache_archive_path=str(cache),
++        checkout_cache_archive_sha256=hashlib.sha256(cache.read_bytes()).hexdigest(),
++        checkout_uv_lock_sha256="a" * 64,
++        checkout_launcher_path=str(launcher),
++        checkout_launcher_sha256=hashlib.sha256(launcher.read_bytes()).hexdigest(),
+     )
+     runtime = _Runtime()
+     asyncio.run(RLMHarness(config).setup(runtime))  # type: ignore[arg-type]
+-    assert runtime.writes == [("/tmp/redco-patched-rlm.tar", archive.read_bytes())]
++    assert runtime.writes == [
++        ("/tmp/redco-patched-rlm.tar", archive.read_bytes()),
++        ("/tmp/redco-uv", uv.read_bytes()),
++        ("/tmp/redco-uv-cache.tar.gz", cache.read_bytes()),
++        ("/tmp/redco-rlm-wrapper", launcher.read_bytes()),
++    ]
+     assert "git clone" not in runtime.commands[0][-1]

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 import pytest
+from test_stage_d_exact_action import _prepared_key
 
 from redco.analysis.stage_d_exact_action import BehaviorAction, ExactActionKey
 from redco.analysis.stage_d_scientific_branch_group import (
@@ -297,11 +298,15 @@ def _sampler(fixture: Fixture) -> tuple[list[tuple[int, int]], CandidateSampler]
                 "action_slot": action_slot,
                 "action_seed": action_seed,
                 "action_digest": action.digest,
+                "action_evidence_sha256": _sha256(action.to_bytes()),
                 "behavior_law_sha256": behavior_law_digest(action.key),
                 "selection_policy": "direct_single_sample",
                 "sample_attempts": 1,
                 "rejected_attempts": 0,
                 "inference_call_id": f"candidate-{action_slot}",
+                "prompt_tokens": action.prompt_tokens,
+                "completion_tokens": action.completion_tokens,
+                "response_sha256": _sha256(b"candidate-response"),
             },
         )
         return CandidateSubmission(action, receipt)
@@ -422,6 +427,38 @@ def test_flat_group_is_retained() -> None:
     assert [arm.advantage for arm in artifact.arms] == [0.0] * 4
 
 
+def test_artifact_is_prepared_once_after_every_scientific_outcome() -> None:
+    fixture = _fixture()
+    prepared: list[bytes] = []
+    artifact = run_scientific_branch_group(
+        fixture.spec,
+        verifier=fixture.store,
+        sample_candidate=_sampler(fixture)[1],
+        run_reconstruction_qa=lambda _: _qa_receipt(fixture),
+        execute_arm=_executor(fixture, (1.0, 0.0, 0.5, -1.0))[1],
+        prepare_artifact=lambda value: prepared.append(value.to_bytes()),
+    )
+
+    assert prepared == [artifact.to_bytes()]
+
+
+def test_artifact_prepare_failure_is_repairable_with_durable_receipts() -> None:
+    fixture = _fixture()
+
+    def fail(_: BranchGroupArtifact) -> None:
+        raise OSError("disk unavailable")
+
+    with pytest.raises(RepairableInfrastructureAbort, match="artifact publish failed"):
+        run_scientific_branch_group(
+            fixture.spec,
+            verifier=fixture.store,
+            sample_candidate=_sampler(fixture)[1],
+            run_reconstruction_qa=lambda _: _qa_receipt(fixture),
+            execute_arm=_executor(fixture, (1.0, 0.0, 0.5, -1.0))[1],
+            prepare_artifact=fail,
+        )
+
+
 def test_qa_is_outside_scientific_digest_ledger_and_batch_identity() -> None:
     first, *_ = _run(report="c" * 64)
     second, *_ = _run(report="d" * 64)
@@ -469,11 +506,15 @@ def test_candidate_receipt_prevents_resampling_and_behavior_drift() -> None:
                 "action_slot": kwargs["action_slot"],
                 "action_seed": kwargs["action_seed"],
                 "action_digest": action.digest,
+                "action_evidence_sha256": _sha256(action.to_bytes()),
                 "behavior_law_sha256": behavior_law_digest(action.key),
                 "selection_policy": "best_of_two",
                 "sample_attempts": 2,
                 "rejected_attempts": 1,
                 "inference_call_id": "bad",
+                "prompt_tokens": action.prompt_tokens,
+                "completion_tokens": action.completion_tokens,
+                "response_sha256": _sha256(b"bad-candidate-response"),
             },
         )
         return CandidateSubmission(action, receipt)
@@ -486,6 +527,20 @@ def test_candidate_receipt_prevents_resampling_and_behavior_drift() -> None:
             run_reconstruction_qa=lambda _: _qa_receipt(fixture),
             execute_arm=executor,
         )
+
+
+def test_prepared_candidate_resampling_preserves_only_the_behavior_law() -> None:
+    reference = _prepared_key()
+    candidate = ExactActionKey.resample_prepared(
+        reference,
+        seed=9917,
+        cache_salt="candidate-salt",
+    )
+
+    assert behavior_law_digest(candidate) == behavior_law_digest(reference)
+    assert behavior_law_digest(_prepared_key(priority=1)) != behavior_law_digest(
+        reference
+    )
 
 
 def test_correspondence_map_alone_authorizes_pairing() -> None:
@@ -592,13 +647,56 @@ def test_trusted_zero_call_candidate_failure_is_separately_repairable() -> None:
             ).action_seed(action_slot=1),
             "attempt_ordinal": 0,
             "attempt_id": "attempt-1",
-            "scientific_model_calls": 0,
+            "attempt_model_calls": 0,
+            "attempt_overrides": 0,
+            "prior_candidate_completions": 0,
+            "prior_execution_completions": 0,
+            "repair_sequence": 0,
             "successor_permitted": True,
             "reason": "capacity vanished",
         },
     )
 
     with pytest.raises(RepairableInfrastructureAbort, match="before a scientific"):
+        run_scientific_branch_group(
+            fixture.spec,
+            verifier=fixture.store,
+            sample_candidate=lambda **_: (_ for _ in ()).throw(
+                ZeroCallInfrastructureFailure(receipt)
+            ),
+            run_reconstruction_qa=lambda _: _qa_receipt(fixture),
+            execute_arm=executor,
+        )
+
+
+def test_second_zero_call_candidate_failure_is_terminal() -> None:
+    fixture = _fixture()
+    _, executor = _executor(fixture, (1.0, 0.0, 0.5, -1.0))
+    receipt = fixture.store.issue(
+        "zero_call_infrastructure_failure",
+        {
+            "ledger_id": fixture.spec.commitment.ledger_id,
+            "ledger_offset": fixture.spec.commitment.ledger_offset + 1,
+            "prior_chain_sha256": fixture.store.chain,
+            "group_id": fixture.spec.commitment.group_id,
+            "target_id": fixture.spec.commitment.target_id,
+            "action_slot": 1,
+            "action_seed": EventSeedScheduler(
+                "master", "rollout-1", "target-0", 1
+            ).action_seed(action_slot=1),
+            "attempt_ordinal": 1,
+            "attempt_id": "attempt-2",
+            "attempt_model_calls": 0,
+            "attempt_overrides": 0,
+            "prior_candidate_completions": 0,
+            "prior_execution_completions": 0,
+            "repair_sequence": 1,
+            "successor_permitted": False,
+            "reason": "successor capacity vanished",
+        },
+    )
+
+    with pytest.raises(NonRepairableCampaignAbort, match="already consumed"):
         run_scientific_branch_group(
             fixture.spec,
             verifier=fixture.store,

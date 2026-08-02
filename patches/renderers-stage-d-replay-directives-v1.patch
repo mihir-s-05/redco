@@ -1,0 +1,230 @@
+diff --git a/renderers/client.py b/renderers/client.py
+index 3c9bedd..8243282 100644
+--- a/renderers/client.py
++++ b/renderers/client.py
+@@ -82,10 +82,56 @@ class PreparedGenerateRequest:
+     prompt_token_ids: tuple[int, ...]
+
+
++@dataclass(frozen=True, slots=True)
++class PreparedGenerateForward:
++    """Forward this exact prepared request once and retain its observer ticket."""
++
++    ticket: object
++
++    def __post_init__(self) -> None:
++        if self.ticket is None:
++            raise ValueError("prepared forward ticket must be non-null")
++
++
++@dataclass(frozen=True, slots=True)
++class PreparedGenerateReturn:
++    """Return one canonical frozen engine response through the ordinary parsers."""
++
++    ticket: object
++    response_content: bytes
++
++    def __post_init__(self) -> None:
++        if self.ticket is None:
++            raise ValueError("prepared return ticket must be non-null")
++        if type(self.response_content) is not bytes or not self.response_content:
++            raise ValueError("prepared return response content must be nonempty bytes")
++
++
++@dataclass(frozen=True, slots=True)
++class PreparedGenerateReject:
++    """Reject before any model call; this directive carries no reservation."""
++
++    reason: str
++
++    def __post_init__(self) -> None:
++        if type(self.reason) is not str or not self.reason:
++            raise ValueError("prepared rejection reason must be nonempty")
++
++
++PreparedGenerateDirective = (
++    PreparedGenerateForward | PreparedGenerateReturn | PreparedGenerateReject
++)
++
++
+ class PreparedGenerateObserver(Protocol):
+     """Exactly-once observer used by scientific clients at the POST boundary."""
+
+-    async def before_forward(self, prepared: PreparedGenerateRequest) -> object: ...
++    async def before_forward(
++        self,
++        prepared: PreparedGenerateRequest,
++    ) -> PreparedGenerateDirective: ...
++
++    async def after_raw_response(self, ticket: object, response_content: bytes) -> None: ...
+
+     async def after_response(self, ticket: object, response: object) -> None: ...
+
+@@ -376,6 +422,7 @@ async def generate(
+     if extra_headers:
+         post_kwargs["options"] = cast(Any, {"headers": extra_headers})
+     observation_ticket: object | None = None
++    return_directive: PreparedGenerateReturn | None = None
+     observation_phase: ObservationAbortPhase = "post_unknown"
+     if observer is not None:
+         if effective_request is None or observer_context is None:
+@@ -392,11 +439,26 @@ async def generate(
+             observer_context=_canonical_json(dict(observer_context)),
+             prompt_token_ids=tuple(prompt_ids),
+         )
+-        observation_ticket = await observer.before_forward(prepared)
++        directive = await observer.before_forward(prepared)
++        if type(directive) is PreparedGenerateForward:
++            observation_ticket = directive.ticket
++        elif type(directive) is PreparedGenerateReturn:
++            observation_ticket = directive.ticket
++            return_directive = directive
++        elif type(directive) is PreparedGenerateReject:
++            raise ValueError(f"prepared request rejected: {directive.reason}")
++        else:
++            raise TypeError("prepared observer returned an unsupported directive")
+     try:
+-        raw_response = await client.post(endpoint, **post_kwargs)
+-        observation_phase = "response_received"
+-        data = parse_generate_response(raw_response.content)
++        if return_directive is None:
++            raw_response = await client.post(endpoint, **post_kwargs)
++            response_content = raw_response.content
++        else:
++            response_content = return_directive.response_content
++        observation_phase = "response_received"
++        if observer is not None and observation_ticket is not None:
++            await observer.after_raw_response(observation_ticket, response_content)
++        data = parse_generate_response(response_content)
+         choice = (data.get("choices") or [{}])[0]
+         completion_ids = choice.get("token_ids") or []
+         parsed = await _maybe_offload(
+diff --git a/tests/test_client.py b/tests/test_client.py
+index edb7729..a969a1a 100644
+--- a/tests/test_client.py
++++ b/tests/test_client.py
+@@ -11,7 +11,13 @@ from renderers.base import (
+     RenderedTokens,
+     ToolCallParseStatus,
+ )
+-from renderers.client import PreparedGenerateRequest, generate
++from renderers.client import (
++    PreparedGenerateForward,
++    PreparedGenerateReject,
++    PreparedGenerateRequest,
++    PreparedGenerateReturn,
++    generate,
++)
+
+
+ class _FakeRenderer:
+@@ -108,7 +114,10 @@ class _PreparedObserver:
+     async def before_forward(self, prepared):
+         assert isinstance(prepared, PreparedGenerateRequest)
+         self.events.append(("before", prepared))
+-        return "ticket"
++        return PreparedGenerateForward("ticket")
++
++    async def after_raw_response(self, ticket, response_content):
++        self.events.append(("raw", ticket, response_content))
+
+     async def after_response(self, ticket, response):
+         self.events.append(("after", ticket, response))
+@@ -117,6 +123,25 @@ class _PreparedObserver:
+         self.events.append(("abort", ticket, phase, type(error).__name__))
+
+
++def _frozen_response_content(*, finish_reason="stop"):
++    return json.dumps(
++        {
++            "request_id": "recorded-action",
++            "choices": [
++                {
++                    "token_ids": [7, 8],
++                    "logprobs": {
++                        "content": [{"logprob": -0.1}, {"logprob": -0.2}]
++                    },
++                    "finish_reason": finish_reason,
++                }
++            ],
++        },
++        separators=(",", ":"),
++        sort_keys=True,
++    ).encode()
++
++
+ def _observed_generate(client, observer):
+     return generate(
+         client=client,
+@@ -160,6 +185,71 @@ def test_prepared_observer_aborts_unknown_post_outcome():
+     assert observer.events[-1][2:] == ("post_unknown", "ConnectionError")
+
+
++def test_prepared_return_skips_post_but_uses_the_same_parser():
++    class ReturningObserver(_PreparedObserver):
++        async def before_forward(self, prepared):
++            self.events.append(("before", prepared))
++            return PreparedGenerateReturn(
++                ticket="return-ticket",
++                response_content=_frozen_response_content(),
++            )
++
++    client = _FakeClient()
++    observer = ReturningObserver()
++    result = asyncio.run(_observed_generate(client, observer))
++
++    assert client.calls == []
++    assert result["request_id"] == "recorded-action"
++    assert result["completion_ids"] == [7, 8]
++    assert result["completion_logprobs"] == [-0.1, -0.2]
++    assert result.pop("_prepared_observation_ticket") == "return-ticket"
++
++
++def test_prepared_return_restores_tool_call_finish_through_the_parser():
++    class ReturningObserver(_PreparedObserver):
++        async def before_forward(self, prepared):
++            self.events.append(("before", prepared))
++            return PreparedGenerateReturn(
++                ticket="return-ticket",
++                response_content=_frozen_response_content(),
++            )
++
++    client = _FakeClient()
++    observer = ReturningObserver()
++    result = asyncio.run(_observed_generate(client, observer))
++
++    assert client.calls == []
++    assert result["finish_reason"] == "tool_calls"
++    assert result.pop("_prepared_observation_ticket") == "return-ticket"
++
++
++@pytest.mark.parametrize(
++    "directive",
++    [
++        lambda: PreparedGenerateForward(None),
++        lambda: PreparedGenerateReturn(
++            ticket=None,
++            response_content=_frozen_response_content(),
++        ),
++    ],
++)
++def test_prepared_directives_reject_null_tickets(directive):
++    with pytest.raises(ValueError, match="ticket must be non-null"):
++        directive()
++
++
++def test_prepared_reject_never_posts():
++    class RejectingObserver(_PreparedObserver):
++        async def before_forward(self, prepared):
++            self.events.append(("before", prepared))
++            return PreparedGenerateReject("not causally authorized")
++
++    client = _FakeClient()
++    with pytest.raises(ValueError, match="not causally authorized"):
++        asyncio.run(_observed_generate(client, RejectingObserver()))
++    assert client.calls == []
++
++
+ def test_prepared_observer_durably_aborts_cancelled_post():
+     class BlockingClient(_FakeClient):
+         def __init__(self):

@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import shutil
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from test_stage_d_evaluation_ledger import _finish_task as _finish_evaluation_task
+from test_stage_d_evaluation_ledger import _start_arm as _start_evaluation_arm
 from test_stage_d_scientific_branch_group import _action, _key
+from test_stage_d_trainer_supervisor import _checkpoint_evidence, _mark_process_started
 
 import redco.analysis.stage_d_campaign_store as campaign_store_module
 from redco.analysis.stage_d_branch_artifacts import (
@@ -16,8 +22,10 @@ from redco.analysis.stage_d_branch_artifacts import (
 )
 from redco.analysis.stage_d_campaign_controller import (
     compile_authorize_seal_campaign,
+    recover_sealed_campaign,
 )
 from redco.analysis.stage_d_campaign_store import (
+    FrozenProtocolInputs,
     StageDCampaignStore,
     verify_campaign_bundle,
 )
@@ -25,15 +33,35 @@ from redco.analysis.stage_d_collection import (
     StageDCollectionPlan,
     verify_collection_outcomes,
 )
+from redco.analysis.stage_d_evaluation_actuation import ActuatedProcessReceipt
+from redco.analysis.stage_d_evaluation_barrier import (
+    StageDEvaluationPlan,
+    StageDEvaluationTask,
+    commit_sealed_heldout_evaluation,
+)
+from redco.analysis.stage_d_evaluation_contracts import (
+    EvaluationProgramBinding,
+    EvaluationRuntimeEntrypoint,
+    EvaluationScheduleUnit,
+    EvaluationSupervisorLimits,
+    StageDEvaluationExecutionManifest,
+)
+from redco.analysis.stage_d_evaluation_ledger import StageDEvaluationLedger
 from redco.analysis.stage_d_exact_action import BehaviorAction, ExactActionKey
+from redco.analysis.stage_d_handoff_coordinator import StageDHandoffCoordinator
 from redco.analysis.stage_d_objective_binding import (
     ObjectiveAuthorization,
     ObjectiveBinding,
     fixture_objective_binding,
 )
+from redco.analysis.stage_d_process_supervision import TrainerProcessStartReceipt
+from redco.analysis.stage_d_protocol_manifest import (
+    StageDPolicyIdentity,
+    StageDProtocolManifest,
+)
 from redco.analysis.stage_d_receipt_ledger import (
-    BatchAlreadyClaimed,
     GenesisBinding,
+    LedgerError,
     SealedReceiptVerifier,
     StageDReceiptLedger,
     inspect_ledger,
@@ -47,6 +75,9 @@ from redco.analysis.stage_d_scientific_branch_group import (
     PreActionTargetCommitment,
     SeedCorrespondenceMap,
     run_scientific_branch_group,
+)
+from redco.analysis.stage_d_shared_initialization import (
+    StageDSharedInitializationManifest,
 )
 from redco.analysis.stage_d_source_artifacts import (
     SourceArtifactError,
@@ -72,10 +103,40 @@ from redco.analysis.stage_d_three_arm_bridge import (
 from redco.analysis.stage_d_three_arm_prime import (
     _verify_stage_d_batch_authorization,
 )
+from redco.analysis.stage_d_trainer_supervisor import StageDTrainerRunLedger
 from redco.analysis.stage_d_training_bridge import policy_identity_sha256
+from redco.analysis.stage_d_training_completion import StageDTrainingCompletion
 from redco.contracts import ActualEvaluationCost, canonical_json
 
 MASTER_SEED = "stage-d-source-producer-test"
+EVALUATION_PLAN_BYTES = StageDEvaluationPlan(
+    tasks=(StageDEvaluationTask("heldout-1", 9101),),
+    reward_min=0.0,
+    reward_max=1.0,
+    success_reward_threshold=0.5,
+).to_bytes()
+PREREGISTRATION_BYTES = b"preregistration"
+GENESIS_CONFIG_BYTES = b"genesis config"
+SOURCE_BYTES = b"source manifest"
+RUNTIME_BYTES = b"runtime manifest"
+SOURCE_EVAL_BYTES = b"source eval"
+SCIENTIFIC_EVAL_BYTES = b"scientific eval"
+HELDOUT_EVAL_BYTES = b"heldout eval"
+BASE_MODEL_BYTES = b"base"
+ADAPTER_BYTES = b"adapter"
+TOKENIZER_BYTES = b"tokenizer"
+RENDERER_BYTES = b"renderer"
+SAMPLER_CONFORMANCE_BYTES = b"sampler conformance"
+RESOLVED_AGENT_BYTES = b"resolved agent sampling law"
+RESOLVED_CLIENT_BYTES = b"resolved train client"
+_INITIALIZATION_KEY = _key(71)
+SHARED_INITIALIZATION_BYTES = StageDSharedInitializationManifest(
+    initialization_id="fixture-shared-initialization",
+    checkpoint_id=_INITIALIZATION_KEY.checkpoint_id,
+    base_model_manifest_sha256=_INITIALIZATION_KEY.base_model_manifest_sha256,
+    adapter_manifest_sha256=_INITIALIZATION_KEY.adapter_manifest_sha256,
+    expected_pre_model_sha256="f" * 64,
+).to_bytes()
 
 
 class _CollectionTaskData:
@@ -87,16 +148,21 @@ class _CollectionTaskData:
         return dict(self._payload)
 
 
-def _collection_evidence(sources):
+def _collection_plan(count: int) -> StageDCollectionPlan:
     data = [
         {
-            "scientific_group_id": source.group_id,
+            "scientific_group_id": "group-1",
             "example_id": "campaign-example",
             "rollout_slot": index,
         }
-        for index, source in enumerate(sources)
+        for index in range(count)
     ]
-    plan = StageDCollectionPlan.build(data, master_seed=MASTER_SEED)
+    return StageDCollectionPlan.build(data, master_seed=MASTER_SEED)
+
+
+def _collection_evidence(sources):
+    plan = _collection_plan(len(sources))
+    data = [slot.to_payload() for slot in plan.slots]
     episodes = [
         SimpleNamespace(
             ok=True,
@@ -116,13 +182,98 @@ def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def _binding() -> GenesisBinding:
+def _zip_bytes(entries: tuple[tuple[str, bytes], ...]) -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, value in entries:
+            archive.writestr(name, value)
+    return output.getvalue()
+
+
+def _binding(
+    *,
+    protocol_manifest_sha256: str = "5" * 64,
+    preregistration_sha256: str = "1" * 64,
+    source_sha256: str = "2" * 64,
+    runtime_sha256: str = "3" * 64,
+    config_sha256: str = "4" * 64,
+) -> GenesisBinding:
     return GenesisBinding(
-        preregistration_sha256="1" * 64,
-        source_sha256="2" * 64,
-        runtime_sha256="3" * 64,
-        config_sha256="4" * 64,
+        preregistration_sha256=preregistration_sha256,
+        source_sha256=source_sha256,
+        runtime_sha256=runtime_sha256,
+        config_sha256=config_sha256,
+        protocol_manifest_sha256=protocol_manifest_sha256,
         master_seed_sha256=_sha256(MASTER_SEED.encode()),
+    )
+
+
+def _campaign_protocol(
+    *,
+    plan: StageDCollectionPlan,
+    bindings: dict[ArmName, bytes],
+    trainer_tomls: dict[ArmName, bytes],
+    authorization: bytes,
+) -> StageDProtocolManifest:
+    key = _key(71)
+    return StageDProtocolManifest(
+        preregistration_sha256=_sha256(PREREGISTRATION_BYTES),
+        dependency_stack_sha256=_sha256(b"dependency stack"),
+        genesis_config_sha256=_sha256(GENESIS_CONFIG_BYTES),
+        master_seed_sha256=_sha256(MASTER_SEED.encode()),
+        source_sha256=_sha256(SOURCE_BYTES),
+        runtime_sha256=_sha256(RUNTIME_BYTES),
+        source_eval_config_sha256=_sha256(SOURCE_EVAL_BYTES),
+        scientific_eval_config_sha256=_sha256(SCIENTIFIC_EVAL_BYTES),
+        heldout_eval_config_sha256=_sha256(HELDOUT_EVAL_BYTES),
+        collection_plan_sha256=plan.plan_sha256,
+        evaluation_plan_sha256=_sha256(EVALUATION_PLAN_BYTES),
+        decision_rule_sha256=_sha256(b"decision rule"),
+        reload_probe_sha256=_sha256(b"reload probe"),
+        shared_initialization_sha256=_sha256(SHARED_INITIALIZATION_BYTES),
+        objective_authorization_sha256=_sha256(authorization),
+        objective_binding_sha256s=tuple(
+            (arm, _sha256(bindings[arm])) for arm in ("stock", "branch-global", "local")
+        ),
+        trainer_config_sha256s=tuple(
+            (arm, _sha256(trainer_tomls[arm])) for arm in ("stock", "branch-global", "local")
+        ),
+        policy_identity=StageDPolicyIdentity(
+            checkpoint_id=key.checkpoint_id,
+            base_model_manifest_sha256=key.base_model_manifest_sha256,
+            adapter_manifest_sha256=key.adapter_manifest_sha256,
+            tokenizer_manifest_sha256=key.tokenizer_manifest_sha256,
+            renderer_manifest_sha256=key.renderer_manifest_sha256,
+            sampler_conformance_manifest_sha256=(key.sampler_conformance_manifest_sha256),
+            resolved_agent_sampling_law_sha256=_sha256(RESOLVED_AGENT_BYTES),
+            resolved_train_client_sha256=_sha256(RESOLVED_CLIENT_BYTES),
+        ),
+        arm_order=("stock", "branch-global", "local"),
+        branch_global_scope="within-source-group-all-target-branches-v1",
+        trainer_step=1,
+        seq_len=64,
+    )
+
+
+def _frozen_protocol_inputs() -> FrozenProtocolInputs:
+    key = _key(71)
+    return FrozenProtocolInputs(
+        preregistration=PREREGISTRATION_BYTES,
+        dependency_stack_manifest=b"dependency stack",
+        genesis_config=GENESIS_CONFIG_BYTES,
+        source=SOURCE_BYTES,
+        runtime=RUNTIME_BYTES,
+        source_eval_config=SOURCE_EVAL_BYTES,
+        scientific_eval_config=SCIENTIFIC_EVAL_BYTES,
+        heldout_eval_config=HELDOUT_EVAL_BYTES,
+        shared_initialization_manifest=SHARED_INITIALIZATION_BYTES,
+        base_model_manifest=BASE_MODEL_BYTES,
+        adapter_manifest=ADAPTER_BYTES,
+        tokenizer_manifest=TOKENIZER_BYTES,
+        renderer_manifest=RENDERER_BYTES,
+        sampler_conformance_manifest=key.sampler_conformance_manifest,
+        resolved_agent_sampling_law=RESOLVED_AGENT_BYTES,
+        resolved_train_client=RESOLVED_CLIENT_BYTES,
     )
 
 
@@ -751,7 +902,7 @@ def _run_live_artifact(
 
     def qa(_: BranchGroupSpec) -> bytes:
         report = writer.put_evidence(b"model-free reconstruction QA")
-        return writer.record_reconstruction_qa(
+        receipt = writer.record_reconstruction_qa(
             group_id=spec.commitment.group_id,
             target_id=spec.commitment.target_id,
             recorded_action=spec.recorded_action,
@@ -759,6 +910,9 @@ def _run_live_artifact(
             report_sha256=report,
             actual_cost=ActualEvaluationCost(cpu_seconds=0.01, wall_seconds=0.01),
         )
+        if writer.branch_target_roster_sha256 is not None:
+            writer.seal_reconstruction_qa_barrier()
+        return receipt
 
     def sample(
         *,
@@ -776,6 +930,7 @@ def _run_live_artifact(
         writer.mark_candidate_model_call_started(attempt, request_sha256=request)
         action = _action(action_seed)
         response = writer.put_evidence(action.to_bytes())
+        writer.mark_candidate_response_observed(attempt, response_sha256=response)
         receipt = writer.complete_candidate_call(
             attempt,
             action=action,
@@ -800,6 +955,24 @@ def _run_live_artifact(
         context = writer.put_evidence(f"context:{arm_id}".encode())
         writer.bind_execution_context(attempt, context_sha256=context)
         writer.mark_execution_dispatched(attempt)
+        target_request = writer.put_evidence(f"target-request:{arm_id}".encode())
+        target_response = writer.put_evidence(action.to_bytes())
+        target_ticket = writer.commit_execution_override(
+            attempt,
+            address=spec.commitment.target_address,
+            action_digest=action.digest,
+            disposition="inject",
+            request_sha256=target_request,
+            response_content_sha256=target_response,
+            prompt_tokens=action.prompt_tokens,
+            completion_tokens=action.completion_tokens,
+            counts_toward_logical_cost=False,
+        )
+        writer.mark_execution_override_delivered(
+            attempt,
+            target_ticket,
+            typed_response_sha256=target_response,
+        )
         request = writer.put_evidence(f"execution-request:{arm_id}".encode())
         call = writer.mark_execution_model_call_started(
             attempt,
@@ -808,6 +981,11 @@ def _run_live_artifact(
             request_sha256=request,
         )
         response = writer.put_evidence(f"execution-response:{arm_id}".encode())
+        writer.mark_execution_response_observed(
+            attempt,
+            call,
+            response_sha256=response,
+        )
         writer.complete_execution_model_call(
             attempt,
             call,
@@ -846,6 +1024,68 @@ def _run_live_artifact(
         training_batch_identity=artifact.training_batch_identity,
     )
     return value
+
+
+def test_global_reconstruction_qa_barrier_blocks_all_candidates(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "ledger"
+    writer = StageDReceiptLedger.create(
+        root,
+        binding=_binding(),
+        master_seed=MASTER_SEED,
+    )
+    first, first_spec = _produce_into(
+        writer,
+        rollout_id="rollout-qa-a",
+        root_seed=81,
+        child_seed=82,
+        reward=0.75,
+        selected=True,
+    )
+    second, second_spec = _produce_into(
+        writer,
+        rollout_id="rollout-qa-b",
+        root_seed=83,
+        child_seed=84,
+        reward=0.25,
+        selected=True,
+    )
+    assert first_spec is not None and second_spec is not None
+    _freeze_target_roster(writer, (first, second))
+
+    for index, spec in enumerate((first_spec, second_spec)):
+        report = writer.put_evidence(f"qa:{index}".encode())
+        writer.record_reconstruction_qa(
+            group_id=spec.commitment.group_id,
+            target_id=spec.commitment.target_id,
+            recorded_action=spec.recorded_action,
+            passed=True,
+            report_sha256=report,
+            actual_cost=ActualEvaluationCost(cpu_seconds=0.01, wall_seconds=0.01),
+        )
+        with pytest.raises(LedgerError, match="whole-roster"):
+            writer.begin_candidate_attempt(
+                group_id=first_spec.commitment.group_id,
+                target_id=first_spec.commitment.target_id,
+                action_slot=1,
+            )
+
+    barrier = writer.seal_reconstruction_qa_barrier()
+    assert writer.reconstruction_qa_barrier_sha256 == _sha256(barrier)
+    attempt = writer.begin_candidate_attempt(
+        group_id=first_spec.commitment.group_id,
+        target_id=first_spec.commitment.target_id,
+        action_slot=1,
+    )
+    supervisor = writer.put_evidence(b"intentional zero-call cleanup")
+    writer.record_zero_call_candidate_failure(
+        attempt,
+        reason="test cleanup",
+        supervisor_evidence_sha256=supervisor,
+    )
+    writer.close()
+    assert inspect_ledger(root).status == "active-clean"
 
 
 def test_live_source_is_derived_from_intercepted_calls_and_trace(tmp_path: Path) -> None:
@@ -1114,7 +1354,7 @@ def test_producer_refuses_finalization_while_request_is_in_flight(tmp_path: Path
     writer.close()
 
 
-def test_exact_live_batch_authorization_is_single_use_and_sealed(tmp_path: Path) -> None:
+def test_exact_live_batch_authorization_is_idempotent_and_sealed(tmp_path: Path) -> None:
     root = tmp_path / "ledger"
     source, writer = _produce(root)
     _freeze_target_roster(writer, (source,))
@@ -1134,7 +1374,22 @@ def test_exact_live_batch_authorization_is_single_use_and_sealed(tmp_path: Path)
         branch_artifact_sha256s=(),
         consumer_id="stage-d-prime:stock:step:1",
     )
-    with pytest.raises(BatchAlreadyClaimed):
+    duplicate = writer.authorize_stage_d_training_batch(
+        arm="stock",
+        training_batch_identity="8" * 64,
+        sealed_batch_sha256=sealed_batch_sha256,
+        objective_sha256="9" * 64,
+        objective_authorization_sha256=objective_authorization_sha256,
+        collection_plan_sha256=collection_plan_sha256,
+        collection_receipt_sha256=collection_receipt_sha256,
+        source_sha256s=(source.source_sha256,),
+        branch_artifact_sha256s=(),
+        consumer_id="stage-d-prime:stock:step:1",
+    )
+    assert duplicate.receipt == authorization.receipt
+    writer.close()
+    writer = StageDReceiptLedger(root, master_seed=MASTER_SEED)
+    assert (
         writer.authorize_stage_d_training_batch(
             arm="stock",
             training_batch_identity="8" * 64,
@@ -1146,6 +1401,21 @@ def test_exact_live_batch_authorization_is_single_use_and_sealed(tmp_path: Path)
             source_sha256s=(source.source_sha256,),
             branch_artifact_sha256s=(),
             consumer_id="stage-d-prime:stock:step:1",
+        ).receipt
+        == authorization.receipt
+    )
+    with pytest.raises(LedgerError, match="different authorization"):
+        writer.authorize_stage_d_training_batch(
+            arm="stock",
+            training_batch_identity="8" * 64,
+            sealed_batch_sha256=sealed_batch_sha256,
+            objective_sha256="9" * 64,
+            objective_authorization_sha256=objective_authorization_sha256,
+            collection_plan_sha256=collection_plan_sha256,
+            collection_receipt_sha256=collection_receipt_sha256,
+            source_sha256s=(source.source_sha256,),
+            branch_artifact_sha256s=(),
+            consumer_id="different-consumer",
         )
     seal = writer.seal()
     assert (
@@ -1296,14 +1566,43 @@ def test_trainer_gate_accepts_only_the_exact_ledger_authorized_batch(
         )
 
 
+@pytest.mark.parametrize("crash_after", [None, "stock", "branch-global", "local"])
 def test_campaign_transaction_reconstructs_after_single_terminal_seal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    crash_after: str | None,
 ) -> None:
+    arms: tuple[ArmName, ...] = ("stock", "branch-global", "local")
+    trainer_tomls = {arm: f"# {arm}\n".encode() for arm in arms}
+    bindings: dict[ArmName, bytes] = {}
+    objective_hashes: list[tuple[ArmName, str]] = []
+    for arm in arms:
+        payload = fixture_objective_binding(arm).to_payload()
+        payload["evidence_class"] = "live"
+        binding = ObjectiveBinding.from_bytes(canonical_json(payload))
+        bindings[arm] = canonical_json(binding.to_payload())
+        objective_hashes.append((arm, binding.objective_sha256))
+    authorization = ObjectiveAuthorization(
+        "live",
+        tuple(sorted(objective_hashes)),
+    ).to_bytes()
+    collection_plan = _collection_plan(2)
+    protocol = _campaign_protocol(
+        plan=collection_plan,
+        bindings=bindings,
+        trainer_tomls=trainer_tomls,
+        authorization=authorization,
+    )
     root = tmp_path / "ledger"
     writer = StageDReceiptLedger.create(
         root,
-        binding=_binding(),
+        binding=_binding(
+            protocol_manifest_sha256=protocol.manifest_sha256,
+            preregistration_sha256=protocol.preregistration_sha256,
+            source_sha256=protocol.source_sha256,
+            runtime_sha256=protocol.runtime_sha256,
+            config_sha256=protocol.genesis_config_sha256,
+        ),
         master_seed=MASTER_SEED,
     )
     selected, spec = _produce_into(
@@ -1355,23 +1654,13 @@ def test_campaign_transaction_reconstructs_after_single_terminal_seal(
     branch_store.commit(artifact, artifact_receipt)
     assert len(branch_store.completed_paths()) == 1
 
-    bindings: dict[ArmName, bytes] = {}
-    objective_hashes: list[tuple[ArmName, str]] = []
-    arms: tuple[ArmName, ...] = ("stock", "branch-global", "local")
-    for arm in arms:
-        payload = fixture_objective_binding(arm).to_payload()
-        payload["evidence_class"] = "live"
-        binding = ObjectiveBinding.from_bytes(canonical_json(payload))
-        bindings[arm] = canonical_json(binding.to_payload())
-        objective_hashes.append((arm, binding.objective_sha256))
-    authorization = ObjectiveAuthorization(
-        "live",
-        tuple(sorted(objective_hashes)),
-    ).to_bytes()
-    collection_plan, collection_receipt = _collection_evidence((selected, control))
-    campaign = compile_authorize_seal_campaign(
+    observed_plan, collection_receipt = _collection_evidence((selected, control))
+    assert observed_plan == collection_plan
+    compile_kwargs = dict(
         ledger=writer,
         ledger_root=root,
+        protocol_manifest_bytes=protocol.to_bytes(),
+        preregistered_protocol_manifest_sha256=protocol.manifest_sha256,
         source_rollout_bytes=(selected.to_bytes(), control.to_bytes()),
         collection_plan=collection_plan,
         collection_receipt_bytes=collection_receipt,
@@ -1381,12 +1670,33 @@ def test_campaign_transaction_reconstructs_after_single_terminal_seal(
         render_prompt=lambda _request: (10, 11),
         master_seed=MASTER_SEED,
         objective_binding_bytes=bindings,
+        trainer_toml_bytes=trainer_tomls,
         objective_authorization_bytes=authorization,
         preregistered_objective_authorization_sha256=_sha256(authorization),
         trainer_step=1,
         seq_len=64,
         allow_test_fixture_collection=True,
     )
+    triggered = False
+
+    def crash_hook(arm: str) -> None:
+        nonlocal triggered
+        if arm == crash_after and not triggered:
+            triggered = True
+            raise RuntimeError(f"injected crash after {arm}")
+
+    try:
+        campaign = compile_authorize_seal_campaign(
+            **compile_kwargs,
+            after_arm_authorized=crash_hook if crash_after is not None else None,
+        )
+    except RuntimeError as error:
+        assert str(error) == f"injected crash after {crash_after}"
+        writer.close()
+        writer = StageDReceiptLedger(root, master_seed=MASTER_SEED)
+        compile_kwargs["ledger"] = writer
+        campaign = compile_authorize_seal_campaign(**compile_kwargs)
+    assert triggered is (crash_after is not None)
     assert tuple(arm for arm, _ in campaign.batch_authorization_receipts) == (
         "branch-global",
         "local",
@@ -1397,12 +1707,28 @@ def test_campaign_transaction_reconstructs_after_single_terminal_seal(
     )
     assert campaign.compilation.local.branch_artifact_sha256s == (_sha256(artifact_bytes),)
     assert campaign.ledger_seal == type(campaign.ledger_seal).from_bytes(campaign.ledger_seal_bytes)
+    recovered_campaign = recover_sealed_campaign(
+        ledger_root=root,
+        expected_ledger_seal_bytes=campaign.ledger_seal_bytes,
+        protocol_manifest_bytes=protocol.to_bytes(),
+        preregistered_protocol_manifest_sha256=protocol.manifest_sha256,
+        source_rollout_bytes=(selected.to_bytes(), control.to_bytes()),
+        collection_plan=collection_plan,
+        collection_receipt_bytes=collection_receipt,
+        branch_artifact_bytes=(artifact_bytes,),
+        encode_action=lambda _request, _message: (20, 2),
+        render_prompt=lambda _request: (10, 11),
+        master_seed=MASTER_SEED,
+        objective_binding_bytes=bindings,
+        trainer_toml_bytes=trainer_tomls,
+        objective_authorization_bytes=authorization,
+        allow_test_fixture_collection=True,
+    )
+    assert recovered_campaign == campaign
     monkeypatch.setattr(
         campaign_store_module,
         "materialize_prime_rollout_bytes",
-        lambda batch: canonical_json(
-            {"arm": batch.arm, "batch_identity": batch.batch_identity}
-        ),
+        lambda batch: canonical_json({"arm": batch.arm, "batch_identity": batch.batch_identity}),
     )
     bundle = StageDCampaignStore(tmp_path / "bundle").persist(
         campaign=campaign,
@@ -1412,22 +1738,423 @@ def test_campaign_transaction_reconstructs_after_single_terminal_seal(
         source_rollout_bytes=(selected.to_bytes(), control.to_bytes()),
         branch_artifact_bytes=(artifact_bytes,),
         objective_binding_bytes=bindings,
-        trainer_toml_bytes={arm: f"# {arm}\n".encode() for arm in arms},
-        frozen_inputs={"preregistration.json": b"{}"},
+        trainer_toml_bytes=trainer_tomls,
+        evaluation_plan_bytes=EVALUATION_PLAN_BYTES,
+        decision_rule_bytes=b"decision rule",
+        reload_probe_bytes=b"reload probe",
+        frozen_inputs=_frozen_protocol_inputs(),
     )
     assert verify_campaign_bundle(bundle.root) == bundle
+    if crash_after is None:
+        crash_root = tmp_path / "handoff-crash"
+        StageDHandoffCoordinator.create(
+            crash_root,
+            preregistration_sha256=protocol.preregistration_sha256,
+            protocol_manifest_sha256=protocol.manifest_sha256,
+            handoff_policy_sha256=_sha256(b"bounded handoff policy"),
+        )
+        crashed = [False]
+
+        def crash_handoff(stage: str, _path: Path) -> None:
+            if stage == "after-evaluation-ledger-pending-fsync" and not crashed[0]:
+                crashed[0] = True
+                raise RuntimeError("injected handoff adoption crash")
+
+        with pytest.raises(RuntimeError, match="handoff adoption crash"):
+            StageDHandoffCoordinator(
+                crash_root,
+                fault_hook=crash_handoff,
+            ).adopt_campaign(bundle.root)
+        assert crashed[0]
+        StageDHandoffCoordinator(crash_root).adopt_campaign(bundle.root)
+        linked_root = tmp_path / "handoff-linked-crash"
+        StageDHandoffCoordinator.create(
+            linked_root,
+            preregistration_sha256=protocol.preregistration_sha256,
+            protocol_manifest_sha256=protocol.manifest_sha256,
+            handoff_policy_sha256=_sha256(b"bounded handoff policy"),
+        )
+        linked = [False]
+
+        def crash_after_record_link(stage: str, path: Path) -> None:
+            if (
+                stage == "after-evaluation-ledger-link"
+                and path.parent.name == "records"
+                and path.name == "00000001.json"
+                and not linked[0]
+            ):
+                linked[0] = True
+                raise RuntimeError("injected linked handoff record crash")
+
+        with pytest.raises(RuntimeError, match="linked handoff record crash"):
+            StageDHandoffCoordinator(
+                linked_root,
+                fault_hook=crash_after_record_link,
+            ).adopt_campaign(bundle.root)
+        assert linked[0]
+        linked_handoff = StageDHandoffCoordinator(linked_root)
+        linked_record = linked_handoff.adopt_campaign(bundle.root)
+        linked_event = linked_handoff.inspect().event("campaign_adopted")
+        assert linked_event is not None
+        assert linked_record == linked_event[1]
+    handoff = StageDHandoffCoordinator.create(
+        tmp_path / "handoff",
+        preregistration_sha256=protocol.preregistration_sha256,
+        protocol_manifest_sha256=protocol.manifest_sha256,
+        handoff_policy_sha256=_sha256(b"bounded handoff policy"),
+    )
+    with pytest.raises(RuntimeError, match="out of order"):
+        handoff.commit_report(
+            report_bytes=b"premature report",
+            decision_evidence_bytes=b"premature decision",
+            billing_evidence_bytes=b"premature billing",
+        )
+    if crash_after is None:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            campaign_adoptions = tuple(
+                pool.map(lambda _: handoff.adopt_campaign(bundle.root), range(2))
+            )
+        assert len(set(campaign_adoptions)) == 1
+        campaign_adoption = campaign_adoptions[0]
+        assert handoff.inspect().record_count == 2
+    else:
+        campaign_adoption = handoff.adopt_campaign(bundle.root)
+    assert handoff.adopt_campaign(bundle.root) == campaign_adoption
+    assert handoff.inspect().campaign_bundle_manifest_sha256 == bundle.manifest_sha256
+    trainer_ledger = StageDTrainerRunLedger.create(
+        tmp_path / "trainer-ledger",
+        campaign_manifest_sha256=bundle.manifest_sha256,
+        protocol_manifest_sha256=protocol.manifest_sha256,
+        shared_initialization_manifest_sha256=_sha256(b"shared initialization"),
+        expected_pre_model_sha256="d" * 64,
+        expected_base_model_manifest_sha256="e" * 64,
+        reload_probe_sha256="f" * 64,
+        trainer_step=1,
+        batch_identities={
+            "stock": "1" * 64,
+            "branch-global": "2" * 64,
+            "local": "3" * 64,
+        },
+        trainer_config_sha256s={
+            "stock": "4" * 64,
+            "branch-global": "5" * 64,
+            "local": "6" * 64,
+        },
+        process_command_sha256s={
+            "stock": "a" * 64,
+            "branch-global": "b" * 64,
+            "local": "c" * 64,
+        },
+        process_environment_sha256s={
+            "stock": "7" * 64,
+            "branch-global": "8" * 64,
+            "local": "9" * 64,
+        },
+    )
+    post_by_arm = {"stock": "7" * 64, "branch-global": "8" * 64, "local": "9" * 64}
+    monkeypatch.setattr(
+        "redco.analysis.stage_d_checkpoint_evidence.adapter_file_state_sha256",
+        lambda path, **_kwargs: post_by_arm[path.parent.name.removeprefix("checkpoint-")],
+    )
+    for arm in arms:
+        launch_id = f"{arm}-handoff"
+        trainer_ledger.claim_launch(arm=arm, launch_id=launch_id)
+        _mark_process_started(trainer_ledger, arm=arm, launch_id=launch_id)
+        trainer_ledger.mark_initialization_verified(
+            arm=arm,
+            launch_id=launch_id,
+            observed_pre_model_sha256="d" * 64,
+        )
+        trainer_ledger.mark_batch_verified(
+            arm=arm,
+            launch_id=launch_id,
+            batch_identity={"stock": "1" * 64, "branch-global": "2" * 64, "local": "3" * 64}[arm],
+        )
+        trainer_ledger.mark_optimizer_started(
+            arm=arm,
+            launch_id=launch_id,
+            trainer_step=1,
+        )
+        post_model = post_by_arm[arm]
+        trainer_ledger.mark_optimizer_completed(
+            arm=arm,
+            launch_id=launch_id,
+            trainer_step=1,
+            post_model_sha256=post_model,
+        )
+        checkpoint = _checkpoint_evidence(
+            arm,
+            tmp_path,
+            post_model,
+            launch_id=launch_id,
+        )
+        trainer_ledger.commit_checkpoint(
+            arm=arm,
+            launch_id=launch_id,
+            checkpoint_root=checkpoint[0],
+            checkpoint_manifest_bytes=checkpoint[2],
+            metrics_bytes=checkpoint[3],
+            reload_evidence_bytes=checkpoint[4],
+            reload_output_bytes=checkpoint[5],
+            reload_process_result_bytes=checkpoint[6],
+            trainer_step=1,
+        )
+    training_adoption = handoff.adopt_training(trainer_ledger)
+    assert handoff.adopt_training(trainer_ledger) == training_adoption
+    training_completion = StageDTrainingCompletion.build(trainer_ledger)
+    checkpoint_by_arm = {item.arm: item for item in training_completion.arms}
+    runtime_bundle = _zip_bytes(
+        (
+            ("client.py", b"client source"),
+            ("scorer.py", b"scorer source"),
+            ("serializer.py", b"serializer source"),
+            ("server.py", b"server source"),
+            ("task_runtime.py", b"task runtime source"),
+        )
+    )
+    programs = tuple(
+        EvaluationProgramBinding(
+            arm=arm,
+            role=role,
+            absolute_executable="/opt/redco/.venv/bin/python",
+            executable_sha256="a" * 64,
+            argv=(
+                "/opt/redco/.venv/bin/python",
+                f"{role}.py",
+                arm,
+                *([f"/opt/redco/checkpoints/{arm}"] if role == "server" else []),
+            ),
+            working_directory="/opt/redco",
+            checkpoint_root=f"/opt/redco/checkpoints/{arm}",
+            environment=(("PYTHONHASHSEED", "0"),),
+            source_sha256s=((f"{role}.py", _sha256(f"{role} source".encode())),),
+            checkpoint_manifest_sha256=checkpoint_by_arm[arm].checkpoint_manifest_sha256,
+            post_model_sha256=checkpoint_by_arm[arm].post_model_sha256,
+            reload_evidence_sha256=checkpoint_by_arm[arm].reload_evidence_sha256,
+            endpoint=f"http://127.0.0.1:{8100 + arm_index}",
+            gpu_assignment=(arm_index,),
+            cache_namespace=f"heldout-{arm}",
+        )
+        for arm_index, arm in enumerate(arms)
+        for role in ("server", "client")
+    )
+    execution_manifest = StageDEvaluationExecutionManifest(
+        evaluation_ledger_id="0" * 64,
+        protocol_manifest_sha256=protocol.manifest_sha256,
+        trainer_ledger_head_sha256=training_completion.trainer_ledger_head_sha256,
+        trainer_record_count=training_completion.trainer_record_count,
+        heldout_eval_config_sha256=protocol.heldout_eval_config_sha256,
+        evaluation_plan_sha256=protocol.evaluation_plan_sha256,
+        decision_rule_sha256=protocol.decision_rule_sha256,
+        runtime_entrypoints=(
+            EvaluationRuntimeEntrypoint(
+                "task_runner",
+                "task_runtime.py",
+                "task_runtime",
+                "run_task",
+                "redco-stage-d-worker-ipc-v1",
+                _sha256(b"task runtime source"),
+            ),
+            EvaluationRuntimeEntrypoint(
+                "scorer",
+                "scorer.py",
+                "scorer",
+                "score",
+                "redco-stage-d-scorer-v1",
+                _sha256(b"scorer source"),
+            ),
+            EvaluationRuntimeEntrypoint(
+                "request_serializer",
+                "serializer.py",
+                "serializer",
+                "serialize",
+                "redco-stage-d-request-serializer-v1",
+                _sha256(b"serializer source"),
+            ),
+        ),
+        runtime_worker_image="python@sha256:" + "f" * 64,
+        runtime_bundle_path=str((handoff.evidence.root / _sha256(runtime_bundle)).resolve()),
+        runtime_bundle_sha256=_sha256(runtime_bundle),
+        container_runtime_executable="/usr/bin/docker",
+        container_runtime_executable_sha256=_sha256(b"docker executable"),
+        supervisor_limits=EvaluationSupervisorLimits(
+            "/opt/redco/evaluation-control",
+            "/opt/redco/evaluation-logs",
+            "/sys/fs/cgroup",
+            7200,
+            30,
+            30,
+            5,
+            50,
+            1048576,
+        ),
+        max_server_launches_per_arm=2,
+        max_client_launches_per_arm=2,
+        server_replacement_policy="before-first-dispatch-only-v1",
+        programs=programs,
+        schedule=tuple(
+            EvaluationScheduleUnit(index, arm, 0, "heldout-1", 9101)
+            for index, arm in enumerate(arms)
+        ),
+    )
+    authorized_evaluation = handoff.authorize_evaluation(
+        execution_manifest_bytes=execution_manifest.to_bytes(),
+        runtime_bundle_bytes=runtime_bundle,
+    )
+    evaluation_authorization = authorized_evaluation.authorization
+    authorization_record = authorized_evaluation.authorization_record_sha256
+    assert (
+        handoff.authorize_evaluation(
+            execution_manifest_bytes=execution_manifest.to_bytes(),
+            runtime_bundle_bytes=runtime_bundle,
+        ).authorization_record_sha256
+        == authorization_record
+    )
+    evaluation_ledger = handoff.materialize_evaluation_ledger(tmp_path / "evaluations")
+    monkeypatch.setattr(
+        StageDEvaluationLedger,
+        "_verify_process_receipt",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        ActuatedProcessReceipt,
+        "is_same_live_process",
+        lambda _self: True,
+    )
+    monkeypatch.setattr(
+        ActuatedProcessReceipt,
+        "is_same_live_tree",
+        lambda _self: True,
+    )
+    monkeypatch.setattr(
+        TrainerProcessStartReceipt,
+        "is_same_live_process",
+        lambda _self: True,
+    )
+    for arm in arms:
+        task, session = _start_evaluation_arm(evaluation_ledger, arm)
+        _finish_evaluation_task(evaluation_ledger, task, session)
+        evaluation_ledger.complete_arm(arm)
+    evaluation_ledger.seal()
+    authorization_path = tmp_path / "evaluation-authorization.json"
+    authorization_path.write_bytes(evaluation_authorization.to_bytes())
+    heldout_config_path = tmp_path / "heldout-eval.toml"
+    heldout_config_path.write_bytes(HELDOUT_EVAL_BYTES)
+    evaluation_plan_path = tmp_path / "evaluation-plan.json"
+    evaluation_plan_path.write_bytes(EVALUATION_PLAN_BYTES)
+    completion_path = tmp_path / "evaluation-completion.json"
+    evaluation_completion = commit_sealed_heldout_evaluation(
+        authorization_path=authorization_path,
+        trainer_ledger=trainer_ledger,
+        evaluation_ledger=evaluation_ledger,
+        heldout_eval_config_path=heldout_config_path,
+        evaluation_plan_path=evaluation_plan_path,
+        retained_evidence_root=tmp_path / "retained-evaluation",
+        destination=completion_path,
+    )
+    evaluation_adoption = handoff.adopt_evaluation(
+        evaluation_ledger,
+        evaluation_completion.to_bytes(),
+    )
+    assert (
+        handoff.adopt_evaluation(
+            evaluation_ledger,
+            evaluation_completion.to_bytes(),
+        )
+        == evaluation_adoption
+    )
+    report_record = handoff.commit_report(
+        report_bytes=b"frozen Stage D report",
+        decision_evidence_bytes=b"frozen Stage D decision",
+        billing_evidence_bytes=b"frozen Stage D billing",
+    )
+    assert report_record == handoff.inspect().report_record_sha256
+    seal_bytes = handoff.seal()
+    assert handoff.inspect().sealed
+    assert handoff.seal() == seal_bytes
     assert tuple(arm for arm, _ in bundle.prime_rollout_paths) == arms
-    with pytest.raises(FileExistsError, match="already exists"):
-        StageDCampaignStore(bundle.root)
+    assert (
+        StageDCampaignStore(bundle.root).persist(
+            campaign=campaign,
+            ledger_root=root,
+            collection_plan=collection_plan,
+            collection_receipt_bytes=collection_receipt,
+            source_rollout_bytes=(selected.to_bytes(), control.to_bytes()),
+            branch_artifact_bytes=(artifact_bytes,),
+            objective_binding_bytes=bindings,
+            trainer_toml_bytes=trainer_tomls,
+            evaluation_plan_bytes=EVALUATION_PLAN_BYTES,
+            decision_rule_bytes=b"decision rule",
+            reload_probe_bytes=b"reload probe",
+            frozen_inputs=_frozen_protocol_inputs(),
+        )
+        == bundle
+    )
+
+    def remanifest(root: Path, changed_path: Path) -> None:
+        manifest_path = root / "manifest.json"
+        payload = json.loads(manifest_path.read_bytes())
+        relative = changed_path.relative_to(root).as_posix()
+        for entry in payload["entries"]:
+            if entry["path"] == relative:
+                changed = changed_path.read_bytes()
+                entry["sha256"] = _sha256(changed)
+                entry["size_bytes"] = len(changed)
+                break
+        manifest_path.write_bytes(canonical_json(payload))
+
+    tampered_payload_root = tmp_path / "tampered-payload-bundle"
+    shutil.copytree(bundle.root, tampered_payload_root)
+    payload_path = next((tampered_payload_root / "sources").glob("*.json"))
+    payload = json.loads(payload_path.read_bytes())
+    payload["source"]["reward"] = 0.125
+    payload_path.write_bytes(canonical_json(payload))
+    remanifest(tampered_payload_root, payload_path)
+    with pytest.raises(ValueError, match="semantic digest"):
+        verify_campaign_bundle(tampered_payload_root)
+
+    tampered_receipt_root = tmp_path / "tampered-receipt-bundle"
+    shutil.copytree(bundle.root, tampered_receipt_root)
+    receipt_path = next((tampered_receipt_root / "sources").glob("*.json"))
+    receipt_payload = json.loads(receipt_path.read_bytes())
+    receipt_payload["producer_receipt"]["completion_sequence"] += 1
+    receipt_path.write_bytes(canonical_json(receipt_payload))
+    remanifest(tampered_receipt_root, receipt_path)
+    with pytest.raises(ValueError, match="anchored"):
+        verify_campaign_bundle(tampered_receipt_root)
 
 
 def test_campaign_transaction_rejects_omitted_completed_source(
     tmp_path: Path,
 ) -> None:
+    arms: tuple[ArmName, ...] = ("stock", "branch-global", "local")
+    trainer_tomls = {arm: f"# {arm}\n".encode() for arm in arms}
+    bindings: dict[ArmName, bytes] = {}
+    objective_hashes: list[tuple[ArmName, str]] = []
+    for arm in arms:
+        payload = fixture_objective_binding(arm).to_payload()
+        payload["evidence_class"] = "live"
+        binding = ObjectiveBinding.from_bytes(canonical_json(payload))
+        bindings[arm] = canonical_json(binding.to_payload())
+        objective_hashes.append((arm, binding.objective_sha256))
+    authorization = ObjectiveAuthorization("live", tuple(sorted(objective_hashes))).to_bytes()
+    collection_plan = _collection_plan(2)
+    protocol = _campaign_protocol(
+        plan=collection_plan,
+        bindings=bindings,
+        trainer_tomls=trainer_tomls,
+        authorization=authorization,
+    )
     root = tmp_path / "omitted-source-ledger"
     writer = StageDReceiptLedger.create(
         root,
-        binding=_binding(),
+        binding=_binding(
+            protocol_manifest_sha256=protocol.manifest_sha256,
+            preregistration_sha256=protocol.preregistration_sha256,
+            source_sha256=protocol.source_sha256,
+            runtime_sha256=protocol.runtime_sha256,
+            config_sha256=protocol.genesis_config_sha256,
+        ),
         master_seed=MASTER_SEED,
     )
     selected, spec = _produce_into(
@@ -1457,24 +2184,15 @@ def test_campaign_transaction_rejects_omitted_completed_source(
     assert spec is not None
     _freeze_target_roster(writer, (selected, control, omitted))
     artifact_bytes = _run_live_artifact(writer, spec)
-    bindings: dict[ArmName, bytes] = {}
-    objective_hashes: list[tuple[ArmName, str]] = []
-    for arm in ("stock", "branch-global", "local"):
-        payload = fixture_objective_binding(arm).to_payload()
-        payload["evidence_class"] = "live"
-        binding = ObjectiveBinding.from_bytes(canonical_json(payload))
-        bindings[arm] = canonical_json(binding.to_payload())
-        objective_hashes.append((arm, binding.objective_sha256))
-    authorization = ObjectiveAuthorization(
-        "live",
-        tuple(sorted(objective_hashes)),
-    ).to_bytes()
-    collection_plan, collection_receipt = _collection_evidence((selected, control))
+    observed_plan, collection_receipt = _collection_evidence((selected, control))
+    assert observed_plan == collection_plan
 
     with pytest.raises(ValueError, match="every completed ledger source"):
         compile_authorize_seal_campaign(
             ledger=writer,
             ledger_root=root,
+            protocol_manifest_bytes=protocol.to_bytes(),
+            preregistered_protocol_manifest_sha256=protocol.manifest_sha256,
             source_rollout_bytes=(selected.to_bytes(), control.to_bytes()),
             collection_plan=collection_plan,
             collection_receipt_bytes=collection_receipt,
@@ -1484,6 +2202,7 @@ def test_campaign_transaction_rejects_omitted_completed_source(
             render_prompt=lambda _request: (10, 11),
             master_seed=MASTER_SEED,
             objective_binding_bytes=bindings,
+            trainer_toml_bytes=trainer_tomls,
             objective_authorization_bytes=authorization,
             preregistered_objective_authorization_sha256=_sha256(authorization),
             trainer_step=1,

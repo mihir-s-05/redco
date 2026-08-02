@@ -238,11 +238,15 @@ def _run_group(fixture: _Fixture, *, rewards: tuple[float, ...]) -> BranchGroupA
                 "action_slot": action_slot,
                 "action_seed": action_seed,
                 "action_digest": action.digest,
+                "action_evidence_sha256": _sha256(action.to_bytes()),
                 "behavior_law_sha256": behavior_law_digest(action.key),
                 "selection_policy": "direct_single_sample",
                 "sample_attempts": 1,
                 "rejected_attempts": 0,
                 "inference_call_id": f"synthetic-candidate-{action_slot}",
+                "prompt_tokens": action.prompt_tokens,
+                "completion_tokens": action.completion_tokens,
+                "response_sha256": _sha256(b"synthetic-candidate-response"),
             },
         )
         return CandidateSubmission(action, receipt)

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 
-def test_stage_d_v4_5_preregistration_audit_passes() -> None:
+def test_stage_d_v4_5_preregistration_remains_archived_and_closed() -> None:
     root = Path(__file__).parents[1]
     script = (
         root
@@ -58,8 +59,17 @@ def test_stage_d_v4_5_preregistration_audit_passes() -> None:
         audit_v4_2,
         patch_audit,
     )
-    assert report["passes"], {
-        name: value
+    archived = json.loads(
+        (
+            root
+            / "reports"
+            / "stage-d0-scaffold-support-preregistration-audit-v4-5.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert archived["passes"] is True
+    assert report["passes"] is False
+    assert {
+        name
         for name, value in report["checks"].items()
         if not value
-    }
+    } == {"all_effective_source_hashes_exact"}

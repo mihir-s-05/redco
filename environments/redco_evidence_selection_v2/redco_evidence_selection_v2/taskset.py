@@ -11,6 +11,8 @@ from redco_evidence_selection_v2.scoring import score_evidence_reply
 
 WORKDIR = "/workspace"
 CONTEXT_PATH = f"{WORKDIR}/evidence_context.txt"
+ISOLATED_EXECUTION_USER = "65534:65534"
+ISOLATED_EXECUTION_HOME = "/tmp/redco-agent"
 BASE_POLICY_CHECKPOINT = (
     "Qwen/Qwen3-4B-Instruct-2507@"
     "cdbee75f17c01a7cc42f958dc650907174af0554"
@@ -75,8 +77,11 @@ class EvidenceSelectionTask(vf.Task[EvidenceSelectionData]):
 
     async def setup(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
         del trace
-        await runtime.run(["mkdir", "-p", WORKDIR], {})
-        await runtime.write(CONTEXT_PATH, self.data.paper.encode("utf-8"))
+        if self.data.network_allow == []:
+            await prepare_isolated_workspace(runtime, self.data.paper.encode("utf-8"))
+        else:
+            await runtime.run(["mkdir", "-p", WORKDIR], {})
+            await runtime.write(CONTEXT_PATH, self.data.paper.encode("utf-8"))
 
     def _score(self, trace: vf.Trace) -> dict[str, float]:
         return score_evidence_reply(
@@ -141,6 +146,7 @@ class EvidenceSelectionConfig(vf.TasksetConfig):
     policy_checkpoint_id: str = BASE_POLICY_CHECKPOINT
     scaffold_prompt_path: Path | None = None
     scaffold_prompt_sha256: str | None = None
+    isolated_runtime_image: str | None = None
 
 
 class EvidenceSelectionTaskset(
@@ -219,6 +225,9 @@ class EvidenceSelectionTaskset(
                 split=row["split"],
                 snapshot_sha256=digest,
                 policy_checkpoint_id=self.config.policy_checkpoint_id,
+                image=self.config.isolated_runtime_image,
+                network_allow=([] if self.config.isolated_runtime_image else ["*"]),
+                network_block=[],
             )
             tasks.append(EvidenceSelectionTask(data, self.config.task))
         if not tasks:
@@ -226,3 +235,39 @@ class EvidenceSelectionTaskset(
                 f"snapshot has no examples for split {self.config.split!r}"
             )
         return tasks
+
+
+async def prepare_isolated_workspace(runtime: vf.Runtime, paper: bytes) -> None:
+    """Create one root-owned input plus the only two non-root writable directories."""
+    if type(paper) is not bytes or not paper:
+        raise ValueError("isolated workspace paper must be nonempty immutable bytes")
+    prepared = await runtime.run(
+        [
+            "sh",
+            "-c",
+            (
+                "set -eu; "
+                "install -d -m 0755 /workspace; "
+                "install -d -o 65534 -g 65534 -m 0700 /workspace/.rlm; "
+                "install -d -o 65534 -g 65534 -m 0700 /tmp/redco-agent; "
+                "install -d -o 65534 -g 65534 -m 0700 /tmp/redco-agent/.cache"
+            ),
+        ],
+        {},
+    )
+    if prepared.exit_code != 0:
+        raise RuntimeError(f"isolated workspace setup failed: {prepared.stderr[-1000:]}")
+    await runtime.write(CONTEXT_PATH, paper)
+    frozen = await runtime.run(
+        [
+            "sh",
+            "-c",
+            (
+                "set -eu; chown 0:0 /workspace/evidence_context.txt; "
+                "chmod 0444 /workspace/evidence_context.txt; chmod 0555 /workspace"
+            ),
+        ],
+        {},
+    )
+    if frozen.exit_code != 0:
+        raise RuntimeError(f"isolated workspace freeze failed: {frozen.stderr[-1000:]}")

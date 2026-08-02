@@ -1,0 +1,32 @@
+diff --git a/verifiers/v1/task.py b/verifiers/v1/task.py
+--- a/verifiers/v1/task.py
++++ b/verifiers/v1/task.py
+@@ -241,6 +241,10 @@ class Task(Generic[DataT, ConfigT]):
+     async def setup(self, trace: Trace, runtime: Runtime) -> None:
+         return None
+
++    async def pre_generation(self, trace: Trace, runtime: Runtime) -> None:
++        """Validate the sealed execution boundary before the first model call."""
++        del trace, runtime
++
+     async def finalize(self, trace: Trace, runtime: Runtime) -> None:
+         return None
+
+diff --git a/verifiers/v1/rollout.py b/verifiers/v1/rollout.py
+--- a/verifiers/v1/rollout.py
++++ b/verifiers/v1/rollout.py
+@@ -277,6 +277,14 @@ class Rollout:
+             # Setup and service provisioning are complete. Apply the runtime's
+             # execution policy while preserving the framework routes the agent uses.
+             await runtime.prepare_execution([self._endpoint, *self._urls.values()])
++            async with (
++                boundary(TaskError, "task pre-generation validation"),
++                asyncio.timeout_at(setup_deadline),
++            ):
++                await invoke(
++                    self.task.pre_generation,
++                    {"trace": self.trace, "runtime": runtime},
++                )
+         except Exception as e:
+             self.fail(e)
+             return False

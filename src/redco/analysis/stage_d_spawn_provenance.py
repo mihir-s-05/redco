@@ -290,6 +290,20 @@ class ScheduledSeed:
     coupling_mode: CouplingMode
     address: PolicyEventAddress
 
+    @property
+    def cache_salt(self) -> str:
+        """Return the exact cache namespace paired with this structural seed."""
+        return "redco-stage-d-" + hashlib.sha256(
+            canonical_json(
+                {
+                    "domain": "redco-stage-d-replay-cache-salt-v1",
+                    "address": self.address.as_payload(),
+                    "seed": self.seed,
+                    "coupling_mode": self.coupling_mode.value,
+                }
+            )
+        ).hexdigest()[:32]
+
 
 @dataclass(frozen=True, slots=True)
 class EventSeedScheduler:

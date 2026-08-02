@@ -92,9 +92,15 @@ def test_renderer_and_verifier_patch_stacks_apply_in_deployment_order(
         tmp_path,
         repo=ROOT / "external" / "prime-rl" / "deps" / "renderers",
         commit="bdb96b0c84a307e2b71c6a366c9d718c3ac7fe78",
-        patch_names=("renderers-stage-d-prepared-observer-v1.patch",),
+        patch_names=(
+            "renderers-stage-d-prepared-observer-v1.patch",
+            "renderers-stage-d-replay-directives-v1.patch",
+        ),
     )
     assert "PreparedGenerateObserver" in (
+        renderer / "renderers/client.py"
+    ).read_text()
+    assert "PreparedGenerateReturn" in (
         renderer / "renderers/client.py"
     ).read_text()
 
@@ -105,10 +111,28 @@ def test_renderer_and_verifier_patch_stacks_apply_in_deployment_order(
         patch_names=(
             "verifiers-stage-d-provenance-baseline-v1.patch",
             "verifiers-stage-d-prepared-observer-v1.patch",
+            "verifiers-stage-d-replay-directives-v1.patch",
+            "verifiers-stage-d-sampling-director-v1.patch",
+            "verifiers-stage-d-isolated-docker-v1.patch",
+            "verifiers-stage-d-pre-generation-preflight-v1.patch",
+            "verifiers-stage-d-patched-rlm-archive-v1.patch",
+            "verifiers-stage-d-frozen-rlm-install-v1.patch",
         ),
     )
     train = (verifier / "verifiers/v1/clients/train.py").read_text()
     assert "prompt_token_ids: Sequence[int]" in train
+    assert (verifier / "verifiers/v1/sampling_director.py").is_file()
+    docker_runtime = (verifier / "verifiers/v1/runtimes/docker/__init__.py").read_text()
+    assert "execution_user: str | None" in docker_runtime
+    assert "self._execution_started = True" in docker_runtime
+    harness = (verifier / "verifiers/v1/harnesses/rlm/harness.py").read_text()
+    assert "checkout_archive_sha256" in harness
+    assert "RLM frozen install asset differs from its SHA-256" in harness
+    assert "--frozen --offline --no-dev" in harness
+    assert "install-sentinel" in harness
+    rollout = (verifier / "verifiers/v1/rollout.py").read_text()
+    assert "await invoke(" in rollout
+    assert "self.task.pre_generation" in rollout
     assert "add_generation_prompt=True" in train
     pytest.importorskip("anthropic", reason="full Verifiers runtime is validated in pinned WSL")
     environment = os.environ.copy()

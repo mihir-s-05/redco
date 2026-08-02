@@ -131,6 +131,71 @@ class StageDCollectionPlan:
             }
         )
 
+    @classmethod
+    def from_bytes(cls, value: bytes) -> StageDCollectionPlan:
+        if type(value) is not bytes:
+            raise ValueError("source collection plan must be immutable bytes")
+        try:
+            payload = json.loads(value)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError("source collection plan is not JSON") from error
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != {"schema_version", "domain", "slots"}
+            or payload.get("schema_version") != 1
+            or payload.get("domain") != "redco-stage-d-source-collection-plan-v1"
+            or canonical_json(payload) != value
+            or not isinstance(payload.get("slots"), list)
+        ):
+            raise ValueError("source collection plan fields differ")
+        slots: list[SourceCollectionSlot] = []
+        expected = {
+            "slot_id",
+            "scientific_group_id",
+            "example_id",
+            "rollout_slot",
+            "seed",
+            "cache_salt",
+        }
+        for item in payload["slots"]:
+            if not isinstance(item, dict) or set(item) != expected:
+                raise ValueError("source collection slot fields differ")
+            if (
+                not isinstance(item["slot_id"], str)
+                or not item["slot_id"]
+                or not isinstance(item["scientific_group_id"], str)
+                or not item["scientific_group_id"]
+                or not isinstance(item["example_id"], str)
+                or not item["example_id"]
+                or type(item["rollout_slot"]) is not int
+                or item["rollout_slot"] < 0
+                or type(item["seed"]) is not int
+                or item["seed"] < 0
+                or not isinstance(item["cache_salt"], str)
+                or not item["cache_salt"]
+                or item["slot_id"]
+                != _source_slot_id(
+                    item["scientific_group_id"],
+                    item["example_id"],
+                    item["rollout_slot"],
+                )
+            ):
+                raise ValueError("source collection slot is invalid")
+            slots.append(SourceCollectionSlot(**item))
+        if not slots or len({slot.slot_id for slot in slots}) != len(slots):
+            raise ValueError("source collection plan must be nonempty and unique")
+        group_counts: dict[str, int] = {}
+        for slot in slots:
+            group_counts[slot.scientific_group_id] = (
+                group_counts.get(slot.scientific_group_id, 0) + 1
+            )
+        if any(count < 2 for count in group_counts.values()):
+            raise ValueError("every source collection group requires at least two slots")
+        result = cls(tuple(slots), _sha256(value))
+        if result.to_bytes() != value:
+            raise ValueError("source collection plan changed on reconstruction")
+        return result
+
 
 def verify_direct_collection_config(
     config: Any,

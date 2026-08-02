@@ -14,6 +14,7 @@ from redco.analysis.stage_d_live_update import (  # noqa: E402
     LiveUpdateBinding,
     LiveUpdateTrainerGate,
     TrainerPoststep,
+    _model_sha256,
     adapter_file_state_sha256,
 )
 
@@ -36,6 +37,21 @@ class _RunManager:
             "layer.lora_A": self.model.layer.lora_A,
             "layer.lora_B": self.model.layer.lora_B,
         }
+
+
+class _FakeDTensor:
+    def __init__(self, full: torch.Tensor) -> None:
+        self._full = full
+        self.shape = (1,)
+
+    def detach(self) -> _FakeDTensor:
+        return self
+
+    def full_tensor(self) -> torch.Tensor:
+        return self._full
+
+    def to_local(self) -> torch.Tensor:
+        raise AssertionError("distributed semantic hashing must not hash a local shard")
 
 
 def _binding() -> LiveUpdateBinding:
@@ -102,3 +118,22 @@ def test_real_torch_gate_hashes_one_adamw_step_and_saved_adapter(
         )
         == poststep.post_model_sha256
     )
+
+
+def test_distributed_tensor_hash_uses_reconstructed_full_tensor() -> None:
+    full = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    expected = _model_sha256((("base_model.model.layer.lora_A", full),), "7" * 64)
+    observed = _model_sha256(
+        (("base_model.model.layer.lora_A", _FakeDTensor(full)),),
+        "7" * 64,
+    )
+    assert observed == expected
+
+
+@pytest.mark.parametrize("nonfinite", [float("nan"), float("inf"), float("-inf")])
+def test_model_state_hash_rejects_nonfinite_tensors(nonfinite: float) -> None:
+    with pytest.raises(ValueError, match="non-finite"):
+        _model_sha256(
+            (("base_model.model.layer.lora_A", torch.tensor([nonfinite])),),
+            "7" * 64,
+        )

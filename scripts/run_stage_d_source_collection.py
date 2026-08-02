@@ -22,6 +22,7 @@ from redco.analysis.stage_d_collection import (
     verify_collection_outcomes,
     verify_direct_collection_config,
 )
+from redco.analysis.stage_d_protocol_manifest import StageDProtocolManifest
 from redco.analysis.stage_d_receipt_ledger import StageDReceiptLedger
 from redco.analysis.stage_d_source_artifacts import StageDSourceArtifactStore
 from redco.analysis.stage_d_source_contracts import SourceRollout
@@ -67,6 +68,8 @@ def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--config-sha256", required=True)
+    parser.add_argument("--protocol-manifest", type=Path, required=True)
+    parser.add_argument("--protocol-manifest-sha256", required=True)
     parser.add_argument("--genesis-config-sha256", required=True)
     parser.add_argument("--preregistration-sha256", required=True)
     parser.add_argument("--source-sha256", required=True)
@@ -84,10 +87,15 @@ def _require_sha256(value: str, name: str) -> str:
     return value
 
 
-def _authenticated_config(args: argparse.Namespace) -> EvalConfig:
+def _authenticated_config(
+    args: argparse.Namespace,
+    protocol: StageDProtocolManifest,
+) -> EvalConfig:
     config_bytes = args.config.read_bytes()
     if _sha256(config_bytes) != _require_sha256(args.config_sha256, "config SHA-256"):
         raise ValueError("config bytes differ from the externally frozen hash")
+    if args.config_sha256 != protocol.source_eval_config_sha256:
+        raise ValueError("source config differs from the protocol manifest")
     try:
         raw = tomllib.loads(config_bytes.decode("utf-8"))
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
@@ -112,7 +120,49 @@ def _authenticated_config(args: argparse.Namespace) -> EvalConfig:
     }
     if mismatches:
         raise ValueError(f"environment trust roots differ from external hashes: {mismatches}")
-    return config
+    if (
+        _sha256(str(config.env.master_seed).encode("utf-8"))
+        != protocol.master_seed_sha256
+        or args.genesis_config_sha256 != protocol.genesis_config_sha256
+        or args.plan_sha256 != protocol.collection_plan_sha256
+        or args.preregistration_sha256 != protocol.preregistration_sha256
+        or args.source_sha256 != protocol.source_sha256
+        or args.runtime_sha256 != protocol.runtime_sha256
+    ):
+        raise ValueError("source runtime inputs differ from the protocol manifest")
+    identity = protocol.policy_identity
+    if config.model != identity.checkpoint_id:
+        raise ValueError("source model and environment checkpoint must both match protocol")
+    config_identity = (
+        config.env.checkpoint_id,
+        config.env.base_model_manifest_sha256,
+        config.env.adapter_manifest_sha256,
+        config.env.tokenizer_manifest_sha256,
+        config.env.renderer_manifest_sha256,
+        config.env.sampler_conformance_manifest_sha256,
+        config.env.resolved_agent_sampling_law_sha256,
+        config.env.resolved_train_client_sha256,
+    )
+    protocol_identity = (
+        identity.checkpoint_id,
+        identity.base_model_manifest_sha256,
+        identity.adapter_manifest_sha256,
+        identity.tokenizer_manifest_sha256,
+        identity.renderer_manifest_sha256,
+        identity.sampler_conformance_manifest_sha256,
+        identity.resolved_agent_sampling_law_sha256,
+        identity.resolved_train_client_sha256,
+    )
+    if config_identity != protocol_identity:
+        raise ValueError("source policy identity differs from the protocol manifest")
+    return config.model_copy(
+        update={
+            "env": config.env.model_copy(
+                update={"protocol_manifest_sha256": protocol.manifest_sha256}
+            )
+        },
+        deep=True,
+    )
 
 
 def _materialize_authenticated_plan(
@@ -254,7 +304,14 @@ async def _run(args: argparse.Namespace) -> None:
     _require_sha256(args.plan_sha256, "plan SHA-256")
     if args.plan_output.resolve() == args.receipt_output.resolve():
         raise ValueError("collection plan and receipt paths must differ")
-    config = _authenticated_config(args)
+    protocol = StageDProtocolManifest.verify_file(
+        args.protocol_manifest,
+        _require_sha256(
+            args.protocol_manifest_sha256,
+            "protocol manifest SHA-256",
+        ),
+    )
+    config = _authenticated_config(args, protocol)
     _verify_unforced_root_tool_choice(config)
     _env, authenticated_plan = _materialize_authenticated_plan(
         config,

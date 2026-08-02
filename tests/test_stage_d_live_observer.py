@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from redco.analysis.stage_d_live_observer import (
+    StageDForwardDirectiveObserver,
     StageDObserverIdentity,
     StageDObserverProtocol,
     StageDPreparedCallObserver,
@@ -61,6 +62,7 @@ def _ledger(root: Path) -> StageDReceiptLedger:
             source_sha256="2" * 64,
             runtime_sha256="3" * 64,
             config_sha256="4" * 64,
+            protocol_manifest_sha256="5" * 64,
             master_seed_sha256=_sha256(MASTER_SEED.encode()),
         ),
         master_seed=MASTER_SEED,
@@ -102,6 +104,12 @@ def _observer(
             continuation_replicates=1,
             failure_reward=-1.0,
             root_policy_turn_count=2,
+        ),
+        runtime_snapshot=canonical_json(
+            {
+                "schema_version": 1,
+                "domain": "redco-stage-d-test-runtime-snapshot-v1",
+            }
         ),
         encode_action=lambda _request, _message, _prompt_token_ids: (20, 2),
     )
@@ -273,7 +281,7 @@ def _response(*, finish_reason: str = "stop") -> SimpleNamespace:
             completion_ids=[20, 2],
             completion_logprobs=[-0.2, -0.1],
         ),
-        raw={"choices": [{"message": message}]},
+        raw={"id": "fixture-request", "choices": [{"message": message}]},
         usage=SimpleNamespace(input_tokens=2, completion_tokens=2),
         finish_reason=finish_reason,
     )
@@ -369,7 +377,7 @@ def test_actual_interception_train_renderer_path_observes_bytes_once(
     session = RolloutSession(
         ModelContext("model@commit", client, sampling),
         trace,
-        observer=observer,
+        observer=StageDForwardDirectiveObserver(observer),
     )
     server = InterceptionServer()
     server.sessions["secret"] = session

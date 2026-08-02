@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -109,6 +110,7 @@ def _config_payload(tmp_path: Path) -> dict[str, object]:
         "source_sha256": "2" * 64,
         "runtime_sha256": "3" * 64,
         "config_sha256": "4" * 64,
+        "protocol_manifest_sha256": "7" * 64,
         "checkpoint_id": "fixture-model",
         "base_model_manifest_path": str(paths["base_model"]),
         "base_model_manifest_sha256": _sha256(values["base_model"]),
@@ -153,6 +155,59 @@ def test_pinned_loader_resolves_exact_source_env_profile(tmp_path: Path) -> None
     config = resolve_env_config(payload)
     assert type(config) is StageDSourceEnvConfig
     assert type(load_environment(config)) is StageDSourceEnv
+
+
+def test_isolated_source_profile_binds_closed_docker_and_task_bytes(
+    tmp_path: Path,
+) -> None:
+    image = "python@sha256:" + "a" * 64
+    manifest = tmp_path / "workspace-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "entries": [
+                    {
+                        "path": "/workspace/evidence_context.txt",
+                        "mode": "0444",
+                    }
+                ],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+    payload = _config_payload(tmp_path)
+    taskset = payload["taskset"]
+    agent = payload["agent"]
+    assert isinstance(taskset, dict) and isinstance(agent, dict)
+    taskset["isolated_runtime_image"] = image
+    agent["harness"] = {
+        "id": "rlm",
+        "version": "fixture",
+        "runtime": {
+            "type": "docker",
+            "image": image,
+            "workdir": "/workspace",
+            "allow": [],
+            "block": [],
+            "gpu": None,
+            "execution_user": "65534:65534",
+            "execution_home": "/tmp/redco-agent",
+        },
+    }
+    payload["frozen_workspace_manifest_path"] = str(manifest)
+    payload["frozen_workspace_manifest_sha256"] = _sha256(manifest.read_bytes())
+    config = StageDSourceEnvConfig.model_validate(payload)
+    env = StageDSourceEnv(config)
+    task = env.taskset.load()[0]
+    assert task.data.image == image
+    assert task.data.network_allow == []
+    snapshot = json.loads(env._runtime_snapshot(task, config.agent))
+    assert snapshot["domain"] == "redco-stage-d-pre-action-runtime-snapshot-v1"
+    assert snapshot["network"]["agent_egress"] is False
+    assert snapshot["paper"]["sha256"] == _sha256(task.data.paper.encode())
 
 
 def test_pinned_successful_model_call_dump_matches_source_schema() -> None:
@@ -360,7 +415,9 @@ def test_cancellation_after_observation_invokes_terminal_finalization_guard(
     monkeypatch.setattr(vf.Env, "run_episode", cancelled_super)
 
     async def scenario() -> None:
-        task = asyncio.create_task(env.run_episode(SimpleNamespace(), SimpleNamespace()))
+        source_task = env.taskset.load()[0]
+        ctx = SimpleNamespace(model="fixture", client=SimpleNamespace(), sampling=vf.Sampling())
+        task = asyncio.create_task(env.run_episode(source_task, ctx))
         await entered.wait()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -399,6 +456,12 @@ asyncio.run(main())
         [sys.executable, "-c", code, str(payload_path)],
         check=False,
         capture_output=True,
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join(
+                (str(ENV_ROOT), os.environ.get("PYTHONPATH", ""))
+            ),
+        },
         text=True,
         timeout=30,
     )
