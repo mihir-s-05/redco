@@ -21,6 +21,7 @@ _COMPONENT_PATCHES = {
         "prime-rl-redco-stage-c9-practical-efficiency.patch",
         "prime-rl-stage-d-live-update-gate-v1.patch",
         "prime-rl-stage-d-objective-gate-v1.patch",
+        "prime-rl-strict-tool-env-guard.patch",
     ),
     "renderers": (
         "renderers-stage-d-prepared-observer-v1.patch",
