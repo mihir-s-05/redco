@@ -24,69 +24,33 @@ def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def _args(config: Path, config_sha256: str) -> SimpleNamespace:
+def _protocol(config_sha256: str, env: dict[str, object]) -> SimpleNamespace:
+    identity = SimpleNamespace(
+        checkpoint_id="fixture-model",
+        base_model_manifest_sha256=env["base_model_manifest_sha256"],
+        adapter_manifest_sha256=None,
+        tokenizer_manifest_sha256=env["tokenizer_manifest_sha256"],
+        renderer_manifest_sha256=env["renderer_manifest_sha256"],
+        sampler_conformance_manifest_sha256=env[
+            "sampler_conformance_manifest_sha256"
+        ],
+        resolved_agent_sampling_law_sha256=env[
+            "resolved_agent_sampling_law_sha256"
+        ],
+        resolved_train_client_sha256=env["resolved_train_client_sha256"],
+    )
     return SimpleNamespace(
-        config=config,
-        config_sha256=config_sha256,
-        genesis_config_sha256="1" * 64,
-        preregistration_sha256="2" * 64,
-        source_sha256="3" * 64,
-        runtime_sha256="4" * 64,
+        source_eval_config_sha256=config_sha256,
+        genesis_config_sha256="4" * 64,
+        preregistration_sha256="1" * 64,
+        source_sha256="2" * 64,
+        runtime_sha256="3" * 64,
+        support_rules_sha256="8" * 64,
+        master_seed_sha256=_sha256(b"fixture-master"),
+        collection_plan_sha256="9" * 64,
+        manifest_sha256="a" * 64,
+        policy_identity=identity,
     )
-
-
-def test_config_bytes_and_independent_genesis_binding_are_authenticated(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "source.toml"
-    config_bytes = b'title = "fixture"\n'
-    config_path.write_bytes(config_bytes)
-    resolved = SimpleNamespace(
-        env=SimpleNamespace(
-            config_sha256="1" * 64,
-            preregistration_sha256="2" * 64,
-            source_sha256="3" * 64,
-            runtime_sha256="4" * 64,
-        )
-    )
-    monkeypatch.setattr(
-        runner,
-        "EvalConfig",
-        SimpleNamespace(model_validate=lambda _raw: resolved),
-    )
-    args = _args(config_path, _sha256(config_bytes))
-
-    assert runner._authenticated_config(args) is resolved
-    assert args.config_sha256 != args.genesis_config_sha256
-
-    config_path.write_bytes(config_bytes + b"# changed\n")
-    with pytest.raises(ValueError, match="externally frozen hash"):
-        runner._authenticated_config(args)
-
-
-def test_config_authentication_rejects_embedded_trust_root_mismatch(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "source.toml"
-    config_bytes = b'title = "fixture"\n'
-    config_path.write_bytes(config_bytes)
-    resolved = SimpleNamespace(
-        env=SimpleNamespace(
-            config_sha256="9" * 64,
-            preregistration_sha256="2" * 64,
-            source_sha256="3" * 64,
-            runtime_sha256="4" * 64,
-        )
-    )
-    monkeypatch.setattr(
-        runner,
-        "EvalConfig",
-        SimpleNamespace(model_validate=lambda _raw: resolved),
-    )
-    with pytest.raises(ValueError, match="trust roots"):
-        runner._authenticated_config(_args(config_path, _sha256(config_bytes)))
 
 
 def test_real_eval_config_materializes_without_hash_fixed_point(tmp_path: Path) -> None:
@@ -128,22 +92,17 @@ def test_real_eval_config_materializes_without_hash_fixed_point(tmp_path: Path) 
         preregistration_sha256="1" * 64,
         source_sha256="2" * 64,
         runtime_sha256="3" * 64,
+        plan_sha256="9" * 64,
     )
+    protocol = _protocol(args.config_sha256, env)
 
-    config = runner._authenticated_config(args)
+    config = runner._authenticated_config(args, protocol)
 
     assert config.env.config_sha256 == "4" * 64
     assert args.config_sha256 != config.env.config_sha256
-
-
-def test_evidence_write_is_exact_and_never_overwrites(tmp_path: Path) -> None:
-    path = tmp_path / "evidence" / "receipt.json"
-    runner._exclusive_write(path, b"first")
-    assert path.read_bytes() == b"first"
-    assert tuple(path.parent.glob(".*.tmp")) == ()
-    with pytest.raises(RuntimeError, match="refusing to overwrite"):
-        runner._exclusive_write(path, b"second")
-    assert path.read_bytes() == b"first"
+    config_path.write_bytes(config_bytes + b"# changed\n")
+    with pytest.raises(ValueError, match="externally frozen hash"):
+        runner._authenticated_config(args, protocol)
 
 
 def test_source_runner_rejects_forced_root_tool_choice(

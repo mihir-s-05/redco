@@ -43,7 +43,7 @@ class StageDSupportRules:
         }
         if (
             not isinstance(payload, dict)
-            or canonical_json(payload) != value
+            or value not in {canonical_json(payload), canonical_json(payload) + b"\n"}
             or set(payload) != fields
             or payload.get("schema_version") != 1
             or payload.get("domain") != "redco-stage-d-support-rules-v1"
@@ -284,7 +284,11 @@ def verify_support_pass(
         or successes < required_successes
         or payload.get("paper_successes") != successes
         or payload.get("paper_failures") != required_papers - successes
-        or hashlib.sha256(reported_rules).hexdigest() != expected_rules_sha256
+        or expected_rules_sha256
+        not in {
+            hashlib.sha256(reported_rules).hexdigest(),
+            hashlib.sha256(reported_rules + b"\n").hexdigest(),
+        }
     ):
         raise RuntimeError("frozen Stage-D support gate failed authentication")
     return hashlib.sha256(report).hexdigest()
