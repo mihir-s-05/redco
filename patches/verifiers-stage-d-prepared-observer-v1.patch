@@ -1,12 +1,13 @@
 diff --git a/tests/test_rlm_structure_v2.py b/tests/test_rlm_structure_v2.py
-index 9f3751f6a..c02ae8995 100644
+index 9f3751f..7a6e801 100644
 --- a/tests/test_rlm_structure_v2.py
 +++ b/tests/test_rlm_structure_v2.py
-@@ -1,22 +1,34 @@
+@@ -1,22 +1,35 @@
  from __future__ import annotations
  
 +import asyncio
  import json
++import tomllib
  from types import SimpleNamespace
  from unittest.mock import AsyncMock
  
@@ -39,7 +40,7 @@ index 9f3751f6a..c02ae8995 100644
  
  _GOLDEN_CHILD_LINEAGE = "root/7ef6d951f46aae83454a5964"
  
-@@ -48,9 +60,7 @@ def _sibling_headers(spawn_ordinal: int) -> dict[str, str]:
+@@ -48,9 +61,7 @@ def _sibling_headers(spawn_ordinal: int) -> dict[str, str]:
      headers = _child_headers()
      headers["X-RLM-Spawn-Ordinal"] = str(spawn_ordinal)
      headers["X-RLM-Episode-Spawn-Ordinal"] = str(8 + spawn_ordinal)
@@ -50,7 +51,7 @@ index 9f3751f6a..c02ae8995 100644
      headers["X-RLM-Lineage"] = derive_child_lineage(
          parent_lineage="root",
          depth=1,
-@@ -159,12 +169,8 @@ def test_v2_operation_key_separates_siblings_but_coalesces_exact_retry() -> None
+@@ -159,12 +170,8 @@ def test_v2_operation_key_separates_siblings_but_coalesces_exact_retry() -> None
      first = _rlm_structure(_sibling_headers(2))
      second = _rlm_structure(_sibling_headers(3))
  
@@ -65,7 +66,7 @@ index 9f3751f6a..c02ae8995 100644
      assert request_operation_key(body_digest, None) == body_digest
  
  
-@@ -198,9 +204,7 @@ async def test_handler_replays_delayed_retry_without_coalescing_sibling() -> Non
+@@ -198,9 +205,7 @@ async def test_handler_replays_delayed_retry_without_coalescing_sibling() -> Non
          )
  
      client = SimpleNamespace(get_response=AsyncMock(side_effect=get_response))
@@ -76,7 +77,7 @@ index 9f3751f6a..c02ae8995 100644
      session = RolloutSession(ModelContext("test-model", client), trace)
      server = InterceptionServer()
      server.sessions["secret"] = session
-@@ -234,3 +238,492 @@ async def test_handler_replays_delayed_retry_without_coalescing_sibling() -> Non
+@@ -234,3 +239,565 @@ async def test_handler_replays_delayed_retry_without_coalescing_sibling() -> Non
          _sibling_headers(2)["X-RLM-Lineage"],
          _sibling_headers(3)["X-RLM-Lineage"],
      ]
@@ -439,6 +440,79 @@ index 9f3751f6a..c02ae8995 100644
 +    )
 +
 +
++def test_observed_application_law_completes_real_toml_sampling_shape() -> None:
++    raw = tomllib.loads(
++        """
++        [sampling]
++        temperature = 0.7
++        top_p = 1.0
++        max_tokens = 768
++        seed = 1974715865
++        tool_choice = "auto"
++        parallel_tool_calls = false
++
++        [sampling.extra_body]
++        cache_salt = "stage-d-address"
++        """
++    )
++    sampling = SamplingConfig.model_validate(raw["sampling"])
++    effective = ChatDialect().apply_overrides(
++        {"messages": [{"role": "user", "content": "hello"}]},
++        "test-model",
++        sampling,
++    )
++
++    request = canonical_observed_application_request(effective, sampling)
++
++    assert request == {
++        "model": "test-model",
++        "messages": [{"role": "user", "content": "hello"}],
++        "tools": [],
++        "temperature": 0.7,
++        "top_p": 1.0,
++        "top_k": None,
++        "min_p": 0.0,
++        "repetition_penalty": 1.0,
++        "frequency_penalty": 0.0,
++        "presence_penalty": 0.0,
++        "seed": 1974715865,
++        "max_tokens": 768,
++        "stop": None,
++        "n": 1,
++        "ignore_eos": False,
++        "min_tokens": 0,
++        "tool_choice": "auto",
++        "parallel_tool_calls": False,
++        "best_of": None,
++        "use_beam_search": False,
++        "logit_bias": {},
++        "logprobs": True,
++        "top_logprobs": 0,
++        "extra_body": {"cache_salt": "stage-d-address"},
++    }
++
++
++def test_observed_application_law_requires_direct_behavior_fields() -> None:
++    sampling = SamplingConfig.model_validate(
++        {
++            "temperature": 0.7,
++            "top_p": 1.0,
++            "max_tokens": 768,
++            "tool_choice": "auto",
++            "parallel_tool_calls": False,
++            "extra_body": {"cache_salt": "stage-d-address"},
++        }
++    )
++    effective = ChatDialect().apply_overrides(
++        {"messages": [{"role": "user", "content": "hello"}]},
++        "test-model",
++        sampling,
++    )
++
++    with pytest.raises(ValueError, match="missing=\\['seed'\\]"):
++        canonical_observed_application_request(effective, sampling)
++
++
 +def test_chat_dialect_effective_request_is_completed_to_exact_observed_law() -> None:
 +    sampling = _exact_observed_sampling()
 +    body = {"messages": [{"role": "user", "content": "hello"}]}
@@ -570,7 +644,7 @@ index 9f3751f6a..c02ae8995 100644
 +    assert task.done()
 +    assert cleanup_finished.is_set()
 diff --git a/verifiers/v1/agent.py b/verifiers/v1/agent.py
-index cf26b21c2..934aca575 100644
+index cf26b21..934aca5 100644
 --- a/verifiers/v1/agent.py
 +++ b/verifiers/v1/agent.py
 @@ -4,11 +4,16 @@ arrow — `agent.run(task) -> Trace`; `runtime=` borrows a live box,
@@ -672,7 +746,7 @@ index cf26b21c2..934aca575 100644
  
  MakeAgent = Callable[[str, AgentConfig], Agent]
 diff --git a/verifiers/v1/clients/client.py b/verifiers/v1/clients/client.py
-index 5940f49f2..285a8002c 100644
+index 5940f49..285a800 100644
 --- a/verifiers/v1/clients/client.py
 +++ b/verifiers/v1/clients/client.py
 @@ -1,9 +1,15 @@
@@ -702,7 +776,7 @@ index 5940f49f2..285a8002c 100644
          """Run one completion -> a vf `Response`. The eval client forwards the native JSON and
          eligible end-to-end headers, then parses a copy via `dialect`; the train client derives
 diff --git a/verifiers/v1/clients/config.py b/verifiers/v1/clients/config.py
-index d8783ee65..038c6c39d 100644
+index d8783ee..038c6c3 100644
 --- a/verifiers/v1/clients/config.py
 +++ b/verifiers/v1/clients/config.py
 @@ -109,6 +109,7 @@ def build_async_openai(config: BaseClientConfig) -> AsyncOpenAI:
@@ -723,7 +797,7 @@ index d8783ee65..038c6c39d 100644
      # The proxy is a raw httpx forwarder; the dialect supplies the auth scheme + upstream path.
      return EvalClient(
 diff --git a/verifiers/v1/clients/eval.py b/verifiers/v1/clients/eval.py
-index 6a7df3369..ec213dbf2 100644
+index 6a7df33..ec213db 100644
 --- a/verifiers/v1/clients/eval.py
 +++ b/verifiers/v1/clients/eval.py
 @@ -12,8 +12,9 @@ new wire format (incl. non-OpenAI providers like Anthropic) is just a new `Diale
@@ -751,7 +825,7 @@ index 6a7df3369..ec213dbf2 100644
              self.base_url + dialect.upstream_path,
              dialect.apply_overrides(body, model, sampling_args),
 diff --git a/verifiers/v1/clients/train.py b/verifiers/v1/clients/train.py
-index 6b7e7fad8..455bca943 100644
+index 6b7e7fa..c823493 100644
 --- a/verifiers/v1/clients/train.py
 +++ b/verifiers/v1/clients/train.py
 @@ -9,13 +9,16 @@ needs a running vLLM engine.
@@ -774,7 +848,7 @@ index 6b7e7fad8..455bca943 100644
  
  from verifiers.v1.clients.client import SESSION_ID_HEADER, Client
  from verifiers.v1.dialects import FINISH_REASONS, ChatDialect, Dialect, parse_tools
-@@ -34,6 +37,116 @@ from verifiers.v1.types import (
+@@ -34,6 +37,157 @@ from verifiers.v1.types import (
      Usage,
  )
  
@@ -807,6 +881,50 @@ index 6b7e7fad8..455bca943 100644
 +_EXACT_APPLICATION_SAMPLING_FIELDS = (
 +    _ENGINE_SAMPLING_FIELDS | _APPLICATION_ONLY_SAMPLING_FIELDS | {"tool_choice", "parallel_tool_calls"}
 +)
++_REQUIRED_OBSERVED_SAMPLING_FIELDS = {
++    "temperature",
++    "top_p",
++    "max_tokens",
++    "seed",
++    "tool_choice",
++    "parallel_tool_calls",
++}
++_OBSERVED_SAMPLING_DEFAULTS = {
++    "top_k": None,
++    "min_p": 0.0,
++    "repetition_penalty": 1.0,
++    "frequency_penalty": 0.0,
++    "presence_penalty": 0.0,
++    "stop": None,
++    "n": 1,
++    "ignore_eos": False,
++    "min_tokens": 0,
++    "reasoning_effort": None,
++    "best_of": None,
++    "use_beam_search": False,
++    "logit_bias": {},
++    "logprobs": True,
++    "top_logprobs": 0,
++}
++
++
++def _resolve_observed_sampling(
++    sampling_args: SamplingConfig,
++) -> tuple[dict[str, Any], Any]:
++    """Complete the sparse TOML model with the frozen neutral sampling law."""
++    configured = sampling_args.model_dump(mode="json", exclude_none=False)
++    extra_body = configured.pop("extra_body", None)
++    unknown = set(configured) - _EXACT_APPLICATION_SAMPLING_FIELDS
++    missing = _REQUIRED_OBSERVED_SAMPLING_FIELDS - set(configured)
++    if unknown or missing:
++        raise ValueError(
++            "observed sampling fields differ: "
++            f"missing={sorted(missing)} unknown={sorted(unknown)}"
++        )
++    resolved = {**_OBSERVED_SAMPLING_DEFAULTS, **configured}
++    if set(resolved) != _EXACT_APPLICATION_SAMPLING_FIELDS:
++        raise ValueError("observed sampling defaults do not cover the exact law")
++    return resolved, extra_body
 +
 +
 +def canonical_observed_application_request(
@@ -814,10 +932,7 @@ index 6b7e7fad8..455bca943 100644
 +    sampling_args: SamplingConfig,
 +) -> dict[str, Any]:
 +    """Resolve the exact observed chat law, including disabled and null controls."""
-+    resolved = sampling_args.model_dump(mode="json", exclude_none=False)
-+    extra_body = resolved.pop("extra_body", None)
-+    if set(resolved) != _EXACT_APPLICATION_SAMPLING_FIELDS:
-+        raise ValueError("observed sampling must explicitly resolve every allowlisted field")
++    resolved, extra_body = _resolve_observed_sampling(sampling_args)
 +    if resolved.pop("reasoning_effort") is not None:
 +        raise ValueError("observed training does not support reasoning_effort")
 +    if not isinstance(extra_body, dict) or set(extra_body) != {"cache_salt"}:
@@ -891,7 +1006,7 @@ index 6b7e7fad8..455bca943 100644
  
  def tool_to_wire(tool: Tool) -> dict:
      function: dict = {
-@@ -70,13 +183,9 @@ def serialize_completion(response: Response, model: str) -> dict:
+@@ -70,13 +224,9 @@ def serialize_completion(response: Response, model: str) -> dict:
              "total_tokens": response.usage.total_tokens,
          }
          if response.usage.reasoning_tokens is not None:
@@ -907,7 +1022,7 @@ index 6b7e7fad8..455bca943 100644
      return {
          "id": response.id or "vf-intercept",
          "object": "chat.completion",
-@@ -93,23 +202,15 @@ def serialize_completion(response: Response, model: str) -> dict:
+@@ -93,23 +243,15 @@ def serialize_completion(response: Response, model: str) -> dict:
      }
  
  
@@ -934,7 +1049,7 @@ index 6b7e7fad8..455bca943 100644
          )
          for i, tc in enumerate(result.get("tool_calls") or [])
          if getattr(tc, "name", None)
-@@ -137,9 +238,7 @@ def response_from_generate(
+@@ -137,9 +279,7 @@ def response_from_generate(
          finish_reason=finish,
          # /inference/v1/generate returns exact token ids but no usage details, so the
          # completion's reasoning-token subset is unknown.
@@ -945,7 +1060,7 @@ index 6b7e7fad8..455bca943 100644
          # generate() returns owned, typed lists. Skip revalidation here to avoid copying
          # million-token contexts synchronously on the event loop.
          tokens=TurnTokens.model_construct(
-@@ -150,9 +249,7 @@ def response_from_generate(
+@@ -150,9 +290,7 @@ def response_from_generate(
              is_content=attribution.is_content if attribution is not None else None,
              multi_modal_data=result.get("multi_modal_data"),
              routed_experts=result.get("routed_experts"),
@@ -956,7 +1071,7 @@ index 6b7e7fad8..455bca943 100644
          ),
      )
  
-@@ -189,11 +286,15 @@ class TrainClient(Client):
+@@ -189,11 +327,15 @@ class TrainClient(Client):
          pool_size: int = 1,
          config: RendererConfig | None = None,
          renderer_model_name: str | None = None,
@@ -972,7 +1087,7 @@ index 6b7e7fad8..455bca943 100644
          self._pool = None
  
      def _renderer_pool(
-@@ -216,6 +317,69 @@ class TrainClient(Client):
+@@ -216,6 +358,69 @@ class TrainClient(Client):
              )
          return self._pool
  
@@ -1042,7 +1157,7 @@ index 6b7e7fad8..455bca943 100644
      async def get_response(
          self,
          dialect: Dialect,
-@@ -225,6 +389,9 @@ class TrainClient(Client):
+@@ -225,6 +430,9 @@ class TrainClient(Client):
          session_id: str | None = None,
          turn: PendingTurn | None = None,
          headers: Mapping[str, str] | None = None,
@@ -1052,7 +1167,7 @@ index 6b7e7fad8..455bca943 100644
      ) -> Response:
          # The renderer tokenizes the typed prompt for training (it needs per-token ids + logprobs
          # back), so it can't forward the raw request — it parses `body` via the dialect and renders
-@@ -248,18 +415,16 @@ class TrainClient(Client):
+@@ -248,18 +456,16 @@ class TrainClient(Client):
          from renderers.client import _maybe_offload, generate
  
          wire_tools = [tool_to_wire(t) for t in tools] if tools else None
@@ -1078,7 +1193,7 @@ index 6b7e7fad8..455bca943 100644
          renderer = self._renderer_pool(
              model,
              chat_template_kwargs=chat_template_kwargs,
-@@ -269,9 +434,7 @@ class TrainClient(Client):
+@@ -269,9 +475,7 @@ class TrainClient(Client):
          # Only build the (O(context)) previous-turn token ids once the cheap guards pass — a
          # multimodal prompt or a tail that isn't a clean `[tool*, user?]` extension can't bridge.
          can_bridge = (
@@ -1089,7 +1204,7 @@ index 6b7e7fad8..455bca943 100644
          )
          previous_ids = turn.previous_token_ids() if can_bridge else None
          if previous_ids is not None:
-@@ -300,6 +463,14 @@ class TrainClient(Client):
+@@ -300,6 +504,14 @@ class TrainClient(Client):
          if prompt_ids is None:
              wire_messages = [message_to_wire(m) for m in prompt]
  
@@ -1104,7 +1219,7 @@ index 6b7e7fad8..455bca943 100644
          try:
              result = await generate(
                  client=self.openai,
-@@ -311,17 +482,37 @@ class TrainClient(Client):
+@@ -311,17 +523,37 @@ class TrainClient(Client):
                  prompt_attribution=prompt_attribution,
                  tools=wire_tools,
                  sampling_params=sampling_params,
@@ -1148,7 +1263,7 @@ index 6b7e7fad8..455bca943 100644
      async def close(self) -> None:
          await self.openai.close()
 diff --git a/verifiers/v1/env.py b/verifiers/v1/env.py
-index 93aaab9bd..61aef7202 100644
+index 93aaab9..61aef72 100644
 --- a/verifiers/v1/env.py
 +++ b/verifiers/v1/env.py
 @@ -8,18 +8,23 @@ from abc import ABC, abstractmethod
@@ -1250,7 +1365,7 @@ index 93aaab9bd..61aef7202 100644
  
          agents = Agents(self.config, make)
 diff --git a/verifiers/v1/interception/server.py b/verifiers/v1/interception/server.py
-index dd50fdef7..65f1c0c35 100644
+index dd50fde..65f1c0c 100644
 --- a/verifiers/v1/interception/server.py
 +++ b/verifiers/v1/interception/server.py
 @@ -362,6 +362,11 @@ class InterceptionServer(Interception):
@@ -1294,7 +1409,7 @@ index dd50fdef7..65f1c0c35 100644
                          logger.debug(
                              "intercept turn: id=%s tools=%d",
 diff --git a/verifiers/v1/rollout.py b/verifiers/v1/rollout.py
-index eca3470cb..3e7954889 100644
+index eca3470..3e79548 100644
 --- a/verifiers/v1/rollout.py
 +++ b/verifiers/v1/rollout.py
 @@ -13,9 +13,12 @@ import logging
@@ -1359,7 +1474,7 @@ index eca3470cb..3e7954889 100644
          self._stack = AsyncExitStack()
          self._failed = False
 diff --git a/verifiers/v1/serve/server.py b/verifiers/v1/serve/server.py
-index 5c23cae66..4ff0be7c8 100644
+index 5c23cae..4ff0be7 100644
 --- a/verifiers/v1/serve/server.py
 +++ b/verifiers/v1/serve/server.py
 @@ -28,6 +28,14 @@ from verifiers.v1.types import SamplingConfig
@@ -1388,7 +1503,7 @@ index 5c23cae66..4ff0be7c8 100644
                      with contextlib.suppress(Exception):
                          await client.close()
 diff --git a/verifiers/v1/session.py b/verifiers/v1/session.py
-index 5c1494118..fa1b5663f 100644
+index 5c14941..fa1b566 100644
 --- a/verifiers/v1/session.py
 +++ b/verifiers/v1/session.py
 @@ -19,6 +19,8 @@ from verifiers.v1.trace import Trace
