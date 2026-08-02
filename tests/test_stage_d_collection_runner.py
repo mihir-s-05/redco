@@ -121,6 +121,48 @@ def test_source_runner_rejects_forced_root_tool_choice(
         runner._verify_unforced_root_tool_choice(config)
 
 
+def test_rlm_preflight_executes_the_installed_launcher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[object] = []
+
+    class Runtime:
+        async def start(self) -> None:
+            events.append("start")
+
+        async def prepare_setup(self) -> None:
+            events.append("prepare")
+
+        async def run(self, command, env):
+            events.append((command, env))
+            return SimpleNamespace(exit_code=0, stderr="", stdout="usage")
+
+        async def stop(self) -> None:
+            events.append("stop")
+
+    class Harness:
+        config = SimpleNamespace(runtime="runtime-config", resolved_env={"PINNED": "1"})
+
+        async def setup(self, runtime) -> None:
+            events.append(("setup", runtime))
+
+    runtime = Runtime()
+    harness = Harness()
+    monkeypatch.setattr(runner.vf, "load_harness", lambda _config: harness)
+    monkeypatch.setattr(runner, "make_runtime", lambda _config: runtime)
+    config = SimpleNamespace(env=SimpleNamespace(agent=SimpleNamespace(harness="config")))
+
+    asyncio.run(runner._preflight_rlm_install(config))
+
+    assert events == [
+        "start",
+        "prepare",
+        ("setup", runtime),
+        (["/tmp/vf-rlm/bin/rlm", "--help"], {"PINNED": "1"}),
+        "stop",
+    ]
+
+
 def test_receipt_recovery_is_deterministic_and_idempotent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

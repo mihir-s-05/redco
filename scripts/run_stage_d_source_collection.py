@@ -35,6 +35,7 @@ from redco.analysis.stage_d_source_artifacts import StageDSourceArtifactStore
 from redco.analysis.stage_d_source_contracts import SourceRollout
 from redco.analysis.stage_d_support_gate import load_support_rules
 from redco.integrations.write_once import write_once
+from verifiers.v1.runtimes import make_runtime
 
 
 def _sha256(value: bytes) -> str:
@@ -62,6 +63,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--branch-artifacts", type=Path, required=True)
     parser.add_argument("--support-rules", type=Path, required=True)
     parser.add_argument("--support-rules-sha256", required=True)
+    parser.add_argument("--preflight-rlm-only", action="store_true")
     parser.add_argument("--recover", action="store_true")
     return parser.parse_args()
 
@@ -182,6 +184,24 @@ def _verify_unforced_root_tool_choice(config: EvalConfig) -> None:
     forwarded = getattr(harness, "forward_env", ()) if harness is not None else ()
     if "RLM_FORCE_TOOL_CHOICE_REQUIRED" in forwarded:
         raise ValueError("source harness must not forward forced root tool choice")
+
+
+async def _preflight_rlm_install(config: EvalConfig) -> None:
+    harness = vf.load_harness(config.env.agent.harness)
+    runtime = make_runtime(harness.config.runtime)
+    await runtime.start()
+    try:
+        await runtime.prepare_setup()
+        await harness.setup(runtime)
+        result = await runtime.run(
+            ["/tmp/vf-rlm/bin/rlm", "--help"],
+            harness.config.resolved_env,
+        )
+        if result.exit_code != 0:
+            detail = (result.stderr or result.stdout).strip()[-500:]
+            raise RuntimeError(f"installed RLM executable failed: {detail}")
+    finally:
+        await runtime.stop()
 
 
 async def _recover_verified_sources(
@@ -349,6 +369,10 @@ async def _run(args: argparse.Namespace) -> None:
         bundle=rlm_bundle,
     )
     _verify_unforced_root_tool_choice(config)
+    if args.preflight_rlm_only:
+        await _preflight_rlm_install(config)
+        print("RLM frozen install preflight passed")
+        return
     _env, authenticated_plan = _materialize_authenticated_plan(
         config,
         plan_sha256=args.plan_sha256,
