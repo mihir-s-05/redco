@@ -1,0 +1,1 @@
+{"amendment":"hardware-only","campaign":"stage-d1-state-aware-support-v1","gpu_count":1,"gpu_type":"A6000 48GB","location":"US","maximum_rate_usd_per_hour":0.54,"persistent_storage":false,"prime_resource_id":"7574d6","provider":"massedcompute","schema_version":1,"security":"datacenter","spot":false}
