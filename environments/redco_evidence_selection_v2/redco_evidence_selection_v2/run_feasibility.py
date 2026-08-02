@@ -26,6 +26,43 @@ DEFAULT_DATASET_SHA256 = (
 
 
 def build_config(args: argparse.Namespace) -> EvalConfig:
+    harness: dict[str, Any] = {
+        "id": "rlm",
+        "version": args.rlm_version,
+        "max_depth": 1,
+        "runtime": {"type": "subprocess"},
+        "forward_env": ["RLM_FORCE_TOOL_CHOICE_REQUIRED"],
+    }
+    bundle_names = (
+        "rlm_archive",
+        "rlm_archive_sha256",
+        "rlm_uv_binary",
+        "rlm_uv_binary_sha256",
+        "rlm_uv_cache_archive",
+        "rlm_uv_cache_archive_sha256",
+        "rlm_uv_lock_sha256",
+        "rlm_launcher",
+        "rlm_launcher_sha256",
+    )
+    frozen_bundle = tuple(getattr(args, name, None) for name in bundle_names)
+    if any(value is not None for value in frozen_bundle):
+        if any(value is None for value in frozen_bundle):
+            raise ValueError("the frozen RLM install bundle must be supplied together")
+        harness.update(
+            {
+                "checkout_archive_path": str(frozen_bundle[0].resolve()),
+                "checkout_archive_sha256": frozen_bundle[1],
+                "checkout_uv_path": str(frozen_bundle[2].resolve()),
+                "checkout_uv_sha256": frozen_bundle[3],
+                "checkout_cache_archive_path": str(
+                    frozen_bundle[4].resolve()
+                ),
+                "checkout_cache_archive_sha256": frozen_bundle[5],
+                "checkout_uv_lock_sha256": frozen_bundle[6],
+                "checkout_launcher_path": str(frozen_bundle[7].resolve()),
+                "checkout_launcher_sha256": frozen_bundle[8],
+            }
+        )
     return EvalConfig(
         model=args.model,
         client={
@@ -66,13 +103,7 @@ def build_config(args: argparse.Namespace) -> EvalConfig:
                     "finalize": 60,
                     "scoring": 60,
                 },
-                "harness": {
-                    "id": "rlm",
-                    "version": args.rlm_version,
-                    "max_depth": 1,
-                    "runtime": {"type": "subprocess"},
-                    "forward_env": ["RLM_FORCE_TOOL_CHOICE_REQUIRED"],
-                },
+                "harness": harness,
             },
         },
         num_tasks=args.num_tasks,
@@ -243,6 +274,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-completion-tokens", type=int, default=768)
     parser.add_argument("--max-total-tokens", type=int, default=8192)
     parser.add_argument("--rlm-version", default=DEFAULT_RLM_VERSION)
+    parser.add_argument("--rlm-archive", type=Path)
+    parser.add_argument("--rlm-archive-sha256")
+    parser.add_argument("--rlm-uv-binary", type=Path)
+    parser.add_argument("--rlm-uv-binary-sha256")
+    parser.add_argument("--rlm-uv-cache-archive", type=Path)
+    parser.add_argument("--rlm-uv-cache-archive-sha256")
+    parser.add_argument("--rlm-uv-lock-sha256")
+    parser.add_argument("--rlm-launcher", type=Path)
+    parser.add_argument("--rlm-launcher-sha256")
     parser.add_argument("--setup-timeout", type=float, default=900)
     parser.add_argument("--harness-timeout", type=float, default=900)
     parser.add_argument("--dry-run", action="store_true")

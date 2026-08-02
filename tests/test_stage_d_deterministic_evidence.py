@@ -256,3 +256,47 @@ def test_served_snapshot_and_renderer_identity_are_separate(
         config.client.renderer_model_name
         == "Qwen/Qwen3-4B-Instruct-2507"
     )
+
+
+def test_feasibility_forwards_complete_frozen_rlm_bundle(tmp_path: Path) -> None:
+    pytest.importorskip("verifiers.v1")
+    from redco_evidence_selection_v2.run_feasibility import build_config
+
+    args = Namespace(
+        model="model",
+        renderer_model_name="model",
+        base_url="http://127.0.0.1:8000/v1",
+        dataset=tmp_path / "dataset.jsonl",
+        dataset_sha256="a" * 64,
+        split="train",
+        prompt_profile="natural",
+        scaffold_prompt=None,
+        scaffold_prompt_sha256=None,
+        output_dir=tmp_path / "output",
+        num_tasks=1,
+        replicates=1,
+        master_seed="master",
+        temperature=0.7,
+        top_p=1.0,
+        max_completion_tokens=768,
+        max_total_tokens=8192,
+        rlm_version="56218f33796ecbe465445bc43948886354fde196",
+        setup_timeout=900.0,
+        harness_timeout=900.0,
+        rlm_archive=tmp_path / "rlm.tar",
+        rlm_archive_sha256="1" * 64,
+        rlm_uv_binary=tmp_path / "uv",
+        rlm_uv_binary_sha256="2" * 64,
+        rlm_uv_cache_archive=tmp_path / "cache.tar.gz",
+        rlm_uv_cache_archive_sha256="3" * 64,
+        rlm_uv_lock_sha256="4" * 64,
+        rlm_launcher=tmp_path / "rlm-wrapper",
+        rlm_launcher_sha256="5" * 64,
+    )
+    harness = build_config(args).env.agent.harness
+    assert harness.checkout_archive_path == str(args.rlm_archive.resolve())
+    assert harness.checkout_uv_path == str(args.rlm_uv_binary.resolve())
+    assert harness.checkout_cache_archive_path == str(
+        args.rlm_uv_cache_archive.resolve()
+    )
+    assert harness.checkout_launcher_path == str(args.rlm_launcher.resolve())
