@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import hashlib
 import os
-import secrets
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
@@ -16,6 +15,10 @@ import verifiers.v1 as vf
 from verifiers.v1.cli.eval.runner import run_eval
 from verifiers.v1.configs.eval import EvalConfig
 
+from redco.analysis.stage_d_branch_artifacts import (
+    StageDBranchArtifactStore,
+    StageDBranchTargetRoster,
+)
 from redco.analysis.stage_d_collection import (
     StageDCollectionPlan,
     run_exact_source_collection,
@@ -30,42 +33,12 @@ from redco.analysis.stage_d_rlm_runtime import (
 )
 from redco.analysis.stage_d_source_artifacts import StageDSourceArtifactStore
 from redco.analysis.stage_d_source_contracts import SourceRollout
+from redco.analysis.stage_d_support_gate import load_support_rules
+from redco.integrations.write_once import write_once
 
 
 def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
-
-
-def _exclusive_write(path: Path, value: bytes) -> None:
-    if not value or path.exists():
-        raise RuntimeError(f"refusing to overwrite collection evidence: {path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(
-        f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
-    )
-    descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    try:
-        with os.fdopen(descriptor, "wb", closefd=True) as handle:
-            handle.write(value)
-            handle.flush()
-            os.fsync(handle.fileno())
-        try:
-            os.link(temporary, path)
-        except FileExistsError as error:
-            raise RuntimeError(f"refusing to overwrite collection evidence: {path}") from error
-        _fsync_directory(path.parent)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def _fsync_directory(path: Path) -> None:
-    if os.name == "nt":
-        return
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 def _arguments() -> argparse.Namespace:
@@ -86,6 +59,9 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--uv-binary", type=Path, required=True)
     parser.add_argument("--uv-cache-archive", type=Path, required=True)
     parser.add_argument("--rlm-launcher", type=Path, required=True)
+    parser.add_argument("--branch-artifacts", type=Path, required=True)
+    parser.add_argument("--support-rules", type=Path, required=True)
+    parser.add_argument("--support-rules-sha256", required=True)
     parser.add_argument("--recover", action="store_true")
     return parser.parse_args()
 
@@ -121,6 +97,7 @@ def _authenticated_config(
         ),
         "source_sha256": _require_sha256(args.source_sha256, "source SHA-256"),
         "runtime_sha256": _require_sha256(args.runtime_sha256, "runtime SHA-256"),
+        "support_rules_sha256": protocol.support_rules_sha256,
     }
     mismatches = {
         name: (getattr(config.env, name, None), value)
@@ -291,7 +268,7 @@ async def _recover_receipt(
     args: argparse.Namespace,
     config: EvalConfig,
     plan: StageDCollectionPlan,
-) -> tuple[int, bytes]:
+) -> tuple[int, bytes, tuple[SourceRollout, ...]]:
     from verifiers.v1.cli.output import read_episodes
     from verifiers.v1.task import WireTaskData
     from verifiers.v1.trace import Trace
@@ -305,8 +282,42 @@ async def _recover_receipt(
         if args.receipt_output.read_bytes() != receipt:
             raise ValueError("existing collection receipt differs from recovered evidence")
     else:
-        _exclusive_write(args.receipt_output, receipt)
-    return len(episodes), receipt
+        write_once(
+            args.receipt_output,
+            receipt,
+            allow_existing_same=False,
+            error_type=RuntimeError,
+        )
+    return len(episodes), receipt, sources
+
+
+def _freeze_branch_targets(
+    config: EvalConfig,
+    sources: tuple[SourceRollout, ...],
+    *,
+    branch_artifacts: Path,
+    minimum_eligible_sources: int,
+) -> StageDBranchTargetRoster:
+    roster = StageDBranchTargetRoster.from_sources(
+        sources,
+        planned_source_count=len(sources),
+        minimum_eligible_sources=minimum_eligible_sources,
+    )
+    store = StageDBranchArtifactStore(branch_artifacts)
+    store.assert_pristine()
+    store.persist_target_roster(roster)
+    ledger = StageDReceiptLedger(
+        config.env.ledger_path,
+        master_seed=config.env.master_seed,
+    )
+    try:
+        if ledger.branch_target_roster_sha256 is None:
+            ledger.record_branch_target_roster(roster.to_bytes())
+        elif ledger.branch_target_roster_sha256 != roster.roster_sha256:
+            raise ValueError("durable branch target roster differs from source artifacts")
+    finally:
+        ledger.close()
+    return roster
 
 
 async def _run(args: argparse.Namespace) -> None:
@@ -320,6 +331,9 @@ async def _run(args: argparse.Namespace) -> None:
             "protocol manifest SHA-256",
         ),
     )
+    if args.support_rules_sha256 != protocol.support_rules_sha256:
+        raise ValueError("support rules hash differs from the protocol manifest")
+    rules = load_support_rules(args.support_rules, protocol.support_rules_sha256)
     config = _authenticated_config(args, protocol)
     dependency_stack, rlm_bundle = load_stage_d_rlm_runtime(
         protocol=protocol,
@@ -343,15 +357,26 @@ async def _run(args: argparse.Namespace) -> None:
     if args.recover:
         if not args.plan_output.is_file():
             raise RuntimeError("receipt recovery requires the durable collection plan")
-        episode_count, receipt = await _recover_receipt(
+        episode_count, receipt, sources = await _recover_receipt(
             args,
             config,
             authenticated_plan,
         )
+        if len(sources) != rules.required_papers:
+            raise ValueError("recovered source count differs from support rules")
+        roster = _freeze_branch_targets(
+            config,
+            sources,
+            branch_artifacts=args.branch_artifacts,
+            minimum_eligible_sources=rules.required_successes,
+        )
+        if not roster.eligibility_passed:
+            raise RuntimeError("source eligibility gate failed")
         print(
             f"recovered slots={len(authenticated_plan.slots)} episodes={episode_count} "
             f"plan_sha256={authenticated_plan.plan_sha256} "
-            f"receipt_sha256={_sha256(receipt)}"
+            f"receipt_sha256={_sha256(receipt)} eligible={roster.eligible_source_count} "
+            f"eligibility_passed={str(roster.eligibility_passed).lower()}"
         )
         return
     if args.plan_output.exists() or args.receipt_output.exists():
@@ -381,12 +406,35 @@ async def _run(args: argparse.Namespace) -> None:
         run_eval=run_eval,
         load_environment=load_environment,
         load_verified_sources=load_verified_sources,
-        persist_plan=lambda value: _exclusive_write(args.plan_output, value),
+        persist_plan=lambda value: write_once(
+            args.plan_output,
+            value,
+            allow_existing_same=False,
+            error_type=RuntimeError,
+        ),
     )
-    _exclusive_write(args.receipt_output, receipt)
+    write_once(
+        args.receipt_output,
+        receipt,
+        allow_existing_same=False,
+        error_type=RuntimeError,
+    )
+    sources = load_verified_sources()
+    if len(sources) != rules.required_papers:
+        raise ValueError("source count differs from support rules")
+    roster = _freeze_branch_targets(
+        config,
+        sources,
+        branch_artifacts=args.branch_artifacts,
+        minimum_eligible_sources=rules.required_successes,
+    )
+    if not roster.eligibility_passed:
+        raise RuntimeError("source eligibility gate failed")
     print(
         f"slots={len(plan.slots)} episodes={len(episodes)} "
-        f"plan_sha256={plan.plan_sha256} receipt_sha256={_sha256(receipt)}"
+        f"plan_sha256={plan.plan_sha256} receipt_sha256={_sha256(receipt)} "
+        f"eligible={roster.eligible_source_count} "
+        f"eligibility_passed={str(roster.eligibility_passed).lower()}"
     )
 
 

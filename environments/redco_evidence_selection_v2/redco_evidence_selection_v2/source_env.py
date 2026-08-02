@@ -129,8 +129,8 @@ class StageDSourceTasksetConfig(EvidenceSelectionConfig):
 
     @model_validator(mode="after")
     def validate_source_roster(self) -> StageDSourceTasksetConfig:
-        if self.rollouts_per_task < 2:
-            raise ValueError("Stage-D source groups require at least two frozen rollouts")
+        if self.rollouts_per_task < 1:
+            raise ValueError("Stage-D source groups require at least one frozen rollout")
         return self
 
 
@@ -179,6 +179,7 @@ class StageDSourceEnvConfig(vf.SingleAgentEnvConfig):
     runtime_sha256: str
     config_sha256: str
     protocol_manifest_sha256: str | None = None
+    support_rules_sha256: str
     checkpoint_id: str
     base_model_manifest_path: Path
     base_model_manifest_sha256: str
@@ -236,6 +237,7 @@ class StageDSourceEnvConfig(vf.SingleAgentEnvConfig):
             "sampler_conformance_manifest_sha256",
             "resolved_agent_sampling_law_sha256",
             "resolved_train_client_sha256",
+            "support_rules_sha256",
         ):
             value = getattr(self, name)
             if not isinstance(value, str) or len(value) != 64:
@@ -311,6 +313,7 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
             config_sha256=self.config.config_sha256,
             protocol_manifest_sha256=self.config.protocol_manifest_sha256,
             master_seed_sha256=_sha256(self.config.master_seed.encode("utf-8")),
+            support_rules_sha256=self.config.support_rules_sha256,
         )
         if self.config.ledger_path.exists():
             self._ledger = StageDReceiptLedger(

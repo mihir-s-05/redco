@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 
 import pytest
 
+from redco.analysis.stage_d_campaign_controller import _require_protocol_genesis
 from redco.analysis.stage_d_protocol_manifest import (
     StageDPolicyIdentity,
     StageDProtocolManifest,
 )
+from redco.analysis.stage_d_receipt_ledger import GenesisBinding
 from redco.contracts import canonical_json
 
 
@@ -40,6 +43,7 @@ def _manifest() -> StageDProtocolManifest:
         collection_plan_sha256="0" * 64,
         evaluation_plan_sha256="0" * 64,
         decision_rule_sha256="1" * 64,
+        support_rules_sha256="b" * 64,
         reload_probe_sha256="2" * 64,
         shared_initialization_sha256="a" * 64,
         objective_authorization_sha256="3" * 64,
@@ -94,3 +98,29 @@ def test_protocol_requires_positive_trainer_step() -> None:
     payload["trainer_step"] = 0
     with pytest.raises(ValueError, match="positive"):
         StageDProtocolManifest.from_bytes(canonical_json(payload))
+
+
+def test_protocol_authenticates_support_rules() -> None:
+    payload = json.loads(_manifest().to_bytes())
+    payload["support_rules_sha256"] = "not-a-digest"
+    with pytest.raises(ValueError, match="support_rules_sha256"):
+        StageDProtocolManifest.from_bytes(canonical_json(payload))
+
+
+def test_campaign_genesis_rejects_different_support_rules() -> None:
+    protocol = _manifest()
+    genesis = GenesisBinding(
+        preregistration_sha256=protocol.preregistration_sha256,
+        source_sha256=protocol.source_sha256,
+        runtime_sha256=protocol.runtime_sha256,
+        config_sha256=protocol.genesis_config_sha256,
+        protocol_manifest_sha256=protocol.manifest_sha256,
+        master_seed_sha256=protocol.master_seed_sha256,
+        support_rules_sha256=protocol.support_rules_sha256,
+    )
+    _require_protocol_genesis(genesis, protocol)
+    with pytest.raises(ValueError, match="ledger genesis"):
+        _require_protocol_genesis(
+            replace(genesis, support_rules_sha256="0" * 64),
+            protocol,
+        )

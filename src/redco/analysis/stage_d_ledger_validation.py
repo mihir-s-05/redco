@@ -103,6 +103,7 @@ def validate_state_machine(
         "config_sha256",
         "protocol_manifest_sha256",
         "master_seed_sha256",
+        "support_rules_sha256",
     }
     if set(genesis) != genesis_fields or any(
         not _is_sha256(genesis[name]) for name in genesis_fields
@@ -141,6 +142,7 @@ def validate_state_machine(
     candidate_slots: set[tuple[str, str, int]] = set()
     execution_slots: set[tuple[str, str, str, int]] = set()
     branch_artifacts: dict[tuple[str, str], str] = {}
+    verified_support_report_sha256: str | None = None
     batch_claims: set[str] = set()
     stage_d_training_authorization_arms: set[str] = set()
     source_reservations: dict[tuple[str, str], tuple[int, str, Mapping[str, Any]]] = {}
@@ -958,6 +960,33 @@ def validate_state_machine(
                 if identity in batch_claims:
                     raise LedgerPoisoned("training batch was claimed twice")
                 batch_claims.add(identity)
+            elif receipt_kind == "stage_d_support_gate_pass":
+                expected_fields = {
+                    "schema_version",
+                    "receipt_kind",
+                    "ledger_id",
+                    "support_rules_sha256",
+                    "support_report_sha256",
+                    "source_sha256s",
+                    "branch_artifact_sha256s",
+                }
+                sources = receipt.get("source_sha256s")
+                artifacts = receipt.get("branch_artifact_sha256s")
+                if (
+                    set(receipt) != expected_fields
+                    or verified_support_report_sha256 is not None
+                    or receipt.get("ledger_id") != records[0]["ledger_id"]
+                    or receipt.get("support_rules_sha256")
+                    != genesis["support_rules_sha256"]
+                    or not _is_sha256(receipt.get("support_report_sha256"))
+                    or sources != sorted(source_rollout_sha256s.values())
+                    or artifacts != sorted(branch_artifacts.values())
+                    or set(branch_artifacts) != branch_target_keys
+                    or set(body["evidence_refs"])
+                    != {receipt.get("support_report_sha256")}
+                ):
+                    raise LedgerPoisoned("Stage D support pass receipt is invalid")
+                verified_support_report_sha256 = receipt["support_report_sha256"]
             elif receipt_kind == "stage_d_training_batch_authorization":
                 expected_fields = {
                     "schema_version",
@@ -972,6 +1001,7 @@ def validate_state_machine(
                     "objective_authorization_sha256",
                     "collection_plan_sha256",
                     "collection_receipt_sha256",
+                    "support_report_sha256",
                     "source_sha256s",
                     "branch_artifact_sha256s",
                     "consumer_id",
@@ -990,6 +1020,8 @@ def validate_state_machine(
                     or identity in batch_claims
                     or receipt.get("claim_sequence") != record["offset"]
                     or receipt.get("single_use") is not True
+                    or receipt.get("support_report_sha256")
+                    != verified_support_report_sha256
                     or not isinstance(receipt.get("consumer_id"), str)
                     or not receipt["consumer_id"]
                     or not all(
@@ -1000,6 +1032,7 @@ def validate_state_machine(
                             "objective_authorization_sha256",
                             "collection_plan_sha256",
                             "collection_receipt_sha256",
+                            "support_report_sha256",
                         )
                     )
                     or not isinstance(sources, list)
@@ -1024,6 +1057,7 @@ def validate_state_machine(
                         receipt.get("objective_authorization_sha256"),
                         receipt.get("collection_plan_sha256"),
                         receipt.get("collection_receipt_sha256"),
+                        receipt.get("support_report_sha256"),
                         *artifacts,
                     }
                 ):

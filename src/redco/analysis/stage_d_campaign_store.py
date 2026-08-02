@@ -59,6 +59,7 @@ class FrozenProtocolInputs:
     source_eval_config: bytes
     scientific_eval_config: bytes
     heldout_eval_config: bytes
+    support_rules: bytes
     shared_initialization_manifest: bytes
     base_model_manifest: bytes
     adapter_manifest: bytes | None
@@ -98,6 +99,10 @@ class FrozenProtocolInputs:
             "protocol/heldout-eval.toml": (
                 self.heldout_eval_config,
                 protocol.heldout_eval_config_sha256,
+            ),
+            "protocol/support-rules.json": (
+                self.support_rules,
+                protocol.support_rules_sha256,
             ),
             "protocol/shared-initialization.json": (
                 self.shared_initialization_manifest,
@@ -354,6 +359,7 @@ def verify_campaign_bundle(root: Path) -> StageDCampaignBundle:
         "protocol/source-eval.toml",
         "protocol/scientific-eval.toml",
         "protocol/heldout-eval.toml",
+        "protocol/support-rules.json",
         "protocol/shared-initialization.json",
         "policy/base-model-manifest.json",
         "policy/tokenizer-manifest.json",
@@ -396,6 +402,7 @@ def verify_campaign_bundle(root: Path) -> StageDCampaignBundle:
         "protocol/source-eval.toml": protocol.source_eval_config_sha256,
         "protocol/scientific-eval.toml": protocol.scientific_eval_config_sha256,
         "protocol/heldout-eval.toml": protocol.heldout_eval_config_sha256,
+        "protocol/support-rules.json": protocol.support_rules_sha256,
         "protocol/shared-initialization.json": protocol.shared_initialization_sha256,
         "policy/base-model-manifest.json": (
             protocol.policy_identity.base_model_manifest_sha256

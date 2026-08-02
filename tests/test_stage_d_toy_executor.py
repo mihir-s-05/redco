@@ -155,6 +155,7 @@ def _binding(*, runtime_sha256: str, config_sha256: str) -> GenesisBinding:
         config_sha256=config_sha256,
         protocol_manifest_sha256="5" * 64,
         master_seed_sha256=_sha256(MASTER_SEED.encode()),
+        support_rules_sha256="6" * 64,
     )
 
 

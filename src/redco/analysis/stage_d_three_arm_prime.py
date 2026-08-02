@@ -442,6 +442,7 @@ def _verify_stage_d_batch_authorization(
         "objective_authorization_sha256",
         "collection_plan_sha256",
         "collection_receipt_sha256",
+        "support_report_sha256",
         "source_sha256s",
         "branch_artifact_sha256s",
         "consumer_id",
@@ -461,6 +462,7 @@ def _verify_stage_d_batch_authorization(
         "objective_authorization_sha256": objective_authorization_sha256,
         "collection_plan_sha256": parsed["collection_plan_sha256"],
         "collection_receipt_sha256": parsed["collection_receipt_sha256"],
+        "support_report_sha256": parsed["support_report_sha256"],
         "source_sha256s": list(batch.source_sha256s),
         "branch_artifact_sha256s": list(batch.branch_artifact_sha256s),
         "consumer_id": f"stage-d-prime:{batch.arm}:step:{batch.trainer_step}",
@@ -470,7 +472,11 @@ def _verify_stage_d_batch_authorization(
         raise ValueError("sealed batch differs from its single-use authorization")
     if any(
         not isinstance(parsed[field], str) or len(parsed[field]) != 64
-        for field in ("collection_plan_sha256", "collection_receipt_sha256")
+        for field in (
+            "collection_plan_sha256",
+            "collection_receipt_sha256",
+            "support_report_sha256",
+        )
     ):
         raise ValueError("sealed batch lacks collection-roster authorization")
     if (

@@ -969,7 +969,7 @@ def _verify_two_slot_scaffold(
             "strict source verification lacks its root-turn count"
         )
     roots = tuple(record for record in records if record.depth == 0)
-    if len(roots) != root_policy_turn_count or len(records) != root_policy_turn_count + 2:
+    if len(roots) < root_policy_turn_count or len(records) != len(roots) + 2:
         raise SourceTopologyIneligible(
             "scientific scaffold has an unexpected policy-call count"
         )

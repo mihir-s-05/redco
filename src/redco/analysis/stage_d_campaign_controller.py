@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from redco.analysis.stage_d_arm_contracts import ThreeArmCompilation
+from redco.analysis.stage_d_branch_artifacts import StageDBranchTargetRoster
 from redco.analysis.stage_d_collection import (
     StageDCollectionPlan,
     verify_collection_receipt,
@@ -27,6 +29,7 @@ from redco.analysis.stage_d_receipt_ledger import (
 )
 from redco.analysis.stage_d_scientific_branch_group import BranchGroupArtifact
 from redco.analysis.stage_d_source_contracts import SourceRollout
+from redco.analysis.stage_d_support_gate import StageDSupportRules, evaluate_support_gate
 from redco.analysis.stage_d_three_arm_bridge import (
     _compile_three_arm_batches,
     compile_verified_three_arm_batches,
@@ -39,6 +42,25 @@ from redco.contracts import canonical_json
 
 def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def _require_protocol_genesis(
+    genesis: object,
+    protocol: StageDProtocolManifest,
+) -> None:
+    if any(
+        getattr(genesis, name) != getattr(protocol, protocol_name)
+        for name, protocol_name in (
+            ("protocol_manifest_sha256", "manifest_sha256"),
+            ("preregistration_sha256", "preregistration_sha256"),
+            ("config_sha256", "genesis_config_sha256"),
+            ("source_sha256", "source_sha256"),
+            ("runtime_sha256", "runtime_sha256"),
+            ("master_seed_sha256", "master_seed_sha256"),
+            ("support_rules_sha256", "support_rules_sha256"),
+        )
+    ):
+        raise ValueError("ledger genesis differs from the protocol manifest")
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +89,8 @@ def compile_authorize_seal_campaign(
     collection_receipt_bytes: bytes,
     preregistered_collection_plan_sha256: str,
     branch_artifact_bytes: Sequence[bytes],
+    support_report_bytes: bytes,
+    support_rules_bytes: bytes,
     encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], tuple[int, ...]],
     render_prompt: Callable[[Mapping[str, Any]], tuple[int, ...]],
     master_seed: str,
@@ -86,15 +110,7 @@ def compile_authorize_seal_campaign(
     if protocol.manifest_sha256 != preregistered_protocol_manifest_sha256:
         raise ValueError("protocol manifest identity is inconsistent")
     genesis = ledger.genesis_binding
-    if (
-        genesis.protocol_manifest_sha256 != protocol.manifest_sha256
-        or genesis.preregistration_sha256 != protocol.preregistration_sha256
-        or genesis.config_sha256 != protocol.genesis_config_sha256
-        or genesis.source_sha256 != protocol.source_sha256
-        or genesis.runtime_sha256 != protocol.runtime_sha256
-        or genesis.master_seed_sha256 != protocol.master_seed_sha256
-    ):
-        raise ValueError("ledger genesis differs from the protocol manifest")
+    _require_protocol_genesis(genesis, protocol)
     if (
         collection_plan.plan_sha256 != protocol.collection_plan_sha256
         or preregistered_collection_plan_sha256 != protocol.collection_plan_sha256
@@ -173,6 +189,38 @@ def compile_authorize_seal_campaign(
         raise ValueError(
             "campaign branch roster differs from every completed ledger artifact"
         )
+    rules = StageDSupportRules.from_bytes(support_rules_bytes)
+    if rules.rules_sha256 != protocol.support_rules_sha256:
+        raise ValueError("support rules differ from the protocol manifest")
+    paper_ids: dict[str, str] = {}
+    for source in sources:
+        episode = json.loads((ledger_root / "evidence" / source.trace_sha256).read_bytes())
+        traces = episode.get("traces") if isinstance(episode, dict) else None
+        trace = traces[0] if isinstance(traces, list) and len(traces) == 1 else None
+        task = trace.get("task") if isinstance(trace, dict) else None
+        data = task.get("data") if isinstance(task, dict) else None
+        paper_id = data.get("paper_id") if isinstance(data, dict) else None
+        if not isinstance(paper_id, str) or not paper_id:
+            raise ValueError("support source lacks an authenticated paper identity")
+        paper_ids[source.source_sha256] = paper_id
+    roster = StageDBranchTargetRoster.from_sources(
+        sources,
+        planned_source_count=rules.required_papers,
+        minimum_eligible_sources=rules.required_successes,
+    )
+    expected_support_report = evaluate_support_gate(
+        sources,
+        tuple(artifact for _, artifact in artifacts),
+        roster,
+        paper_ids=paper_ids,
+        rules=rules,
+    )
+    if support_report_bytes != expected_support_report:
+        raise ValueError("support report differs from authenticated campaign evidence")
+    support_report_sha256 = _sha256(support_report_bytes)
+    if ledger.put_evidence(support_report_bytes) != support_report_sha256:
+        raise ValueError("ledger stored different support report bytes")
+    ledger._record_verified_support_gate(support_report_sha256)
     compilation = _compile_three_arm_batches(
         sources,
         artifacts,
@@ -203,6 +251,7 @@ def compile_authorize_seal_campaign(
             objective_authorization_sha256=objective_authorization_sha256,
             collection_plan_sha256=collection_plan_sha256,
             collection_receipt_sha256=collection_receipt_sha256,
+            support_report_sha256=support_report_sha256,
             source_sha256s=batch.source_sha256s,
             branch_artifact_sha256s=batch.branch_artifact_sha256s,
             consumer_id=f"stage-d-prime:{batch.arm}:step:{batch.trainer_step}",
@@ -294,6 +343,7 @@ def recover_sealed_campaign(
         or genesis.get("source_sha256") != protocol.source_sha256
         or genesis.get("runtime_sha256") != protocol.runtime_sha256
         or genesis.get("master_seed_sha256") != protocol.master_seed_sha256
+        or genesis.get("support_rules_sha256") != protocol.support_rules_sha256
         or _sha256(master_seed.encode("utf-8")) != protocol.master_seed_sha256
     ):
         raise ValueError("sealed ledger genesis differs from protocol")

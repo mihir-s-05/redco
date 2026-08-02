@@ -90,6 +90,7 @@ from redco.analysis.stage_d_source_artifacts import (
 )
 from redco.analysis.stage_d_source_producer import (
     StageDSourceRolloutProducer,
+    _verify_two_slot_scaffold,
     structural_child_target_id,
     verify_source_trace_semantics,
 )
@@ -98,6 +99,7 @@ from redco.analysis.stage_d_spawn_provenance import (
     SpawnScope,
     derive_child_lineage,
 )
+from redco.analysis.stage_d_support_gate import StageDSupportRules, evaluate_support_gate
 from redco.analysis.stage_d_terminalization import (
     StageDCleanupEvidence,
     StageDDecisionOutcome,
@@ -128,6 +130,74 @@ EVALUATION_PLAN_BYTES = StageDEvaluationPlan(
 ).to_bytes()
 PREREGISTRATION_BYTES = b"preregistration"
 GENESIS_CONFIG_BYTES = b"genesis config"
+SUPPORT_RULES_BYTES = canonical_json(
+    {
+        "schema_version": 1,
+        "domain": "redco-stage-d-support-rules-v1",
+        "required_papers": 2,
+        "required_successes": 1,
+        "minimum_targets": 1,
+        "maximum_targets": 1,
+        "minimum_reward_range": 1e-12,
+    }
+)
+
+
+def test_two_slot_scaffold_allows_extra_contiguous_returning_root_turns() -> None:
+    root_addresses = tuple(PolicyEventAddress(0, "root", turn, turn) for turn in range(3))
+    roots = tuple(
+        SimpleNamespace(
+            depth=0,
+            lineage="root",
+            call_kind="policy",
+            turn=turn,
+            session_call_ordinal=turn,
+            scientific_address=address,
+            node_index=turn,
+        )
+        for turn, address in enumerate(root_addresses)
+    )
+    children = tuple(
+        SimpleNamespace(
+            depth=1,
+            lineage=f"root/child-{slot}",
+            call_kind="policy",
+            turn=0,
+            session_call_ordinal=0,
+            spawn_ordinal=slot,
+            parent_lineage="root",
+            parent_call_ordinal=0,
+            parent_tool_call_slot=0,
+            parent_tool_call_id="call-0",
+            scientific_address=PolicyEventAddress(1, f"root/child-{slot}", 0, 0),
+            node_index=3 + slot,
+        )
+        for slot in range(2)
+    )
+    nodes = (
+        {
+            "message": {
+                "tool_calls": [
+                    {
+                        "id": "call-0",
+                        "type": "function",
+                        "function": {"name": "ipython", "arguments": "{}"},
+                    }
+                ]
+            }
+        },
+        {"message": {}},
+        {"message": {}},
+        {"message": {}},
+        {"message": {}},
+    )
+    _verify_two_slot_scaffold(
+        (*roots, *children),
+        nodes,
+        child_parent_event=root_addresses[0],
+        child_parent_tool_call_slot=0,
+        root_policy_turn_count=2,
+    )
 SOURCE_BYTES = b"source manifest"
 RUNTIME_BYTES = b"runtime manifest"
 SOURCE_EVAL_BYTES = b"source eval"
@@ -216,6 +286,7 @@ def _binding(
         config_sha256=config_sha256,
         protocol_manifest_sha256=protocol_manifest_sha256,
         master_seed_sha256=_sha256(MASTER_SEED.encode()),
+        support_rules_sha256=_sha256(SUPPORT_RULES_BYTES),
     )
 
 
@@ -240,6 +311,7 @@ def _campaign_protocol(
         collection_plan_sha256=plan.plan_sha256,
         evaluation_plan_sha256=_sha256(EVALUATION_PLAN_BYTES),
         decision_rule_sha256=_sha256(b"decision rule"),
+        support_rules_sha256=_sha256(SUPPORT_RULES_BYTES),
         reload_probe_sha256=_sha256(b"reload probe"),
         shared_initialization_sha256=_sha256(SHARED_INITIALIZATION_BYTES),
         objective_authorization_sha256=_sha256(authorization),
@@ -277,6 +349,7 @@ def _frozen_protocol_inputs() -> FrozenProtocolInputs:
         source_eval_config=SOURCE_EVAL_BYTES,
         scientific_eval_config=SCIENTIFIC_EVAL_BYTES,
         heldout_eval_config=HELDOUT_EVAL_BYTES,
+        support_rules=SUPPORT_RULES_BYTES,
         shared_initialization_manifest=SHARED_INITIALIZATION_BYTES,
         base_model_manifest=BASE_MODEL_BYTES,
         adapter_manifest=ADAPTER_BYTES,
@@ -394,7 +467,10 @@ def _episode(
         "id": trace_id,
         "task": {
             "type": "EvidenceSelectionTask",
-            "data": {"policy_checkpoint_id": "model@commit"},
+            "data": {
+                "policy_checkpoint_id": "model@commit",
+                "paper_id": f"paper-{trace_id}",
+            },
         },
         "runtime": None,
         "version": 1,
@@ -1365,7 +1441,9 @@ def test_producer_refuses_finalization_while_request_is_in_flight(tmp_path: Path
     writer.close()
 
 
-def test_exact_live_batch_authorization_is_idempotent_and_sealed(tmp_path: Path) -> None:
+def test_exact_live_batch_authorization_is_idempotent_and_sealed(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "ledger"
     source, writer = _produce(root)
     _freeze_target_roster(writer, (source,))
@@ -1373,6 +1451,8 @@ def test_exact_live_batch_authorization_is_idempotent_and_sealed(tmp_path: Path)
     objective_authorization_sha256 = writer.put_evidence(b"preregistered objective authorization")
     collection_plan_sha256 = writer.put_evidence(b"collection plan")
     collection_receipt_sha256 = writer.put_evidence(b"collection receipt")
+    support_report_sha256 = writer.put_evidence(b"support report")
+    writer._record_verified_support_gate(support_report_sha256)
     authorization = writer.authorize_stage_d_training_batch(
         arm="stock",
         training_batch_identity="8" * 64,
@@ -1381,6 +1461,7 @@ def test_exact_live_batch_authorization_is_idempotent_and_sealed(tmp_path: Path)
         objective_authorization_sha256=objective_authorization_sha256,
         collection_plan_sha256=collection_plan_sha256,
         collection_receipt_sha256=collection_receipt_sha256,
+        support_report_sha256=support_report_sha256,
         source_sha256s=(source.source_sha256,),
         branch_artifact_sha256s=(),
         consumer_id="stage-d-prime:stock:step:1",
@@ -1393,6 +1474,7 @@ def test_exact_live_batch_authorization_is_idempotent_and_sealed(tmp_path: Path)
         objective_authorization_sha256=objective_authorization_sha256,
         collection_plan_sha256=collection_plan_sha256,
         collection_receipt_sha256=collection_receipt_sha256,
+        support_report_sha256=support_report_sha256,
         source_sha256s=(source.source_sha256,),
         branch_artifact_sha256s=(),
         consumer_id="stage-d-prime:stock:step:1",
@@ -1409,6 +1491,7 @@ def test_exact_live_batch_authorization_is_idempotent_and_sealed(tmp_path: Path)
             objective_authorization_sha256=objective_authorization_sha256,
             collection_plan_sha256=collection_plan_sha256,
             collection_receipt_sha256=collection_receipt_sha256,
+            support_report_sha256=support_report_sha256,
             source_sha256s=(source.source_sha256,),
             branch_artifact_sha256s=(),
             consumer_id="stage-d-prime:stock:step:1",
@@ -1424,6 +1507,7 @@ def test_exact_live_batch_authorization_is_idempotent_and_sealed(tmp_path: Path)
             objective_authorization_sha256=objective_authorization_sha256,
             collection_plan_sha256=collection_plan_sha256,
             collection_receipt_sha256=collection_receipt_sha256,
+            support_report_sha256=support_report_sha256,
             source_sha256s=(source.source_sha256,),
             branch_artifact_sha256s=(),
             consumer_id="different-consumer",
@@ -1545,6 +1629,8 @@ def test_trainer_gate_accepts_only_the_exact_ledger_authorized_batch(
     objective_authorization_sha256 = writer.put_evidence(objective_authorization)
     collection_plan_sha256 = writer.put_evidence(b"collection plan")
     collection_receipt_sha256 = writer.put_evidence(b"collection receipt")
+    support_report_sha256 = writer.put_evidence(b"support report")
+    writer._record_verified_support_gate(support_report_sha256)
     batch_sha256 = writer.put_evidence(batch.to_bytes())
     authorization = writer.authorize_stage_d_training_batch(
         arm="stock",
@@ -1554,6 +1640,7 @@ def test_trainer_gate_accepts_only_the_exact_ledger_authorized_batch(
         objective_authorization_sha256=objective_authorization_sha256,
         collection_plan_sha256=collection_plan_sha256,
         collection_receipt_sha256=collection_receipt_sha256,
+        support_report_sha256=support_report_sha256,
         source_sha256s=batch.source_sha256s,
         branch_artifact_sha256s=(),
         consumer_id="stage-d-prime:stock:step:1",
@@ -1664,6 +1751,16 @@ def test_campaign_transaction_reconstructs_after_single_terminal_seal(
     )
     branch_store.commit(artifact, artifact_receipt)
     assert len(branch_store.completed_paths()) == 1
+    support_report = evaluate_support_gate(
+        (selected, control),
+        (artifact,),
+        target_roster,
+        paper_ids={
+            selected.source_sha256: "paper-rollout-live-1",
+            control.source_sha256: "paper-rollout-live-2",
+        },
+        rules=StageDSupportRules.from_bytes(SUPPORT_RULES_BYTES),
+    )
 
     observed_plan, collection_receipt = _collection_evidence((selected, control))
     assert observed_plan == collection_plan
@@ -1677,6 +1774,8 @@ def test_campaign_transaction_reconstructs_after_single_terminal_seal(
         collection_receipt_bytes=collection_receipt,
         preregistered_collection_plan_sha256=collection_plan.plan_sha256,
         branch_artifact_bytes=(artifact_bytes,),
+        support_report_bytes=support_report,
+        support_rules_bytes=SUPPORT_RULES_BYTES,
         encode_action=lambda _request, _message: (20, 2),
         render_prompt=lambda _request: (10, 11),
         master_seed=MASTER_SEED,
@@ -2308,6 +2407,8 @@ def test_campaign_transaction_rejects_omitted_completed_source(
             collection_receipt_bytes=collection_receipt,
             preregistered_collection_plan_sha256=collection_plan.plan_sha256,
             branch_artifact_bytes=(artifact_bytes,),
+            support_report_bytes=b"not-a-passing-report",
+            support_rules_bytes=SUPPORT_RULES_BYTES,
             encode_action=lambda _request, _message: (20, 2),
             render_prompt=lambda _request: (10, 11),
             master_seed=MASTER_SEED,

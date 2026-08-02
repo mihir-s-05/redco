@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +13,7 @@ from redco.analysis.stage_d_receipt_ledger import inspect_ledger
 from redco.analysis.stage_d_scientific_branch_group import BranchGroupArtifact
 from redco.analysis.stage_d_source_contracts import SourceRollout
 from redco.contracts import canonical_json
+from redco.integrations.write_once import write_once
 
 
 def _sha256(value: bytes) -> str:
@@ -144,15 +144,22 @@ class StageDBranchArtifactStore:
     """Persist target roster before calls and artifacts around completion receipts."""
 
     def __init__(self, root: Path) -> None:
+        if root.is_symlink():
+            raise RuntimeError("branch artifact root cannot be a symbolic link")
         self.root = root
         self.pending = root / "pending"
         self.completed = root / "completed"
         root.mkdir(parents=True, exist_ok=True)
+        if self.pending.is_symlink() or self.completed.is_symlink():
+            raise RuntimeError("branch artifact directories cannot be symbolic links")
         self.pending.mkdir(exist_ok=True)
         self.completed.mkdir(exist_ok=True)
 
     def assert_pristine(self) -> None:
         expected = {self.pending, self.completed}
+        guarded = (*expected, self.root / "target-roster.json")
+        if any(path.is_symlink() for path in guarded):
+            raise RuntimeError("branch artifact store forbids symbolic links")
         if set(self.root.iterdir()) - {self.root / "target-roster.json"} != expected:
             raise RuntimeError("branch artifact store contains unexpected entries")
         if any(self.pending.iterdir()) or any(self.completed.iterdir()):
@@ -160,13 +167,13 @@ class StageDBranchArtifactStore:
 
     def persist_target_roster(self, roster: StageDBranchTargetRoster) -> Path:
         path = self.root / "target-roster.json"
-        _exclusive_atomic_write(path, roster.to_bytes())
+        write_once(path, roster.to_bytes())
         return path
 
     def prepare(self, artifact: BranchGroupArtifact) -> str:
         value = artifact.to_bytes()
         digest = _sha256(value)
-        _exclusive_atomic_write(self.pending / f"{digest}.json", value)
+        write_once(self.pending / f"{digest}.json", value)
         return digest
 
     def commit(self, artifact: BranchGroupArtifact, completion_receipt: bytes) -> Path:
@@ -184,7 +191,7 @@ class StageDBranchArtifactStore:
         if pending.read_bytes() != value:
             raise ValueError("branch completion lacks its exact pending artifact")
         destination = self.completed / f"{digest}.json"
-        _exclusive_atomic_write(destination, value)
+        write_once(destination, value)
         pending.unlink()
         _fsync_directory(self.pending)
         return destination
@@ -205,7 +212,7 @@ class StageDBranchArtifactStore:
             if pending.name != f"{digest}.json" or digest not in receipts:
                 raise RuntimeError("pending branch artifact lacks a durable completion receipt")
             destination = self.completed / pending.name
-            _exclusive_atomic_write(destination, value)
+            write_once(destination, value)
             pending.unlink()
             recovered.append(destination)
         _fsync_directory(self.pending)
@@ -232,24 +239,6 @@ def _completion_receipt(value: bytes) -> dict[str, Any]:
     if set(payload) != expected or payload.get("receipt_kind") != "branch_group_artifact_completed":
         raise ValueError("branch artifact completion fields differ")
     return payload
-
-
-def _exclusive_atomic_write(path: Path, value: bytes) -> None:
-    if path.exists():
-        if path.read_bytes() != value:
-            raise FileExistsError(f"branch artifact collision at {path}")
-        return
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")
-    descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    try:
-        with os.fdopen(descriptor, "wb", closefd=True) as handle:
-            handle.write(value)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.link(temporary, path)
-        _fsync_directory(path.parent)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def _fsync_directory(path: Path) -> None:

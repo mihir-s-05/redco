@@ -111,6 +111,7 @@ def _config_payload(tmp_path: Path) -> dict[str, object]:
         "runtime_sha256": "3" * 64,
         "config_sha256": "4" * 64,
         "protocol_manifest_sha256": "7" * 64,
+        "support_rules_sha256": "8" * 64,
         "checkpoint_id": "fixture-model",
         "base_model_manifest_path": str(paths["base_model"]),
         "base_model_manifest_sha256": _sha256(values["base_model"]),
@@ -263,6 +264,21 @@ def test_scientific_group_id_is_stable_and_namespace_bound(tmp_path: Path) -> No
 
     assert load("campaign-a") == load("campaign-a")
     assert load("campaign-a") != load("campaign-b")
+
+
+def test_support_profile_can_use_one_unique_rollout_per_paper(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    tasks = StageDSourceTaskset(
+        StageDSourceTasksetConfig(
+            dataset_path=inputs["dataset"],
+            dataset_sha256=inputs["dataset_sha256"],
+            split="train",
+            scientific_group_namespace="support-v1",
+            rollouts_per_task=1,
+        )
+    ).load()
+    assert len(tasks) == 1
+    assert tasks[0].data.rollout_slot == 0
 
 
 def test_source_config_rejects_retry_or_parallel_collection(tmp_path: Path) -> None:

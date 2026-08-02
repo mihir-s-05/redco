@@ -183,10 +183,16 @@ def test_receipt_recovery_is_deterministic_and_idempotent(
         return sources
 
     monkeypatch.setattr(runner, "_recover_verified_sources", recovered_sources)
-    count, first = asyncio.run(runner._recover_receipt(args, config, plan))
+    count, first, first_sources = asyncio.run(
+        runner._recover_receipt(args, config, plan)
+    )
     assert count == len(episodes)
+    assert first_sources == sources
     assert receipt_path.read_bytes() == first
 
-    count, second = asyncio.run(runner._recover_receipt(args, config, plan))
+    count, second, second_sources = asyncio.run(
+        runner._recover_receipt(args, config, plan)
+    )
     assert count == len(episodes)
+    assert second_sources == sources
     assert second == first

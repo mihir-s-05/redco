@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import secrets
 from pathlib import Path
 from typing import Any
 
 from redco.analysis.stage_d_receipt_ledger import inspect_ledger
 from redco.analysis.stage_d_source_contracts import SourceRollout
 from redco.contracts import canonical_json
+from redco.integrations.write_once import write_once
 
 
 class SourceArtifactError(RuntimeError):
@@ -26,10 +26,14 @@ class StageDSourceArtifactStore:
     """Persist each source around its ledger receipt without an unrecoverable gap."""
 
     def __init__(self, root: Path) -> None:
+        if root.is_symlink():
+            raise SourceArtifactError("source artifact root cannot be a symbolic link")
         self._root = root
         self._pending = root / "pending"
         self._sources = root / "sources"
         root.mkdir(parents=True, exist_ok=True)
+        if self._pending.is_symlink() or self._sources.is_symlink():
+            raise SourceArtifactError("source artifact directories cannot be symbolic links")
         self._pending.mkdir(exist_ok=True)
         self._sources.mkdir(exist_ok=True)
         _fsync_directory(root)
@@ -38,7 +42,11 @@ class StageDSourceArtifactStore:
         """Durably stage a source payload before its completion receipt is appended."""
         prepared = _parse_prepared(value)
         digest = str(prepared["source_sha256"])
-        _exclusive_atomic_write(self._pending / f"{digest}.json", value)
+        write_once(
+            self._pending / f"{digest}.json",
+            value,
+            error_type=SourceArtifactError,
+        )
         return digest
 
     def commit(self, source: SourceRollout) -> Path:
@@ -55,7 +63,7 @@ class StageDSourceArtifactStore:
         ):
             raise SourceArtifactError("completed source differs from its prepared artifact")
         destination = self._sources / f"{source.source_sha256}.json"
-        _exclusive_atomic_write(destination, source.to_bytes())
+        write_once(destination, source.to_bytes(), error_type=SourceArtifactError)
         pending_path.unlink()
         _fsync_directory(self._pending)
         return destination
@@ -105,7 +113,7 @@ class StageDSourceArtifactStore:
                 }
             )
             destination = self._sources / f"{prepared['source_sha256']}.json"
-            _exclusive_atomic_write(destination, source_bytes)
+            write_once(destination, source_bytes, error_type=SourceArtifactError)
             pending_path.unlink()
             _fsync_directory(self._pending)
             recovered.append(destination)
@@ -164,30 +172,6 @@ def _parse_prepared(value: bytes) -> dict[str, Any]:
     if not isinstance(parsed["source_sha256"], str) or parsed["source_sha256"] != expected:
         raise ValueError("prepared source artifact digest mismatch")
     return parsed
-
-
-def _exclusive_atomic_write(path: Path, value: bytes) -> None:
-    if type(value) is not bytes or not value:
-        raise ValueError("artifact bytes must be nonempty and immutable")
-    if path.exists():
-        if path.read_bytes() != value:
-            raise SourceArtifactError(f"artifact collision at {path}")
-        return
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")
-    descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    try:
-        with os.fdopen(descriptor, "wb", closefd=True) as handle:
-            handle.write(value)
-            handle.flush()
-            os.fsync(handle.fileno())
-        try:
-            os.link(temporary, path)
-        except FileExistsError as error:
-            if path.read_bytes() != value:
-                raise SourceArtifactError(f"artifact collision at {path}") from error
-        _fsync_directory(path.parent)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def _fsync_directory(path: Path) -> None:

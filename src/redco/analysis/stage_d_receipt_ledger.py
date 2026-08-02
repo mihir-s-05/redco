@@ -83,6 +83,7 @@ class GenesisBinding:
     config_sha256: str
     protocol_manifest_sha256: str
     master_seed_sha256: str
+    support_rules_sha256: str
 
     def __post_init__(self) -> None:
         for name in (
@@ -92,6 +93,7 @@ class GenesisBinding:
             "config_sha256",
             "protocol_manifest_sha256",
             "master_seed_sha256",
+            "support_rules_sha256",
         ):
             _require_sha256(getattr(self, name), name)
 
@@ -103,6 +105,7 @@ class GenesisBinding:
             "config_sha256": self.config_sha256,
             "protocol_manifest_sha256": self.protocol_manifest_sha256,
             "master_seed_sha256": self.master_seed_sha256,
+            "support_rules_sha256": self.support_rules_sha256,
         }
 
 
@@ -395,6 +398,7 @@ class StageDReceiptLedger:
             config_sha256=str(body["config_sha256"]),
             protocol_manifest_sha256=str(body["protocol_manifest_sha256"]),
             master_seed_sha256=str(body["master_seed_sha256"]),
+            support_rules_sha256=str(body["support_rules_sha256"]),
         )
 
     @property
@@ -2186,6 +2190,41 @@ class StageDReceiptLedger:
         return receipt
 
     @_writer_transaction
+    def _record_verified_support_gate(self, support_report_sha256: str) -> bytes:
+        """Anchor the controller-verified support pass before training authorization."""
+        self._require_writable()
+        _require_sha256(support_report_sha256, "support_report_sha256")
+        self._require_evidence(support_report_sha256)
+        if self._verified_support_report_sha256 is not None:
+            if self._verified_support_report_sha256 != support_report_sha256:
+                raise LedgerError("scientific campaign already has a different support pass")
+            return next(
+                canonical_json(receipt)
+                for (kind, _), receipt in self._receipts.items()
+                if kind == "stage_d_support_gate_pass"
+            )
+        if (
+            not self._source_rollout_completed
+            or set(self._branch_artifacts) != self._branch_target_keys
+        ):
+            raise LedgerError("support pass requires complete source and branch rosters")
+        receipt = self._append_receipt(
+            "stage_d_support_gate_pass",
+            {
+                "ledger_id": self._ledger_id,
+                "support_rules_sha256": self.genesis_binding.support_rules_sha256,
+                "support_report_sha256": support_report_sha256,
+                "source_sha256s": list(self.completed_source_sha256s),
+                "branch_artifact_sha256s": list(
+                    self.completed_branch_artifact_sha256s
+                ),
+            },
+            evidence_refs=(support_report_sha256,),
+        )
+        self._verified_support_report_sha256 = support_report_sha256
+        return receipt
+
+    @_writer_transaction
     def authorize_stage_d_training_batch(
         self,
         *,
@@ -2196,6 +2235,7 @@ class StageDReceiptLedger:
         objective_authorization_sha256: str,
         collection_plan_sha256: str,
         collection_receipt_sha256: str,
+        support_report_sha256: str,
         source_sha256s: Sequence[str],
         branch_artifact_sha256s: Sequence[str],
         consumer_id: str,
@@ -2211,6 +2251,7 @@ class StageDReceiptLedger:
             (objective_authorization_sha256, "objective_authorization_sha256"),
             (collection_plan_sha256, "collection_plan_sha256"),
             (collection_receipt_sha256, "collection_receipt_sha256"),
+            (support_report_sha256, "support_report_sha256"),
         ):
             _require_sha256(digest, name)
         if not consumer_id:
@@ -2238,6 +2279,8 @@ class StageDReceiptLedger:
             raise LedgerError(
                 "Stage D batch artifact roster differs from completed branch groups"
             )
+        if self._verified_support_report_sha256 != support_report_sha256:
+            raise LedgerError("Stage D training requires the verified support pass")
         evidence_refs = tuple(
             sorted(
                 {
@@ -2245,6 +2288,7 @@ class StageDReceiptLedger:
                     objective_authorization_sha256,
                     collection_plan_sha256,
                     collection_receipt_sha256,
+                    support_report_sha256,
                     *artifacts,
                 }
             )
@@ -2259,6 +2303,7 @@ class StageDReceiptLedger:
             "objective_authorization_sha256": objective_authorization_sha256,
             "collection_plan_sha256": collection_plan_sha256,
             "collection_receipt_sha256": collection_receipt_sha256,
+            "support_report_sha256": support_report_sha256,
             "source_sha256s": list(sources),
             "branch_artifact_sha256s": list(artifacts),
             "consumer_id": consumer_id,
@@ -2290,6 +2335,7 @@ class StageDReceiptLedger:
                 "objective_authorization_sha256": objective_authorization_sha256,
                 "collection_plan_sha256": collection_plan_sha256,
                 "collection_receipt_sha256": collection_receipt_sha256,
+                "support_report_sha256": support_report_sha256,
                 "source_sha256s": list(sources),
                 "branch_artifact_sha256s": list(artifacts),
                 "consumer_id": consumer_id,
@@ -2370,6 +2416,8 @@ class StageDReceiptLedger:
             "local",
         }:
             raise LedgerError("scientific campaign lacks its three training authorizations")
+        if self._verified_support_report_sha256 is None:
+            raise LedgerError("scientific campaign lacks its verified support pass")
         return self.seal()
 
     def _append_receipt(
@@ -2635,6 +2683,7 @@ class StageDReceiptLedger:
         self._stage_d_training_authorizations: dict[
             Literal["stock", "branch-global", "local"], dict[str, Any]
         ] = {}
+        self._verified_support_report_sha256: str | None = None
         for record in self._records:
             if record["record_kind"] == "action_reservation":
                 event = _event(_body(record))
@@ -2863,6 +2912,10 @@ class StageDReceiptLedger:
                 self._branch_artifacts[
                     receipt["group_id"], receipt["target_id"]
                 ] = receipt["artifact_sha256"]
+            elif kind == "stage_d_support_gate_pass":
+                self._verified_support_report_sha256 = receipt[
+                    "support_report_sha256"
+                ]
             elif kind in {
                 "training_batch_consumption",
                 "stage_d_training_batch_authorization",

@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from uuid import UUID
 
+from redco.analysis.stage_d_branch_artifacts import StageDBranchTargetRoster
 from redco.analysis.stage_d_protocol_manifest import StageDProtocolManifest
 from redco.analysis.stage_d_receipt_ledger import (
     GenesisBinding,
@@ -31,10 +32,16 @@ from redco.analysis.stage_d_scientific_campaign import (
     runtime_snapshot_from_pre_action_evidence,
 )
 from redco.analysis.stage_d_source_contracts import SourceRollout
+from redco.analysis.stage_d_support_gate import (
+    evaluate_support_gate,
+    load_support_rules,
+    verify_support_pass,
+)
 from redco.analysis.stage_d_zero_call_recovery import (
     recover_or_open_scientific_ledger,
 )
 from redco.contracts import canonical_json
+from redco.integrations.write_once import write_once
 
 
 def _sha256(value: bytes) -> str:
@@ -60,6 +67,9 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--recover-zero-call", action="store_true")
     parser.add_argument("--supervisor-evidence", type=Path)
     parser.add_argument("--repair-archive", type=Path)
+    parser.add_argument("--support-report", type=Path, required=True)
+    parser.add_argument("--support-rules", type=Path, required=True)
+    parser.add_argument("--support-rules-sha256", required=True)
     return parser.parse_args()
 
 
@@ -104,6 +114,9 @@ def _run(args: argparse.Namespace) -> None:
         args.protocol_manifest,
         args.protocol_manifest_sha256,
     )
+    if args.support_rules_sha256 != protocol.support_rules_sha256:
+        raise ValueError("support rules hash differs from the protocol manifest")
+    support_rules = load_support_rules(args.support_rules, protocol.support_rules_sha256)
     config_bytes = args.config.read_bytes()
     if _sha256(config_bytes) != args.config_sha256:
         raise ValueError("scientific config differs from its frozen SHA-256")
@@ -127,6 +140,7 @@ def _run(args: argparse.Namespace) -> None:
             identity.resolved_agent_sampling_law_sha256
         ),
         "resolved_train_client_sha256": identity.resolved_train_client_sha256,
+        "support_rules_sha256": protocol.support_rules_sha256,
     }
     if (
         raw_config.get("model") != identity.checkpoint_id
@@ -143,6 +157,7 @@ def _run(args: argparse.Namespace) -> None:
         config_sha256=protocol.genesis_config_sha256,
         protocol_manifest_sha256=protocol.manifest_sha256,
         master_seed_sha256=protocol.master_seed_sha256,
+        support_rules_sha256=protocol.support_rules_sha256,
     )
     if any(
         genesis.get(name) != value
@@ -300,6 +315,25 @@ def _run(args: argparse.Namespace) -> None:
         source_by_rollout = {source.rollout_id: source for source in sources}
         if len(source_by_rollout) != len(sources):
             raise ValueError("scientific source roster contains duplicate rollout IDs")
+        trace_by_rollout: dict[str, dict[str, object]] = {}
+        paper_ids: dict[str, str] = {}
+        for source in sources:
+            episode = json.loads(_evidence_loader(args.ledger, source.trace_sha256))
+            traces = episode.get("traces") if isinstance(episode, dict) else None
+            if not isinstance(traces, list) or len(traces) != 1:
+                raise ValueError("source episode evidence is malformed")
+            trace = traces[0]
+            if not isinstance(trace, dict):
+                raise ValueError("source trace evidence is malformed")
+            task = trace.get("task")
+            data = task.get("data") if isinstance(task, dict) else None
+            paper_id = data.get("paper_id") if isinstance(data, dict) else None
+            if not isinstance(paper_id, str) or not paper_id:
+                raise ValueError("source trace lacks an authenticated paper identity")
+            trace_by_rollout[source.rollout_id] = trace
+            paper_ids[source.source_sha256] = paper_id
+        if len(set(paper_ids.values())) != len(sources):
+            raise ValueError("scientific source roster repeats an authenticated paper")
 
         async def run_episode(binding: StageDScientificEpisodeBinding) -> bytes:
             identity = binding.episode_identity
@@ -347,12 +381,7 @@ def _run(args: argparse.Namespace) -> None:
                 recorded_action=recorded,
             )
             spec = BranchGroupSpec(commitment, recorded, correspondence, args.master_seed)
-            episode = json.loads(_evidence_loader(args.ledger, source.trace_sha256))
-            if not isinstance(episode, dict) or len(episode.get("traces", [])) != 1:
-                raise ValueError("source episode evidence is malformed")
-            trace = episode["traces"][0]
-            if not isinstance(trace, dict):
-                raise ValueError("source trace evidence is malformed")
+            trace = trace_by_rollout[source.rollout_id]
             task = source_task_from_trace(trace, config.env.taskset.task)
             runtime_snapshot = runtime_snapshot_from_pre_action_evidence(
                 _evidence_loader(
@@ -385,10 +414,37 @@ def _run(args: argparse.Namespace) -> None:
         scan = inspect_ledger(args.ledger)
         if scan.status != "active-clean":
             raise RuntimeError("scientific campaign did not leave an active-clean ledger")
+        roster = StageDBranchTargetRoster.from_sources(
+            sources,
+            planned_source_count=support_rules.required_papers,
+            minimum_eligible_sources=support_rules.required_successes,
+        )
+        if roster.roster_sha256 != ledger.branch_target_roster_sha256:
+            raise ValueError("support target roster differs from the durable ledger")
+        report = evaluate_support_gate(
+            sources,
+            result.artifacts,
+            roster,
+            paper_ids=paper_ids,
+            rules=support_rules,
+        )
+        if args.support_report.exists():
+            if args.support_report.read_bytes() != report:
+                raise RuntimeError("existing support report differs")
+        else:
+            write_once(args.support_report, report)
+        verify_support_pass(
+            report,
+            expected_rules_sha256=support_rules.rules_sha256,
+            source_sha256s=tuple(source.source_sha256 for source in sources),
+            artifact_sha256s=tuple(
+                _sha256(artifact.to_bytes()) for artifact in result.artifacts
+            ),
+        )
         print(
             canonical_json(
                 {
-                    "status": "science-complete-awaiting-training-authorization",
+                    "status": "support-pass",
                     "artifact_count": len(result.artifacts),
                     "ledger_head_sha256": scan.record_sha256s[-1],
                     "record_count": len(scan.records),

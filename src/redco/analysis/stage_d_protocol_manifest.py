@@ -119,6 +119,7 @@ class StageDProtocolManifest:
     collection_plan_sha256: str
     evaluation_plan_sha256: str
     decision_rule_sha256: str
+    support_rules_sha256: str
     reload_probe_sha256: str
     shared_initialization_sha256: str
     objective_authorization_sha256: str
@@ -144,6 +145,7 @@ class StageDProtocolManifest:
             "collection_plan_sha256",
             "evaluation_plan_sha256",
             "decision_rule_sha256",
+            "support_rules_sha256",
             "reload_probe_sha256",
             "shared_initialization_sha256",
             "objective_authorization_sha256",
@@ -185,6 +187,7 @@ class StageDProtocolManifest:
                 "collection_plan_sha256": self.collection_plan_sha256,
                 "evaluation_plan_sha256": self.evaluation_plan_sha256,
                 "decision_rule_sha256": self.decision_rule_sha256,
+                "support_rules_sha256": self.support_rules_sha256,
                 "reload_probe_sha256": self.reload_probe_sha256,
                 "shared_initialization_sha256": self.shared_initialization_sha256,
                 "objective_authorization_sha256": self.objective_authorization_sha256,
@@ -219,6 +222,7 @@ class StageDProtocolManifest:
             "collection_plan_sha256",
             "evaluation_plan_sha256",
             "decision_rule_sha256",
+            "support_rules_sha256",
             "reload_probe_sha256",
             "shared_initialization_sha256",
             "objective_authorization_sha256",
@@ -251,6 +255,7 @@ class StageDProtocolManifest:
             collection_plan_sha256=payload["collection_plan_sha256"],
             evaluation_plan_sha256=payload["evaluation_plan_sha256"],
             decision_rule_sha256=payload["decision_rule_sha256"],
+            support_rules_sha256=payload["support_rules_sha256"],
             reload_probe_sha256=payload["reload_probe_sha256"],
             shared_initialization_sha256=payload["shared_initialization_sha256"],
             objective_authorization_sha256=payload["objective_authorization_sha256"],

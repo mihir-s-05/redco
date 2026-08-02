@@ -139,6 +139,7 @@ def _protocol_bytes(config: bytes, plan: bytes) -> bytes:
         collection_plan_sha256=_sha("9"),
         evaluation_plan_sha256=hashlib.sha256(plan).hexdigest(),
         decision_rule_sha256=_sha("a"),
+        support_rules_sha256=_sha("support"),
         reload_probe_sha256=_sha("b"),
         shared_initialization_sha256=_sha("c"),
         objective_authorization_sha256=_sha("d"),

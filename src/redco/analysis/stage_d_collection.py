@@ -108,13 +108,6 @@ class StageDCollectionPlan:
         )
         if not slots or len({slot.slot_id for slot in slots}) != len(slots):
             raise ValueError("source collection plan must be nonempty and unique")
-        group_members: dict[str, int] = {}
-        for slot in slots:
-            group_members[slot.scientific_group_id] = (
-                group_members.get(slot.scientific_group_id, 0) + 1
-            )
-        if any(count < 2 for count in group_members.values()):
-            raise ValueError("every source collection group requires at least two slots")
         payload = {
             "schema_version": 1,
             "domain": "redco-stage-d-source-collection-plan-v1",
@@ -184,13 +177,6 @@ class StageDCollectionPlan:
             slots.append(SourceCollectionSlot(**item))
         if not slots or len({slot.slot_id for slot in slots}) != len(slots):
             raise ValueError("source collection plan must be nonempty and unique")
-        group_counts: dict[str, int] = {}
-        for slot in slots:
-            group_counts[slot.scientific_group_id] = (
-                group_counts.get(slot.scientific_group_id, 0) + 1
-            )
-        if any(count < 2 for count in group_counts.values()):
-            raise ValueError("every source collection group requires at least two slots")
         result = cls(tuple(slots), _sha256(value))
         if result.to_bytes() != value:
             raise ValueError("source collection plan changed on reconstruction")
