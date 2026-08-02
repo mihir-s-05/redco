@@ -251,6 +251,7 @@ def test_served_snapshot_and_renderer_identity_are_separate(
         harness_timeout=900.0,
     )
     config = build_config(args)
+    assert type(config.env).__name__ == "SingleAgentEnvConfig"
     assert config.model == "/workspace/models/exact-snapshot"
     assert (
         config.client.renderer_model_name

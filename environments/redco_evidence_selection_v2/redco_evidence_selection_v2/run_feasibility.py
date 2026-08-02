@@ -63,25 +63,8 @@ def build_config(args: argparse.Namespace) -> EvalConfig:
                 "checkout_launcher_sha256": frozen_bundle[8],
             }
         )
-    return EvalConfig(
-        model=args.model,
-        client={
-            "type": "train",
-            "base_url": args.base_url,
-            "api_key_var": "VLLM_API_KEY",
-            "renderer": {"name": "auto"},
-            "renderer_model_name": args.renderer_model_name,
-            "pool_size": 1,
-        },
-        # This placeholder never reaches a model call. Each RunSlot receives an
-        # episode-addressed copy below; the exact mapping is persisted.
-        sampling={
-            "temperature": args.temperature,
-            "top_p": args.top_p,
-            "seed": 1,
-            "max_tokens": args.max_completion_tokens,
-        },
-        env={
+    env = vf.SingleAgentEnvConfig.model_validate(
+        {
             "taskset": {
                 "id": "redco-evidence-selection-v2",
                 "dataset_path": args.dataset.resolve(),
@@ -105,7 +88,27 @@ def build_config(args: argparse.Namespace) -> EvalConfig:
                 },
                 "harness": harness,
             },
+        }
+    )
+    return EvalConfig(
+        model=args.model,
+        client={
+            "type": "train",
+            "base_url": args.base_url,
+            "api_key_var": "VLLM_API_KEY",
+            "renderer": {"name": "auto"},
+            "renderer_model_name": args.renderer_model_name,
+            "pool_size": 1,
         },
+        # This placeholder never reaches a model call. Each RunSlot receives an
+        # episode-addressed copy below; the exact mapping is persisted.
+        sampling={
+            "temperature": args.temperature,
+            "top_p": args.top_p,
+            "seed": 1,
+            "max_tokens": args.max_completion_tokens,
+        },
+        env=env,
         num_tasks=args.num_tasks,
         num_rollouts=args.replicates,
         max_concurrent=1,
