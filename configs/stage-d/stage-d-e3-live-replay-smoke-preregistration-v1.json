@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "experiment": "stage-d-e3-live-event-replay-smoke-v1",
+  "status": "frozen_before_provisioning_or_model_call",
+  "purpose": "Collect one fresh patched-RLM live fixture trace and prove that one precommitted depth-one intervention executes through state-aware replay with real downstream 4B completions.",
+  "claim_scope": {
+    "engineering_only": true,
+    "does_not_establish": [
+      "support density",
+      "estimator quality",
+      "task learning",
+      "ReDCO superiority"
+    ]
+  },
+  "source": {
+    "commit": "343daecc2e8efee0c4ac5e1449a1b63e51565ab0",
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "model_revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+    "adapter_archive": "runs/stage-d0/scaffold-support-v4/selected-adapter.tar.gz",
+    "adapter_sha256": "296a7d6163d1e1a7e8800f3fb1114a9646a8aaf6e9dfbd8437ba006025745263",
+    "fixture": "the existing event_replay_regression fixture",
+    "source_completions": 1,
+    "candidate": "fixed literal changed at canonical candidate rank 0",
+    "candidate_is_forced_and_not_a_policy_sample": true,
+    "downstream_completions": "real frozen-policy resamples only after the intervention"
+  },
+  "pass_rule": {
+    "fresh_trace_exact_provenance": true,
+    "precommit_covers_every_recorded_depth_one_policy_event": true,
+    "intervention_served": true,
+    "minimum_downstream_resampled_policy_calls": 1,
+    "replay_completes": true,
+    "semantic_reward_change": "diagnostic only"
+  },
+  "repair_rule": {
+    "maximum_deployments": 2,
+    "allowed_once": "demonstrated outcome-independent environment or launcher failure before any source completion is observed",
+    "forbidden": "rerunning an observed source completion or changing model, adapter, fixture, intervention, seeds, or pass rule"
+  },
+  "hardware": {
+    "resource_id": "7574d6",
+    "cloud_id": "gpu_1x_a6000",
+    "provider": "massedcompute",
+    "location": "US",
+    "gpu": "non-spot A6000 48GB",
+    "rate_usd_per_hour": 0.54,
+    "maximum_billed_lifetime_hours": 2.0,
+    "maximum_charge_usd": 1.08,
+    "persistent_storage": "forbidden"
+  },
+  "state_before_provisioning": {
+    "wallet_usd": 44.6919,
+    "active_pods": 0,
+    "persistent_disks": 0,
+    "availability": "Available"
+  },
+  "source_sha256": {
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/run_feasibility.py": "62d22c791bc5b421ae6b61312eabff5f487223d17811f8ae735fed2b33755297",
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/run_event_replay_regression_v1.py": "a44218af371612cf58d67c7b52ecb02828af45564e78fbae02e01c3a4c750809",
+    "src/redco/analysis/rlm_episode_replay.py": "bf0669c529bc2c1f2b3402370eeade8e34468c2a82b387c2134f176550f48f05",
+    "src/redco/analysis/stage_d_all_child_support_v2.py": "a2eb01bf92d545dd78b3b8e672ed5424e8949e6629719543e986269243af162b",
+    "configs/stage-d/stage-d0-scaffold-fewshot-v4.txt": "b27653e90f52a20f26ac79e3d0569275e9ba0ed2b07abbe06f060dd2486aee73",
+    "runs/stage-d0/scaffold-support-v4/selected-adapter.tar.gz": "296a7d6163d1e1a7e8800f3fb1114a9646a8aaf6e9dfbd8437ba006025745263",
+    "reports/stage-d0-scaffold-step8-adapter-manifest-v1.json": "1b3cc7f5e374919f90f41b537f398ec59c12b1c31e25482b5bcf6f3b7bc1ddbe",
+    "runs/stage-d/dependency-stack/rlm-patched-v1.tar": "0db97a244b88b5186a27fe1af14fa33a89b69e39a68a064cf7d10bb6f3084669",
+    "scripts/stage_d_rlm_wrapper.sh": "7f6d55f352d521a4d34c675e2bc5cb9581fde2fb635c826a9486470aa0de6cd4"
+  },
+  "operations": {
+    "repository": "https://github.com/mihir-s-05/redco.git",
+    "ssh_key": "C:/Users/mihir/.ssh/id_rsa",
+    "package_manager": "uv only",
+    "artifact_root": "runs/stage-d/e3-live-replay-smoke-v1",
+    "teardown": "always recover compact evidence, terminate compute, confirm zero disks, and record exact billing"
+  }
+}
