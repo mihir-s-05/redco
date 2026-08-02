@@ -18,6 +18,7 @@ from redco.analysis.stage_d_receipt_ledger import (
     BatchAlreadyClaimed,
     GenesisBinding,
     LedgerError,
+    LedgerPoisoned,
     SealedReceiptVerifier,
     StageDReceiptLedger,
     inspect_ledger,
@@ -36,6 +37,7 @@ from redco.analysis.stage_d_spawn_provenance import (
     EventSeedScheduler,
     PolicyEventAddress,
 )
+from redco.analysis.stage_d_three_arm_bridge import DecisionProvenance
 from redco.contracts import ActualEvaluationCost, canonical_json
 
 MASTER_SEED = "durable-master"
@@ -132,6 +134,27 @@ def _materialize(key: ExactActionKey) -> BehaviorAction:
 
 def _action(seed: int) -> BehaviorAction:
     return _materialize(_key(seed))
+
+
+def _bind_source_rollout(
+    writer: StageDReceiptLedger,
+    completion: bytes,
+) -> bytes:
+    trace = writer.put_evidence(b"raw-trace")
+    reward = writer.put_evidence(b"reward-evidence")
+    stock = writer.put_evidence(b"stock-sequences")
+    result = writer.record_source_rollout_completed(
+        group_id="group-1",
+        rollout_id="rollout-1",
+        source_sha256="5" * 64,
+        trace_sha256=trace,
+        reward_evidence_sha256=reward,
+        stock_sequences_evidence_sha256=stock,
+        base_model_manifest_sha256="6" * 64,
+        decision_ids=("root-turn-0",),
+        decision_completion_receipt_sha256s=(_sha256(completion),),
+    )
+    return result.receipt
 
 
 def _create(root: Path, *, fault_hook: Any = None) -> StageDReceiptLedger:
@@ -254,6 +277,7 @@ def _complete_scientific_artifact(
         )
         context = writer.put_evidence(f"execution-context-{arm_id}".encode())
         writer.bind_execution_context(attempt, context_sha256=context)
+        writer.mark_execution_dispatched(attempt)
         request = writer.put_evidence(f"execution-request-{arm_id}".encode())
         call = writer.mark_execution_model_call_started(
             attempt,
@@ -318,6 +342,264 @@ def test_golden_chain_seals_and_reloads_full_c1_artifact(tmp_path: Path) -> None
         master_seed=MASTER_SEED,
     )
     assert loaded == artifact
+
+
+def test_source_policy_receipts_roundtrip_reopen_seal_and_verify(tmp_path: Path) -> None:
+    root = tmp_path / "source-policy"
+    writer = _create(root)
+    key = _key(17)
+    request = writer.put_evidence(key.request)
+    reservation = writer.reserve_source_policy_call(
+        group_id="group-1",
+        rollout_id="rollout-1",
+        decision_id="root-turn-0",
+        node_kind="root",
+        target_id=None,
+        target_ordinal=None,
+        target_address=PolicyEventAddress(0, "root", 0, 0),
+        recorded_action_key=key,
+        request_sha256=request,
+        branch_selected=False,
+    )
+    action = _materialize(key)
+    response = writer.put_evidence(action.to_bytes())
+    completion = writer.complete_source_policy_call(
+        reservation,
+        action=action,
+        response_sha256=response,
+    )
+    _bind_source_rollout(writer, completion)
+    writer.close()
+
+    reopened = StageDReceiptLedger(root, master_seed=MASTER_SEED)
+    seal = reopened.seal()
+    verifier = SealedReceiptVerifier(root, seal)
+    provenance = DecisionProvenance.from_receipts(
+        reservation.receipt,
+        completion,
+        verifier=verifier,
+    )
+    assert provenance.ledger_id == seal.ledger_id
+    assert provenance.request_sequence < provenance.completion_sequence
+    assert provenance.exact_action_key_digest == key.digest
+    assert provenance.action_digest == action.digest
+
+
+def test_selected_source_policy_call_requires_same_ledger_commitment(
+    tmp_path: Path,
+) -> None:
+    writer = _create(tmp_path / "selected")
+    key = _key(17)
+    request = writer.put_evidence(key.request)
+    with pytest.raises(LedgerError, match="lacks pre-action commitment"):
+        writer.reserve_source_policy_call(
+            group_id="group-1",
+            rollout_id="rollout-1",
+            decision_id="child-0",
+            node_kind="child",
+            target_id="target-0",
+            target_ordinal=0,
+            target_address=PolicyEventAddress(1, "root/child", 0, 0),
+            recorded_action_key=key,
+            request_sha256=request,
+            branch_selected=True,
+        )
+    writer.close()
+
+
+def test_source_policy_call_rejects_dangling_duplicate_and_mismatched_evidence(
+    tmp_path: Path,
+) -> None:
+    writer = _create(tmp_path / "source-negative")
+    key = _key(17)
+    wrong_request = writer.put_evidence(b"wrong-request")
+    with pytest.raises(ValueError, match="request evidence"):
+        writer.reserve_source_policy_call(
+            group_id="group-1",
+            rollout_id="rollout-1",
+            decision_id="root-turn-0",
+            node_kind="root",
+            target_id=None,
+            target_ordinal=None,
+            target_address=PolicyEventAddress(0, "root", 0, 0),
+            recorded_action_key=key,
+            request_sha256=wrong_request,
+            branch_selected=False,
+        )
+
+    request = writer.put_evidence(key.request)
+    reservation = writer.reserve_source_policy_call(
+        group_id="group-1",
+        rollout_id="rollout-1",
+        decision_id="root-turn-0",
+        node_kind="root",
+        target_id=None,
+        target_ordinal=None,
+        target_address=PolicyEventAddress(0, "root", 0, 0),
+        recorded_action_key=key,
+        request_sha256=request,
+        branch_selected=False,
+    )
+    with pytest.raises(LedgerError, match="already reserved"):
+        writer.reserve_source_policy_call(
+            group_id="group-1",
+            rollout_id="rollout-1",
+            decision_id="root-turn-0",
+            node_kind="root",
+            target_id=None,
+            target_ordinal=None,
+            target_address=PolicyEventAddress(0, "root", 0, 0),
+            recorded_action_key=key,
+            request_sha256=request,
+            branch_selected=False,
+        )
+    wrong_action = _action(18)
+    wrong_response = writer.put_evidence(wrong_action.to_bytes())
+    with pytest.raises(LedgerError, match="differs from its reservation"):
+        writer.complete_source_policy_call(
+            reservation,
+            action=wrong_action,
+            response_sha256=wrong_response,
+        )
+    with pytest.raises(LedgerPoisoned, match="dangling"):
+        writer.seal()
+    writer.close()
+
+
+def test_concurrent_source_policy_calls_complete_out_of_order_but_recovery_is_strict(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "source-concurrent"
+    writer = _create(root)
+    reservations = []
+    actions = []
+    for ordinal, seed in enumerate((17, 18)):
+        key = _key(seed)
+        request = writer.put_evidence(key.request)
+        reservations.append(
+            writer.reserve_source_policy_call(
+                group_id="group-1",
+                rollout_id="rollout-1",
+                decision_id=f"child-{ordinal}",
+                node_kind="child",
+                target_id=f"target-{ordinal}",
+                target_ordinal=ordinal,
+                target_address=PolicyEventAddress(
+                    1, f"root/child-{ordinal}", 0, 0
+                ),
+                recorded_action_key=key,
+                request_sha256=request,
+                branch_selected=False,
+            )
+        )
+        actions.append(_materialize(key))
+
+    assert inspect_ledger(root).status == "poisoned"
+    completions: dict[int, bytes] = {}
+    for ordinal in (1, 0):
+        response = writer.put_evidence(actions[ordinal].to_bytes())
+        completions[ordinal] = writer.complete_source_policy_call(
+            reservations[ordinal],
+            action=actions[ordinal],
+            response_sha256=response,
+        )
+
+    trace = writer.put_evidence(b"raw-trace-concurrent")
+    reward = writer.put_evidence(b"reward-evidence-concurrent")
+    stock = writer.put_evidence(b"stock-sequences-concurrent")
+    writer.record_source_rollout_completed(
+        group_id="group-1",
+        rollout_id="rollout-1",
+        source_sha256="5" * 64,
+        trace_sha256=trace,
+        reward_evidence_sha256=reward,
+        stock_sequences_evidence_sha256=stock,
+        base_model_manifest_sha256="6" * 64,
+        decision_ids=("child-0", "child-1"),
+        decision_completion_receipt_sha256s=(
+            _sha256(completions[0]),
+            _sha256(completions[1]),
+        ),
+    )
+    assert writer.seal().record_count > 1
+
+
+def test_aborted_source_policy_call_is_durable_and_terminal(tmp_path: Path) -> None:
+    root = tmp_path / "source-aborted"
+    writer = _create(root)
+    key = _key(17)
+    request = writer.put_evidence(key.request)
+    reservation = writer.reserve_source_policy_call(
+        group_id="group-1",
+        rollout_id="rollout-1",
+        decision_id="root-turn-0",
+        node_kind="root",
+        target_id=None,
+        target_ordinal=None,
+        target_address=PolicyEventAddress(0, "root", 0, 0),
+        recorded_action_key=key,
+        request_sha256=request,
+        branch_selected=False,
+    )
+    error = writer.put_evidence(b"transport outcome unknown")
+    receipt = writer.abort_source_policy_call(
+        reservation,
+        phase="post_unknown",
+        error_sha256=error,
+    )
+    assert json.loads(receipt)["receipt_kind"] == "source_policy_call_aborted"
+    assert inspect_ledger(root).reason == "ledger records an aborted source policy call"
+    with pytest.raises(LedgerPoisoned):
+        writer.seal()
+    writer.close()
+    with pytest.raises(LedgerError, match="requires active-clean"):
+        StageDReceiptLedger(root, master_seed=MASTER_SEED)
+
+
+def test_source_policy_receipts_reject_cross_ledger_and_tampering(tmp_path: Path) -> None:
+    first = _create(tmp_path / "first")
+    second = _create(tmp_path / "second")
+    key = _key(17)
+    request = first.put_evidence(key.request)
+    reservation = first.reserve_source_policy_call(
+        group_id="group-1",
+        rollout_id="rollout-1",
+        decision_id="root-turn-0",
+        node_kind="root",
+        target_id=None,
+        target_ordinal=None,
+        target_address=PolicyEventAddress(0, "root", 0, 0),
+        recorded_action_key=key,
+        request_sha256=request,
+        branch_selected=False,
+    )
+    action = _materialize(key)
+    other_response = second.put_evidence(action.to_bytes())
+    with pytest.raises(LedgerError, match="not pending"):
+        second.complete_source_policy_call(
+            reservation,
+            action=action,
+            response_sha256=other_response,
+        )
+    response = first.put_evidence(action.to_bytes())
+    completion = first.complete_source_policy_call(
+        reservation,
+        action=action,
+        response_sha256=response,
+    )
+    _bind_source_rollout(first, completion)
+    seal = first.seal()
+    verifier = SealedReceiptVerifier(tmp_path / "first", seal)
+    tampered = json.loads(completion)
+    tampered["action_digest"] = "f" * 64
+    tampered_bytes = canonical_json(tampered)
+    with pytest.raises(ValueError, match="not anchored"):
+        DecisionProvenance.from_receipts(
+            reservation.receipt,
+            tampered_bytes,
+            verifier=verifier,
+        )
+    second.close()
 
 
 def test_wrong_out_of_band_seal_and_append_after_seal_fail(tmp_path: Path) -> None:
@@ -666,10 +948,27 @@ def test_zero_call_receipt_is_minted_only_before_start(tmp_path: Path) -> None:
     )
     value = writer(receipt, receipt_kind="zero_call_infrastructure_failure")
     assert value["scientific_model_calls"] == 0
+    assert value["attempt_ordinal"] == 0
+    assert value["successor_permitted"] is True
     assert value["ledger_offset"] > json.loads(commitment)["ledger_offset"]
     writer.close()
     reopened = StageDReceiptLedger(root, master_seed=MASTER_SEED)
-    with pytest.raises(LedgerError, match="already"):
+    repair = reopened.begin_candidate_attempt(
+        group_id="group-1",
+        target_id="target-0",
+        action_slot=1,
+    )
+    assert repair.attempt_ordinal == 1
+    supervisor = reopened.put_evidence(b"second supervisor")
+    second_receipt = reopened.record_zero_call_candidate_failure(
+        repair,
+        reason="successor capacity vanished",
+        supervisor_evidence_sha256=supervisor,
+    )
+    second = reopened(second_receipt, receipt_kind="zero_call_infrastructure_failure")
+    assert second["attempt_ordinal"] == 1
+    assert second["successor_permitted"] is False
+    with pytest.raises(LedgerError, match="exhausted"):
         reopened.begin_candidate_attempt(
             group_id="group-1",
             target_id="target-0",
@@ -752,7 +1051,44 @@ def test_execution_cannot_dispatch_or_finish_without_a_frozen_context(
             wall_seconds=0.0,
             storage_bytes=0,
         )
-    writer.close()
+    context = writer.put_evidence(b"execution context")
+    writer.bind_execution_context(attempt, context_sha256=context)
+    with pytest.raises(LedgerError, match="must be dispatched"):
+        writer.mark_execution_model_call_started(
+            attempt,
+            address=matched,
+            scheduled_seed=scheduled,
+            request_sha256=request,
+        )
+    with pytest.raises(LedgerError, match="must be dispatched"):
+        writer.finish_execution(
+            attempt,
+            outcome_kind=OutcomeKind.TERMINAL_WITHOUT_DOWNSTREAM,
+            scored_reward=0.0,
+            scorer_evidence_sha256=score,
+            latency_seconds=0.0,
+            dollars=0.0,
+            judge_calls=0,
+            cpu_seconds=0.0,
+            gpu_seconds=0.0,
+            wall_seconds=0.0,
+            storage_bytes=0,
+        )
+    writer.mark_execution_dispatched(attempt)
+    writer.finish_execution(
+        attempt,
+        outcome_kind=OutcomeKind.TERMINAL_WITHOUT_DOWNSTREAM,
+        scored_reward=0.0,
+        scorer_evidence_sha256=score,
+        latency_seconds=0.0,
+        dollars=0.0,
+        judge_calls=0,
+        cpu_seconds=0.0,
+        gpu_seconds=0.0,
+        wall_seconds=0.0,
+        storage_bytes=0,
+    )
+    writer.seal()
 
 
 def test_concurrent_single_use_batch_claim_has_one_winner(tmp_path: Path) -> None:
@@ -796,3 +1132,35 @@ def test_batch_claim_remains_consumed_after_reopen(tmp_path: Path) -> None:
             consumer_id="two",
         )
     reopened.seal()
+
+
+def test_committed_child_pre_post_abort_is_durable_and_terminal(tmp_path: Path) -> None:
+    root = tmp_path / "ledger"
+    writer = _create(root)
+    action_key = _key(17)
+    snapshot = writer.put_evidence(b"snapshot")
+    reservation = writer.commit_pre_action_and_reserve(
+        group_id="group-1",
+        rollout_id="rollout-1",
+        target_roster=("target-0",),
+        target_ordinal=0,
+        target_id="target-0",
+        target_address=PolicyEventAddress(1, "root/child", 0, 0),
+        pre_action_snapshot_sha256=snapshot,
+        recorded_action_key=action_key,
+        branch_count=2,
+        continuation_replicates=1,
+        failure_reward=-1.0,
+    )
+    error = writer.put_evidence(b"child reservation failed before POST")
+
+    receipt = writer.abort_source_child_before_post(
+        reservation,
+        rollout_id="rollout-1",
+        error_sha256=error,
+    )
+
+    assert b'"receipt_kind":"source_child_pre_post_aborted"' in receipt
+    assert inspect_ledger(root).status == "poisoned"
+    writer.close()
+    assert inspect_ledger(root).status == "poisoned"

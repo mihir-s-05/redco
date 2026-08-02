@@ -1,0 +1,427 @@
+diff --git a/renderers/client.py b/renderers/client.py
+index 026df02..3c9bedd 100644
+--- a/renderers/client.py
++++ b/renderers/client.py
+@@ -14,8 +14,10 @@ from __future__ import annotations
+ import asyncio
+ import json
+ import logging
++import math
+ from collections.abc import Mapping
+-from typing import Any, cast
++from dataclasses import dataclass
++from typing import Any, Literal, Protocol, cast
+ 
+ import httpx
+ from openai import AsyncOpenAI
+@@ -35,6 +37,90 @@ ROUTED_EXPERTS_DATA_PREFIX = b'"routed_experts":{"data":"'
+ KEPT_TOKENS_IDS_PREFIX = b'"kept_tokens":{"ids":"'
+ 
+ 
++def _strict_completion_logprobs(
++    choice: Mapping[str, Any],
++    completion_ids: list[int],
++) -> list[float]:
++    raw = choice.get("logprobs")
++    if not isinstance(raw, Mapping):
++        raise ValueError("generate response lacks completion logprobs")
++    content = raw.get("content")
++    if not isinstance(content, list) or len(content) != len(completion_ids):
++        raise ValueError("generate response token/logprob lengths differ")
++    values: list[float] = []
++    for item in content:
++        if not isinstance(item, Mapping) or "logprob" not in item:
++            raise ValueError("generate response has a malformed logprob entry")
++        value = item["logprob"]
++        if (
++            type(value) not in {int, float}
++            or not math.isfinite(value)
++            or value > 0.0
++        ):
++            raise ValueError("generate response logprobs must be finite and nonpositive")
++        values.append(float(value))
++    return values
++
++
++ObservationAbortPhase = Literal[
++    "post_unknown",
++    "response_received",
++    "response_parsed",
++    "typed_response",
++]
++
++
++@dataclass(frozen=True, slots=True)
++class PreparedGenerateRequest:
++    """Immutable evidence for the exact request about to cross the network."""
++
++    application_request: bytes
++    engine_endpoint: str
++    engine_request: bytes
++    engine_headers: bytes
++    observer_context: bytes
++    prompt_token_ids: tuple[int, ...]
++
++
++class PreparedGenerateObserver(Protocol):
++    """Exactly-once observer used by scientific clients at the POST boundary."""
++
++    async def before_forward(self, prepared: PreparedGenerateRequest) -> object: ...
++
++    async def after_response(self, ticket: object, response: object) -> None: ...
++
++    async def abort(
++        self,
++        ticket: object,
++        phase: ObservationAbortPhase,
++        error: BaseException,
++    ) -> None: ...
++
++
++def _canonical_json(value: object) -> bytes:
++    return json.dumps(
++        value,
++        allow_nan=False,
++        ensure_ascii=False,
++        separators=(",", ":"),
++        sort_keys=True,
++    ).encode("utf-8")
++
++
++async def abort_prepared_observation(
++    observer: PreparedGenerateObserver,
++    ticket: object,
++    phase: ObservationAbortPhase,
++    error: BaseException,
++) -> None:
++    """Durably finish an abort even when the model-call task was cancelled."""
++    task = asyncio.create_task(observer.abort(ticket, phase, error))
++    try:
++        await asyncio.shield(task)
++    except asyncio.CancelledError:
++        await task
++
++
+ class OverlongPromptError(Exception):
+     """The rendered prompt exceeds the engine's context window.
+ 
+@@ -165,6 +251,9 @@ async def generate(
+     priority: int | None = None,
+     extra_headers: dict[str, str] | None = None,
+     max_prompt_len: int | None = None,
++    effective_request: Mapping[str, Any] | None = None,
++    observer_context: Mapping[str, Any] | None = None,
++    observer: PreparedGenerateObserver | None = None,
+ ) -> dict[str, Any]:
+     """Tokenize messages, call vLLM /inference/v1/generate, parse the response.
+ 
+@@ -286,63 +375,92 @@ async def generate(
+     }
+     if extra_headers:
+         post_kwargs["options"] = cast(Any, {"headers": extra_headers})
+-    raw_response = await client.post(endpoint, **post_kwargs)
+-    data = parse_generate_response(raw_response.content)
+-
+-    choice = (data.get("choices") or [{}])[0]
+-    completion_ids = choice.get("token_ids") or []
+-
+-    parsed = await _maybe_offload(
+-        renderer, lambda: renderer.parse_response(completion_ids, tools=tools)
+-    )
++    observation_ticket: object | None = None
++    observation_phase: ObservationAbortPhase = "post_unknown"
++    if observer is not None:
++        if effective_request is None or observer_context is None:
++            raise ValueError(
++                "a prepared-request observer requires the effective request and context"
++            )
++        if features is not None:
++            raise ValueError("prepared-request observation supports text-only calls")
++        prepared = PreparedGenerateRequest(
++            application_request=_canonical_json(dict(effective_request)),
++            engine_endpoint=endpoint,
++            engine_request=_canonical_json(body),
++            engine_headers=_canonical_json(extra_headers or {}),
++            observer_context=_canonical_json(dict(observer_context)),
++            prompt_token_ids=tuple(prompt_ids),
++        )
++        observation_ticket = await observer.before_forward(prepared)
++    try:
++        raw_response = await client.post(endpoint, **post_kwargs)
++        observation_phase = "response_received"
++        data = parse_generate_response(raw_response.content)
++        choice = (data.get("choices") or [{}])[0]
++        completion_ids = choice.get("token_ids") or []
++        parsed = await _maybe_offload(
++            renderer, lambda: renderer.parse_response(completion_ids, tools=tools)
++        )
+ 
+-    # ChatCompletionLogProbs flatten: {"content": [{"logprob": ...}, ...]}
+-    raw_logprobs = choice.get("logprobs") or {}
+-    content_lp = raw_logprobs.get("content") if isinstance(raw_logprobs, dict) else None
+-    completion_logprobs = [float(c.get("logprob") or 0.0) for c in content_lp or []]
+-
+-    routed_experts = choice.get("routed_experts")
+-    kept_tokens = choice.get("kept_tokens")
+-
+-    # /inference/v1/generate returns finish_reason in {"stop","length",...} —
+-    # never "tool_calls" (a chat-completions concept). Promote stop→tool_calls
+-    # when we extracted at least one well-formed tool call client-side, so
+-    # OpenAI-compatible agent loops continue past the tool turn instead of
+-    # treating the response as final. Malformed attempts (INVALID_JSON,
+-    # UNCLOSED_BLOCK, ...) don't qualify — those still surface on
+-    # ``parsed.tool_calls`` so verifiers can inspect them, but they don't
+-    # trigger the tool-loop continuation.
+-    finish_reason = choice.get("finish_reason")
+-    ok_tool_calls = [
+-        tc for tc in parsed.tool_calls if tc.status == ToolCallParseStatus.OK
+-    ]
+-    if ok_tool_calls and finish_reason == "stop":
+-        finish_reason = "tool_calls"
+-
+-    return {
+-        "request_id": data.get("request_id") or "",
+-        "prompt_ids": list(prompt_ids),
+-        "completion_ids": list(completion_ids),
+-        "completion_logprobs": completion_logprobs,
+-        "content": parsed.content,
+-        "reasoning_content": parsed.reasoning_content,
+-        "tool_calls": parsed.tool_calls,
+-        "finish_reason": finish_reason,
+-        "routed_experts": routed_experts,
+-        "kept_tokens": kept_tokens,
+-        # The mm sidecar consumed on the request side, surfaced back so
+-        # callers can persist it on the trajectory step for downstream
+-        # multi-turn bridging and training-sample construction.
+-        "multi_modal_data": mm_data,
+-        # The renderer's per-token attribution for the prompt — either
+-        # the RenderedTokens computed here via renderer.render(...) or
+-        # the one threaded in by the caller alongside prompt_ids (the
+-        # bridge path). Lets downstream consumers (verifiers
+-        # RendererClient → prime-rl) build SFT-on-tool-body and other
+-        # selective loss masks without a second render pass. ``None``
+-        # when the caller passed prompt_ids without attribution.
+-        "prompt_attribution": prompt_attr,
+-    }
++        # ChatCompletionLogProbs flatten: {"content": [{"logprob": ...}, ...]}
++        completion_logprobs = _strict_completion_logprobs(choice, completion_ids)
++
++        routed_experts = choice.get("routed_experts")
++        kept_tokens = choice.get("kept_tokens")
++
++        # /inference/v1/generate returns finish_reason in {"stop","length",...} —
++        # never "tool_calls" (a chat-completions concept). Promote stop→tool_calls
++        # when we extracted at least one well-formed tool call client-side, so
++        # OpenAI-compatible agent loops continue past the tool turn instead of
++        # treating the response as final. Malformed attempts (INVALID_JSON,
++        # UNCLOSED_BLOCK, ...) don't qualify — those still surface on
++        # ``parsed.tool_calls`` so verifiers can inspect them, but they don't
++        # trigger the tool-loop continuation.
++        finish_reason = choice.get("finish_reason")
++        ok_tool_calls = [
++            tc for tc in parsed.tool_calls if tc.status == ToolCallParseStatus.OK
++        ]
++        if ok_tool_calls and finish_reason == "stop":
++            finish_reason = "tool_calls"
++
++        result = {
++            "request_id": data.get("request_id") or "",
++            "prompt_ids": list(prompt_ids),
++            "completion_ids": list(completion_ids),
++            "completion_logprobs": completion_logprobs,
++            "content": parsed.content,
++            "reasoning_content": parsed.reasoning_content,
++            "tool_calls": parsed.tool_calls,
++            "finish_reason": finish_reason,
++            "routed_experts": routed_experts,
++            "kept_tokens": kept_tokens,
++            # The mm sidecar consumed on the request side, surfaced back so
++            # callers can persist it on the trajectory step for downstream
++            # multi-turn bridging and training-sample construction.
++            "multi_modal_data": mm_data,
++            # The renderer's per-token attribution for the prompt — either
++            # the RenderedTokens computed here via renderer.render(...) or
++            # the one threaded in by the caller alongside prompt_ids (the
++            # bridge path). Lets downstream consumers (verifiers
++            # RendererClient → prime-rl) build SFT-on-tool-body and other
++            # selective loss masks without a second render pass. ``None``
++            # when the caller passed prompt_ids without attribution.
++            "prompt_attribution": prompt_attr,
++        }
++        observation_phase = "response_parsed"
++        if observation_ticket is not None:
++            result["_prepared_observation_ticket"] = observation_ticket
++        return result
++    except BaseException as error:
++        if observer is not None and observation_ticket is not None:
++            await abort_prepared_observation(
++                observer,
++                observation_ticket,
++                observation_phase,
++                error,
++            )
++        raise
+ 
+ 
+ def _build_mm_features(
+diff --git a/tests/test_client.py b/tests/test_client.py
+index 1cc1000..edb7729 100644
+--- a/tests/test_client.py
++++ b/tests/test_client.py
+@@ -11,7 +11,7 @@ from renderers.base import (
+     RenderedTokens,
+     ToolCallParseStatus,
+ )
+-from renderers.client import generate
++from renderers.client import PreparedGenerateRequest, generate
+ 
+ 
+ class _FakeRenderer:
+@@ -101,6 +101,90 @@ class _FakeClient:
+         )
+ 
+ 
++class _PreparedObserver:
++    def __init__(self):
++        self.events = []
++
++    async def before_forward(self, prepared):
++        assert isinstance(prepared, PreparedGenerateRequest)
++        self.events.append(("before", prepared))
++        return "ticket"
++
++    async def after_response(self, ticket, response):
++        self.events.append(("after", ticket, response))
++
++    async def abort(self, ticket, phase, error):
++        self.events.append(("abort", ticket, phase, type(error).__name__))
++
++
++def _observed_generate(client, observer):
++    return generate(
++        client=client,
++        renderer=_FakeRenderer(),
++        messages=[{"role": "user", "content": "hi"}],
++        model="test-model",
++        tools=[{"type": "function", "function": {"name": "echo"}}],
++        sampling_params={"temperature": 0.3, "max_tokens": 7},
++        effective_request={"model": "test-model", "messages": []},
++        observer_context={"trace_id": "trace-1", "rlm": {"depth": 0}},
++        observer=observer,
++    )
++
++
++def test_prepared_observer_runs_before_exactly_one_post():
++    client = _FakeClient()
++    observer = _PreparedObserver()
++    result = asyncio.run(_observed_generate(client, observer))
++
++    assert len(client.calls) == 1
++    assert [event[0] for event in observer.events] == ["before"]
++    prepared = observer.events[0][1]
++    assert json.loads(prepared.application_request) == {
++        "messages": [],
++        "model": "test-model",
++    }
++    assert json.loads(prepared.engine_request)["token_ids"] == [1, 2, 3]
++    assert prepared.prompt_token_ids == (1, 2, 3)
++    assert result.pop("_prepared_observation_ticket") == "ticket"
++
++
++def test_prepared_observer_aborts_unknown_post_outcome():
++    class FailingClient(_FakeClient):
++        async def post(self, *args, **kwargs):
++            raise ConnectionError("unknown delivery")
++
++    observer = _PreparedObserver()
++    with pytest.raises(ConnectionError, match="unknown delivery"):
++        asyncio.run(_observed_generate(FailingClient(), observer))
++    assert [event[0] for event in observer.events] == ["before", "abort"]
++    assert observer.events[-1][2:] == ("post_unknown", "ConnectionError")
++
++
++def test_prepared_observer_durably_aborts_cancelled_post():
++    class BlockingClient(_FakeClient):
++        def __init__(self):
++            super().__init__()
++            self.started = asyncio.Event()
++
++        async def post(self, *args, **kwargs):
++            self.started.set()
++            await asyncio.Event().wait()
++
++    async def exercise():
++        client = BlockingClient()
++        observer = _PreparedObserver()
++        task = asyncio.create_task(_observed_generate(client, observer))
++        await client.started.wait()
++        task.cancel()
++        with pytest.raises(asyncio.CancelledError):
++            await task
++        return observer
++
++    observer = asyncio.run(exercise())
++    assert [event[0] for event in observer.events] == ["before", "abort"]
++    assert observer.events[-1][2:] == ("post_unknown", "CancelledError")
++
++
+ def test_generate_builds_request_body_and_parses_response():
+     client = _FakeClient()
+     renderer = _FakeRenderer()
+@@ -172,6 +256,56 @@ def test_generate_builds_request_body_and_parses_response():
+     assert tc.status == ToolCallParseStatus.OK
+ 
+ 
++@pytest.mark.parametrize(
++    "case",
++    [
++        "missing_logprobs",
++        "null_content",
++        "missing_entry",
++        "null_value",
++        "nan_value",
++        "positive_value",
++        "length_mismatch",
++    ],
++)
++def test_generate_rejects_inexact_completion_logprobs(case):
++    class MalformedLogprobClient(_FakeClient):
++        async def post(self, *args, **kwargs):
++            response = await super().post(*args, **kwargs)
++            payload = json.loads(response.content)
++            choice = payload["choices"][0]
++            if case == "missing_logprobs":
++                del choice["logprobs"]
++            elif case == "null_content":
++                choice["logprobs"]["content"] = None
++            elif case == "missing_entry":
++                choice["logprobs"]["content"][0] = {}
++            elif case == "null_value":
++                choice["logprobs"]["content"][0]["logprob"] = None
++            elif case == "nan_value":
++                choice["logprobs"]["content"][0]["logprob"] = float("nan")
++            elif case == "positive_value":
++                choice["logprobs"]["content"][0]["logprob"] = 0.1
++            elif case == "length_mismatch":
++                choice["logprobs"]["content"].pop()
++            return httpx.Response(
++                200,
++                content=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
++            )
++
++    with pytest.raises(ValueError, match="logprob|token/logprob"):
++        asyncio.run(
++            generate(
++                client=MalformedLogprobClient(),
++                renderer=_FakeRenderer(),
++                messages=[{"role": "user", "content": "hi"}],
++                model="test-model",
++                tools=[{"type": "function", "function": {"name": "echo"}}],
++                sampling_params={"temperature": 0.3, "max_tokens": 7},
++            )
++        )
++
++
+ class _MalformedToolRenderer(_FakeRenderer):
+     """Returns only a malformed tool-call attempt — finish_reason must stay "stop"."""
+ 

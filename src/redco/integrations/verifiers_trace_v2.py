@@ -104,6 +104,29 @@ def extract_v2_rlm_provenance(
     return result
 
 
+def parse_v2_rlm_provenance_payload(
+    *,
+    trace_id: str,
+    payload: dict[str, Any],
+) -> RecordedRLMProvenanceV2:
+    """Parse one prepared-call provenance payload before its trace node exists."""
+    if (
+        not isinstance(trace_id, str)
+        or not trace_id
+        or len(trace_id) > 512
+        or not trace_id.isprintable()
+    ):
+        raise ValueError("trace id must be a nonempty printable string")
+    if not isinstance(payload, dict):
+        raise TypeError("RLM v2 provenance payload must be an object")
+    return _parse_v2(
+        trace_id=trace_id,
+        call_index=0,
+        node_index=0,
+        payload=payload,
+    )
+
+
 def validate_v2_spawn_ticket_ledger(
     records: tuple[RecordedRLMProvenanceV2, ...],
     ledger_dir: Path,

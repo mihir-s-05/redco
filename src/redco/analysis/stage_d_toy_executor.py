@@ -613,6 +613,7 @@ class ToySubprocessArmExecutor:
             attempt,
             context_sha256=request_evidence_sha256,
         )
+        self._writer.mark_execution_dispatched(attempt)
         if action.parse_status == "malformed":
             return self._finish_failure(
                 attempt,

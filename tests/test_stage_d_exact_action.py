@@ -34,6 +34,41 @@ def _conformance(stack_hash: str = "a" * 64) -> bytes:
     )
 
 
+@pytest.mark.parametrize("fixture_marker", [True, False, 1, "true"])
+def test_fixture_only_conformance_cannot_create_live_behavior_action(
+    fixture_marker: object,
+) -> None:
+    fixture = canonical_json(
+        sign_payload(
+            {
+                "schema_version": 1,
+                "analysis": "served-stack-categorical-logprob-conformance-v1",
+                "passes": True,
+                "logprob_semantics": "served_chosen_token_post_transform",
+                "categorical_case_count": 1,
+                "served_stack_sha256": "a" * 64,
+                "tool_call_termination_includes_all_generated_tokens": True,
+                "eos_is_included_in_action_tokens_and_logprobs": True,
+                "fixture_only": fixture_marker,
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="did not pass"):
+        ExactActionKey.build(
+            checkpoint_id="model@commit",
+            base_model_manifest=b"base",
+            adapter_manifest=None,
+            tokenizer_manifest=b"tokenizer",
+            renderer_manifest=b"renderer",
+            sampler_conformance_manifest=fixture,
+            action_selection_policy="direct_single_sample",
+            transport_retry_policy="fail_before_action_no_resample",
+            request=_request(),
+            prompt_token_ids=(10, 11),
+            render_prompt=lambda _: (10, 11),
+        )
+
+
 def _request(**changes: object) -> dict[str, object]:
     request: dict[str, object] = {
         "model": "model@commit",
@@ -78,6 +113,38 @@ def _key(**request_changes: object) -> ExactActionKey:
         request=_request(**request_changes),
         prompt_token_ids=(10, 11),
         render_prompt=lambda _: (10, 11),
+    )
+
+
+def _prepared_key(**engine_changes: object) -> ExactActionKey:
+    engine: dict[str, object] = {
+        "model": "model@commit",
+        "token_ids": [10, 11],
+        "sampling_params": {
+            "temperature": 0.7,
+            "top_p": 1.0,
+            "seed": 17,
+            "max_tokens": 2,
+            "stop_token_ids": [2],
+            "logprobs": 1,
+            "skip_special_tokens": False,
+            "parallel_tool_calls": False,
+        },
+        "cache_salt": "exact",
+    }
+    engine.update(engine_changes)
+    return ExactActionKey.build_prepared(
+        checkpoint_id="model@commit",
+        base_model_manifest=b"base manifest",
+        adapter_manifest=b"adapter manifest",
+        tokenizer_manifest=b"tokenizer manifest",
+        renderer_manifest=b"renderer manifest",
+        sampler_conformance_manifest=_conformance(),
+        action_selection_policy="direct_single_sample",
+        transport_retry_policy="fail_before_action_no_resample",
+        request=_request(),
+        prompt_token_ids=(10, 11),
+        prepared_engine_request=engine,
     )
 
 
@@ -268,6 +335,88 @@ def test_factory_normalizes_inputs_to_deeply_immutable_values() -> None:
     assert key.prompt_token_ids == (10, 11)
     assert action.action_token_ids == (20, 2)
     assert fields(ExactActionKey)[0].name == "schema_version"
+
+
+def test_prepared_engine_request_is_bound_and_round_trips() -> None:
+    key = _prepared_key()
+    assert key.schema_version == 2
+    assert key.prepared_engine_request is not None
+    assert key.prepared_engine_request_sha256 is not None
+    payload = key.to_payload()
+    loaded = ExactActionKey.from_payload(payload, render_prompt=lambda _: (10, 11))
+    assert loaded == key
+    payload["prepared_engine_request"]["token_ids"] = [99]  # type: ignore[index]
+    with pytest.raises(ExactActionMismatch, match="prompt differs"):
+        ExactActionKey.from_payload(payload, render_prompt=lambda _: (10, 11))
+
+
+def test_prepared_engine_allows_only_disabled_parallel_tool_calls() -> None:
+    assert _prepared_key().prepared_engine_request is not None
+    sampling = {
+        "temperature": 0.7,
+        "top_p": 1.0,
+        "seed": 17,
+        "max_tokens": 2,
+        "stop_token_ids": [2],
+        "logprobs": 1,
+        "skip_special_tokens": False,
+        "parallel_tool_calls": True,
+    }
+    with pytest.raises(ValueError, match="unauthorized transform"):
+        _prepared_key(sampling_params=sampling)
+
+
+def test_prepared_engine_binds_optional_routed_expert_prompt_boundary() -> None:
+    sampling = {
+        "temperature": 0.7,
+        "top_p": 1.0,
+        "seed": 17,
+        "max_tokens": 2,
+        "stop_token_ids": [2],
+        "logprobs": 1,
+        "skip_special_tokens": False,
+        "routed_experts_prompt_start": 1,
+    }
+    assert _prepared_key(sampling_params=sampling).prepared_engine_request is not None
+    sampling["routed_experts_prompt_start"] = 2
+    with pytest.raises(ValueError, match="routed-expert boundary"):
+        _prepared_key(sampling_params=sampling)
+
+
+def test_legacy_exact_action_payload_stays_byte_identical_without_prepared_fields() -> None:
+    key = _key()
+    payload = key.to_payload()
+    assert payload["schema_version"] == 1
+    assert "prepared_engine_request" not in payload
+    assert "prepared_engine_request_sha256" not in payload
+    assert ExactActionKey.from_payload(payload, render_prompt=lambda _: (10, 11)) == key
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"model": "other"},
+        {"token_ids": [10, 12]},
+        {"sampling_params": []},
+        {
+            "sampling_params": {
+                "temperature": 0.9,
+                "top_p": 1.0,
+                "seed": 17,
+                "max_tokens": 2,
+                "stop_token_ids": [2],
+                "logprobs": 1,
+                "skip_special_tokens": False,
+            }
+        },
+        {"features": {}},
+    ],
+)
+def test_prepared_engine_request_rejects_unbound_or_unsupported_transport(
+    changes: dict[str, object],
+) -> None:
+    with pytest.raises((ValueError, ExactActionMismatch)):
+        _prepared_key(**changes)
 
 
 @pytest.mark.parametrize("bad", [(0.1, -0.1), (True, -0.1), (-0.1,), (-0.1, float("nan"))])

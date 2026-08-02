@@ -183,6 +183,9 @@ def _fixture(
     continuation_replicates: int = 1,
     prompt_content: str = "q",
     temperature: float = 0.7,
+    target_address: PolicyEventAddress | None = None,
+    rollout_id: str = "rollout-1",
+    group_id: str | None = None,
 ) -> Fixture:
     store = TrustedReceiptStore()
     recorded = _action(
@@ -190,7 +193,7 @@ def _fixture(
         prompt_content=prompt_content,
         temperature=temperature,
     )
-    target = PolicyEventAddress(1, "root/child", 0, 0)
+    target = target_address or PolicyEventAddress(1, "root/child", 0, 0)
     master_seed = "master"
     prior_chain = store.chain
     receipt = store.issue(
@@ -200,8 +203,8 @@ def _fixture(
             "ledger_offset": store.offset,
             "prior_chain_sha256": prior_chain,
             "phase": "pre_action",
-            "group_id": f"group-{target_ordinal}",
-            "rollout_id": "rollout-1",
+            "group_id": group_id or f"group-{target_ordinal}",
+            "rollout_id": rollout_id,
             "target_roster": ["target-0", "target-1"],
             "target_ordinal": target_ordinal,
             "target_id": f"target-{target_ordinal}",
@@ -587,8 +590,10 @@ def test_trusted_zero_call_candidate_failure_is_separately_repairable() -> None:
             "action_seed": EventSeedScheduler(
                 "master", "rollout-1", "target-0", 1
             ).action_seed(action_slot=1),
+            "attempt_ordinal": 0,
             "attempt_id": "attempt-1",
             "scientific_model_calls": 0,
+            "successor_permitted": True,
             "reason": "capacity vanished",
         },
     )

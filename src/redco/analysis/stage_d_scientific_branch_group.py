@@ -1268,8 +1268,10 @@ def _validate_zero_call_failure(
             "target_id",
             "action_slot",
             "action_seed",
+            "attempt_ordinal",
             "attempt_id",
             "scientific_model_calls",
+            "successor_permitted",
             "reason",
         },
         "zero-call failure receipt",
@@ -1283,6 +1285,8 @@ def _validate_zero_call_failure(
         or value["target_id"] != commitment.target_id
         or value["action_slot"] != action_slot
         or value["action_seed"] != action_seed
+        or _exact_int(value["attempt_ordinal"], "attempt_ordinal") not in {0, 1}
+        or value["successor_permitted"] is not (value["attempt_ordinal"] == 0)
         or not isinstance(attempt_id, str)
         or not attempt_id
         or _exact_int(value["scientific_model_calls"], "scientific_model_calls") != 0

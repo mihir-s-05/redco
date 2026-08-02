@@ -13,6 +13,7 @@ from redco.contracts import canonical_json
 from redco.integrations.signed_subprocess import verify_signed_payload
 
 SCHEMA_VERSION = 1
+EXACT_ACTION_KEY_PREPARED_SCHEMA_VERSION = 2
 _DOMAIN = "redco-stage-d-behavior-action-v1"
 _TRANSPORT_FIELDS = {
     "model",
@@ -102,6 +103,89 @@ def _strict_keys(payload: Mapping[str, Any], expected: set[str], name: str) -> N
         )
 
 
+def _verify_prepared_engine_request(
+    engine: Mapping[str, Any],
+    request: Mapping[str, Any],
+    prompt: tuple[int, ...],
+) -> None:
+    allowed_engine = {"model", "token_ids", "sampling_params", "cache_salt", "priority"}
+    if set(engine) - allowed_engine:
+        raise ValueError("prepared engine request contains unsupported fields")
+    if not {"model", "token_ids", "sampling_params"} <= set(engine):
+        raise ValueError("prepared engine request lacks required fields")
+    if engine.get("model") != request.get("model"):
+        raise ValueError("prepared engine model differs from the application request")
+    if tuple(engine.get("token_ids", ())) != prompt:
+        raise ExactActionMismatch("prepared engine prompt differs from rendered tokens")
+    sampling = engine.get("sampling_params")
+    if not isinstance(sampling, dict):
+        raise ValueError("prepared engine sampling params must be an object")
+    required = {
+        "temperature": request.get("temperature"),
+        "top_p": request.get("top_p"),
+        "seed": request.get("seed"),
+        "max_tokens": request.get("max_tokens"),
+        "logprobs": 1,
+        "skip_special_tokens": False,
+    }
+    if any(
+        type(sampling.get(name)) is not type(expected)
+        or sampling.get(name) != expected
+        for name, expected in required.items()
+    ):
+        raise ValueError("prepared engine sampling law differs from the application request")
+    neutral_if_present: dict[str, set[tuple[type[Any], Any]]] = {
+        "top_k": {(type(None), None), (int, -1)},
+        "min_p": {(float, 0.0)},
+        "repetition_penalty": {(float, 1.0)},
+        "frequency_penalty": {(float, 0.0)},
+        "presence_penalty": {(float, 0.0)},
+        "n": {(int, 1)},
+        "best_of": {(type(None), None), (int, 1)},
+        "use_beam_search": {(bool, False)},
+        "ignore_eos": {(bool, False)},
+        "min_tokens": {(int, 0)},
+        "parallel_tool_calls": {(bool, False)},
+    }
+    allowed_sampling = set(required) | set(neutral_if_present) | {
+        "stop_token_ids",
+        "cache_salt",
+        "routed_experts_prompt_start",
+    }
+    if set(sampling) - allowed_sampling:
+        raise ValueError("prepared engine sampling params contain unsupported fields")
+    if any(
+        name in sampling
+        and (type(sampling[name]), sampling[name]) not in allowed
+        for name, allowed in neutral_if_present.items()
+    ):
+        raise ValueError("prepared engine request enables an unauthorized transform")
+    routing_start = sampling.get("routed_experts_prompt_start")
+    if routing_start is not None and (
+        type(routing_start) is not int
+        or routing_start < 0
+        or routing_start >= len(prompt)
+    ):
+        raise ValueError("prepared engine request has an invalid routed-expert boundary")
+    stop_ids = sampling.get("stop_token_ids")
+    if (
+        not isinstance(stop_ids, list)
+        or not stop_ids
+        or any(type(token) is not int or token < 0 for token in stop_ids)
+    ):
+        raise ValueError("prepared engine request lacks pinned stop token IDs")
+    extra_body = request.get("extra_body")
+    assert isinstance(extra_body, dict)
+    expected_salt = extra_body.get("cache_salt")
+    engine_salts = [
+        value
+        for value in (engine.get("cache_salt"), sampling.get("cache_salt"))
+        if value is not None
+    ]
+    if engine_salts != [expected_salt]:
+        raise ValueError("prepared engine cache salt differs from the application request")
+
+
 def _verify_sampler_conformance(payload: bytes) -> None:
     try:
         value = json.loads(payload)
@@ -119,6 +203,7 @@ def _verify_sampler_conformance(payload: bytes) -> None:
         or value.get("eos_is_included_in_action_tokens_and_logprobs") is not True
         or type(value.get("categorical_case_count")) is not int
         or value["categorical_case_count"] < 1
+        or "fixture_only" in value
     ):
         raise ValueError("sampler conformance manifest did not pass its frozen contract")
     _require_sha256(value.get("served_stack_sha256"), "served_stack_sha256")
@@ -298,6 +383,8 @@ class ExactActionKey:
     sampler_config_sha256: str
     request: bytes
     request_sha256: str
+    prepared_engine_request: bytes | None
+    prepared_engine_request_sha256: str | None
     prompt_token_ids: tuple[int, ...]
     prompt_token_ids_sha256: str
 
@@ -370,10 +457,47 @@ class ExactActionKey:
             "sampler_config_sha256": _sha256(sampler_bytes),
             "request": request_bytes,
             "request_sha256": _sha256(request_bytes),
+            "prepared_engine_request": None,
+            "prepared_engine_request_sha256": None,
             "prompt_token_ids": prompt,
             "prompt_token_ids_sha256": _sha256(prompt_bytes),
         }.items():
             object.__setattr__(self, name, field_value)
+        return self
+
+    @classmethod
+    def build_prepared(
+        cls,
+        *,
+        prepared_engine_request: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> ExactActionKey:
+        """Build from the renderer's already-prepared request without re-rendering."""
+        prompt_token_ids = kwargs.get("prompt_token_ids")
+        if not isinstance(prompt_token_ids, Sequence) or isinstance(
+            prompt_token_ids, str | bytes | bytearray
+        ):
+            raise ValueError("prepared prompt token IDs must be a sequence")
+        prompt = _token_tuple(prompt_token_ids, "prompt_token_ids")
+        engine = dict(prepared_engine_request)
+        request = kwargs.get("request")
+        if not isinstance(request, Mapping):
+            raise ValueError("prepared application request must be an object")
+        if kwargs.get("checkpoint_id") != request.get("model"):
+            raise ValueError("prepared checkpoint differs from the application request")
+        _verify_prepared_engine_request(engine, request, prompt)
+        self = cls.build(
+            **kwargs,
+            render_prompt=lambda _: prompt,
+        )
+        engine_bytes = canonical_mapping(engine)
+        object.__setattr__(self, "schema_version", EXACT_ACTION_KEY_PREPARED_SCHEMA_VERSION)
+        object.__setattr__(self, "prepared_engine_request", engine_bytes)
+        object.__setattr__(
+            self,
+            "prepared_engine_request_sha256",
+            _sha256(engine_bytes),
+        )
         return self
 
     @property
@@ -384,7 +508,7 @@ class ExactActionKey:
         return ResolvedSamplerConfig.from_request(request)
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "checkpoint_id": self.checkpoint_id,
             "base_model_manifest_sha256": self.base_model_manifest_sha256,
@@ -403,6 +527,21 @@ class ExactActionKey:
             "prompt_token_ids": list(self.prompt_token_ids),
             "prompt_token_ids_sha256": self.prompt_token_ids_sha256,
         }
+        if self.schema_version == EXACT_ACTION_KEY_PREPARED_SCHEMA_VERSION:
+            if (
+                self.prepared_engine_request is None
+                or self.prepared_engine_request_sha256 is None
+            ):
+                raise ValueError("prepared exact action key lacks engine evidence")
+            payload["prepared_engine_request"] = json.loads(
+                self.prepared_engine_request
+            )
+            payload["prepared_engine_request_sha256"] = (
+                self.prepared_engine_request_sha256
+            )
+        elif self.schema_version != SCHEMA_VERSION:
+            raise ValueError("unsupported exact action key schema")
+        return payload
 
     @classmethod
     def from_payload(
@@ -411,7 +550,7 @@ class ExactActionKey:
         *,
         render_prompt: Callable[[Mapping[str, Any]], Sequence[int]],
     ) -> ExactActionKey:
-        expected = {
+        legacy_expected = {
             "schema_version",
             "checkpoint_id",
             "base_model_manifest_sha256",
@@ -430,10 +569,18 @@ class ExactActionKey:
             "prompt_token_ids",
             "prompt_token_ids_sha256",
         }
+        schema_version = payload.get("schema_version")
+        expected = (
+            legacy_expected
+            if schema_version == SCHEMA_VERSION
+            else legacy_expected
+            | {"prepared_engine_request", "prepared_engine_request_sha256"}
+        )
         _strict_keys(payload, expected, "exact action key")
         if (
-            type(payload["schema_version"]) is not int
-            or payload["schema_version"] != SCHEMA_VERSION
+            type(schema_version) is not int
+            or schema_version
+            not in {SCHEMA_VERSION, EXACT_ACTION_KEY_PREPARED_SCHEMA_VERSION}
         ):
             raise ValueError("unsupported exact action key schema")
         checkpoint_id = payload["checkpoint_id"]
@@ -457,6 +604,21 @@ class ExactActionKey:
         if canonical_json(sampler.to_payload()) != canonical_json(sampler_payload):
             raise ValueError("stored sampler config disagrees with transport request")
         request_bytes = canonical_json(request)
+        raw_engine = payload.get("prepared_engine_request")
+        raw_engine_hash = payload.get("prepared_engine_request_sha256")
+        if schema_version == EXACT_ACTION_KEY_PREPARED_SCHEMA_VERSION:
+            if not isinstance(raw_engine, dict):
+                raise ValueError("prepared engine request must be an object")
+            engine_bytes: bytes | None = canonical_json(raw_engine)
+            engine_hash: str | None = _require_sha256(
+                raw_engine_hash,
+                "prepared_engine_request_sha256",
+            )
+            if raw_engine.get("model") != checkpoint_id:
+                raise ValueError("prepared engine request model differs")
+        else:
+            engine_bytes = None
+            engine_hash = None
         sampler_bytes = canonical_json(sampler_payload)
         tools = request.get("tools", [])
         if not isinstance(tools, list):
@@ -464,11 +626,16 @@ class ExactActionKey:
         if request["model"] != checkpoint_id or request["parallel_tool_calls"]:
             raise ValueError("stored request disagrees with model or tool selection policy")
         prompt = _token_tuple(payload["prompt_token_ids"], "prompt_token_ids")
+        if engine_bytes is not None:
+            assert isinstance(raw_engine, dict)
+            if tuple(raw_engine.get("token_ids", ())) != prompt:
+                raise ExactActionMismatch("prepared engine request prompt differs")
+            _verify_prepared_engine_request(raw_engine, request, prompt)
         rendered_prompt = _token_tuple(render_prompt(request), "rendered_prompt_token_ids")
         if rendered_prompt != prompt:
             raise ExactActionMismatch("stored request does not render to prompt tokens")
         validated = {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": schema_version,
             "checkpoint_id": checkpoint_id,
             "base_model_manifest_sha256": _require_sha256(
                 payload["base_model_manifest_sha256"], "base_model_manifest_sha256"
@@ -496,6 +663,8 @@ class ExactActionKey:
             ),
             "request": request_bytes,
             "request_sha256": _require_sha256(payload["request_sha256"], "request_sha256"),
+            "prepared_engine_request": engine_bytes,
+            "prepared_engine_request_sha256": engine_hash,
             "prompt_token_ids": prompt,
             "prompt_token_ids_sha256": _require_sha256(
                 payload["prompt_token_ids_sha256"], "prompt_token_ids_sha256"
@@ -512,6 +681,8 @@ class ExactActionKey:
             "request_sha256": _sha256(request_bytes),
             "prompt_token_ids_sha256": _sha256(canonical_json(prompt)),
         }
+        if engine_bytes is not None:
+            expected_hashes["prepared_engine_request_sha256"] = _sha256(engine_bytes)
         if any(validated[name] != value for name, value in expected_hashes.items()):
             raise ValueError("stored exact action key hash mismatch")
         self = object.__new__(cls)

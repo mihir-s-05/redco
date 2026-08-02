@@ -122,6 +122,40 @@ class LedgerSeal:
             "receipt_count": self.receipt_count,
         }
 
+    def to_bytes(self) -> bytes:
+        return canonical_json(
+            {
+                "schema_version": 1,
+                "domain": "redco-stage-d-ledger-seal-v1",
+                "seal": self.to_payload(),
+            }
+        )
+
+    @classmethod
+    def from_bytes(cls, value: bytes) -> LedgerSeal:
+        parsed = _strict_canonical_object(value, "Stage D ledger seal")
+        if set(parsed) != {"schema_version", "domain", "seal"} or (
+            parsed["schema_version"],
+            parsed["domain"],
+        ) != (1, "redco-stage-d-ledger-seal-v1"):
+            raise ValueError("unsupported Stage D ledger seal")
+        seal = parsed["seal"]
+        if not isinstance(seal, dict) or set(seal) != {
+            "ledger_id",
+            "genesis_sha256",
+            "head_sha256",
+            "record_count",
+            "receipt_count",
+        }:
+            raise ValueError("Stage D ledger seal fields differ")
+        return cls(
+            seal["ledger_id"],
+            seal["genesis_sha256"],
+            seal["head_sha256"],
+            seal["record_count"],
+            seal["receipt_count"],
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class CandidateAttempt:
@@ -130,6 +164,7 @@ class CandidateAttempt:
     target_id: str
     action_slot: int
     action_seed: int
+    attempt_ordinal: int
     attempt_id: str
 
 
@@ -143,6 +178,35 @@ class RecordedActionReservation:
     exact_action_key_digest: str
     request_sha256: str
     commitment_receipt: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class SourcePolicyCallReservation:
+    ledger_id: str
+    group_id: str
+    rollout_id: str
+    decision_id: str
+    receipt: bytes
+    exact_action_key_digest: str
+    request_sequence: int
+
+
+@dataclass(frozen=True, slots=True)
+class SourceRolloutCompletion:
+    ledger_id: str
+    group_id: str
+    rollout_id: str
+    source_sha256: str
+    receipt: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class StageDTrainingBatchAuthorization:
+    ledger_id: str
+    arm: Literal["stock", "branch-global", "local"]
+    training_batch_identity: str
+    sealed_batch_sha256: str
+    receipt: bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +258,9 @@ class SealedReceiptVerifier:
 
 class StageDReceiptLedger:
     """Exclusive trusted writer and live receipt verifier for one Stage D run."""
+
+    _branch_target_roster_sha256: str | None
+    _branch_target_keys: set[tuple[str, str]]
 
     def __init__(
         self,
@@ -286,6 +353,25 @@ class StageDReceiptLedger:
     def head_sha256(self) -> str:
         return self._record_sha256s[-1]
 
+    @property
+    def completed_source_sha256s(self) -> tuple[str, ...]:
+        """Return the exact completed-source roster anchored in this live writer."""
+        return tuple(
+            sorted(
+                completion.source_sha256 for completion in self._source_rollout_completed.values()
+            )
+        )
+
+    @property
+    def completed_branch_artifact_sha256s(self) -> tuple[str, ...]:
+        """Return the exact completed scientific-artifact roster."""
+        return tuple(sorted(self._branch_artifacts.values()))
+
+    @property
+    def branch_target_roster_sha256(self) -> str | None:
+        """Return the single frozen target-roster identity, if one was recorded."""
+        return self._branch_target_roster_sha256
+
     def __enter__(self) -> StageDReceiptLedger:
         return self
 
@@ -301,10 +387,13 @@ class StageDReceiptLedger:
     @_writer_transaction
     def __call__(self, receipt: bytes, *, receipt_kind: str) -> Mapping[str, Any]:
         self._require_writable()
-        scan = inspect_ledger(self._root)
+        scan = inspect_ledger(self._root, allow_source_inflight=True)
         if scan.status != "active-clean":
             self._poisoned = True
-            raise LedgerPoisoned("live ledger is no longer active-clean")
+            raise LedgerPoisoned(
+                "live ledger is no longer active-clean"
+                + (f": {scan.reason}" if scan.reason else "")
+            )
         return _lookup_receipt(scan, receipt, receipt_kind)
 
     @_writer_transaction
@@ -322,6 +411,495 @@ class StageDReceiptLedger:
         _atomic_blob_write(path, evidence)
         self._evidence_refs.add(digest)
         return digest
+
+    @_writer_transaction
+    def reserve_source_policy_call(
+        self,
+        *,
+        group_id: str,
+        rollout_id: str,
+        decision_id: str,
+        node_kind: Literal["root", "child"],
+        target_id: str | None,
+        target_ordinal: int | None,
+        target_address: PolicyEventAddress,
+        recorded_action_key: ExactActionKey,
+        request_sha256: str,
+        branch_selected: bool,
+        recorded_action_reservation: RecordedActionReservation | None = None,
+    ) -> SourcePolicyCallReservation:
+        """Durably reserve one source-rollout policy call before forwarding it."""
+        self._require_writable()
+        if not group_id or not rollout_id or not decision_id:
+            raise ValueError("source policy identifiers must be nonempty")
+        if node_kind not in {"root", "child"}:
+            raise ValueError("source policy node kind must be root or child")
+        if (node_kind == "root" and (target_id is not None or target_ordinal is not None)) or (
+            node_kind == "child"
+            and (not target_id or type(target_ordinal) is not int or target_ordinal < 0)
+        ):
+            raise ValueError("source policy target fields disagree with node kind")
+        if type(branch_selected) is not bool:
+            raise ValueError("branch_selected must be bool")
+        if branch_selected and node_kind != "child":
+            raise ValueError("only child decisions can be selected for branching")
+        self._require_evidence(request_sha256)
+        if request_sha256 != recorded_action_key.request_sha256:
+            raise ValueError("source policy request evidence differs from exact action key")
+        key = (rollout_id, decision_id)
+        if key in self._source_policy_pending or key in self._source_policy_completed:
+            raise LedgerError("source policy decision is already reserved")
+        commitment_sha256: str | None = None
+        recorded_action_reservation_id: str | None = None
+        if branch_selected:
+            assert target_id is not None
+            commitment = self._commitments.get((group_id, target_id))
+            if commitment is None:
+                raise LedgerError("selected source policy call lacks pre-action commitment")
+            if (
+                commitment["rollout_id"] != rollout_id
+                or commitment["target_address"] != _address_payload(target_address)
+                or commitment["target_ordinal"] != target_ordinal
+            ):
+                raise LedgerError("selected source policy call differs from its commitment")
+            commitment_sha256 = _sha256(canonical_json(commitment))
+            state = self._recorded_reservations.get((group_id, target_id))
+            if (
+                recorded_action_reservation is None
+                or state is None
+                or state["reservation"] != recorded_action_reservation
+                or recorded_action_reservation.ledger_id != self._ledger_id
+                or recorded_action_reservation.exact_action_key_digest != recorded_action_key.digest
+                or recorded_action_reservation.request_sha256 != request_sha256
+            ):
+                raise LedgerError(
+                    "selected source call lacks its same-ledger recorded-action reservation"
+                )
+            recorded_action_reservation_id = recorded_action_reservation.reservation_id
+        elif recorded_action_reservation is not None:
+            raise ValueError("unselected source calls cannot name recorded-action reservations")
+        request_sequence = len(self._records)
+        receipt = self._append_receipt(
+            "source_policy_call_reserved",
+            {
+                "ledger_id": self._ledger_id,
+                "ledger_offset": request_sequence,
+                "prior_chain_sha256": self.head_sha256,
+                "group_id": group_id,
+                "rollout_id": rollout_id,
+                "decision_id": decision_id,
+                "node_kind": node_kind,
+                "target_id": target_id,
+                "target_ordinal": target_ordinal,
+                "target_address": _address_payload(target_address),
+                "exact_action_key_digest": recorded_action_key.digest,
+                "request_sha256": request_sha256,
+                "branch_selected": branch_selected,
+                "target_commitment_receipt_sha256": commitment_sha256,
+                "recorded_action_reservation_id": recorded_action_reservation_id,
+                "request_sequence": request_sequence,
+            },
+            evidence_refs=(request_sha256,),
+        )
+        reservation = SourcePolicyCallReservation(
+            self._ledger_id,
+            group_id,
+            rollout_id,
+            decision_id,
+            receipt,
+            recorded_action_key.digest,
+            request_sequence,
+        )
+        self._source_policy_pending[key] = reservation
+        self._source_policy_reservations[key] = json.loads(receipt)
+        return reservation
+
+    @_writer_transaction
+    def complete_source_policy_call(
+        self,
+        reservation: SourcePolicyCallReservation,
+        *,
+        action: BehaviorAction,
+        response_sha256: str,
+    ) -> bytes:
+        """Anchor the exact response for a previously reserved source policy call."""
+        self._require_writable()
+        key = (reservation.rollout_id, reservation.decision_id)
+        if self._source_policy_pending.get(key) != reservation:
+            raise LedgerError("source policy reservation is not pending")
+        if (
+            reservation.ledger_id != self._ledger_id
+            or action.key.digest != reservation.exact_action_key_digest
+        ):
+            raise LedgerError("source policy completion differs from its reservation")
+        self._require_evidence(response_sha256)
+        if response_sha256 != _sha256(action.to_bytes()):
+            raise ValueError("source policy response evidence differs from exact action")
+        completion_sequence = len(self._records)
+        receipt = self._append_receipt(
+            "source_policy_call_completed",
+            {
+                "ledger_id": self._ledger_id,
+                "ledger_offset": completion_sequence,
+                "prior_chain_sha256": self.head_sha256,
+                "group_id": reservation.group_id,
+                "rollout_id": reservation.rollout_id,
+                "decision_id": reservation.decision_id,
+                "request_receipt_sha256": _sha256(reservation.receipt),
+                "exact_action_key_digest": reservation.exact_action_key_digest,
+                "action_digest": action.digest,
+                "response_sha256": response_sha256,
+                "request_sequence": reservation.request_sequence,
+                "completion_sequence": completion_sequence,
+            },
+            evidence_refs=(response_sha256,),
+        )
+        del self._source_policy_pending[key]
+        self._source_policy_completed[key] = _sha256(receipt)
+        return receipt
+
+    @_writer_transaction
+    def abort_source_policy_call(
+        self,
+        reservation: SourcePolicyCallReservation,
+        *,
+        phase: Literal[
+            "post_unknown",
+            "response_received",
+            "response_parsed",
+            "typed_response",
+        ],
+        error_sha256: str,
+    ) -> bytes:
+        """Durably terminate an observed source call that cannot be completed.
+
+        Any such abort makes the scientific ledger terminal.  The receipt exists
+        so a transport ambiguity cannot be mistaken for an unused reservation.
+        """
+        self._require_writable()
+        key = (reservation.rollout_id, reservation.decision_id)
+        if self._source_policy_pending.get(key) != reservation:
+            raise LedgerError("source policy reservation is not pending")
+        if reservation.ledger_id != self._ledger_id:
+            raise LedgerError("source policy abort belongs to another ledger")
+        if phase not in {
+            "post_unknown",
+            "response_received",
+            "response_parsed",
+            "typed_response",
+        }:
+            raise ValueError("source policy abort phase is invalid")
+        self._require_evidence(error_sha256)
+        abort_sequence = len(self._records)
+        receipt = self._append_receipt(
+            "source_policy_call_aborted",
+            {
+                "ledger_id": self._ledger_id,
+                "ledger_offset": abort_sequence,
+                "prior_chain_sha256": self.head_sha256,
+                "group_id": reservation.group_id,
+                "rollout_id": reservation.rollout_id,
+                "decision_id": reservation.decision_id,
+                "request_receipt_sha256": _sha256(reservation.receipt),
+                "exact_action_key_digest": reservation.exact_action_key_digest,
+                "error_sha256": error_sha256,
+                "phase": phase,
+                "request_sequence": reservation.request_sequence,
+                "abort_sequence": abort_sequence,
+            },
+            evidence_refs=(error_sha256,),
+        )
+        del self._source_policy_pending[key]
+        self._poisoned = True
+        return receipt
+
+    @_writer_transaction
+    def abort_source_child_before_post(
+        self,
+        reservation: RecordedActionReservation,
+        *,
+        rollout_id: str,
+        error_sha256: str,
+    ) -> bytes:
+        """Durably poison a committed child that never obtained a POST ticket."""
+        self._require_writable()
+        state = self._recorded_action_state(reservation)
+        if state["started"] or state["materialized"]:
+            raise LedgerError("pre-POST abort follows a recorded model call")
+        if not rollout_id:
+            raise ValueError("pre-POST abort requires a rollout ID")
+        self._require_evidence(error_sha256)
+        abort_sequence = len(self._records)
+        receipt = self._append_receipt(
+            "source_child_pre_post_aborted",
+            {
+                "ledger_id": self._ledger_id,
+                "ledger_offset": abort_sequence,
+                "prior_chain_sha256": self.head_sha256,
+                "group_id": reservation.group_id,
+                "rollout_id": rollout_id,
+                "target_id": reservation.target_id,
+                "reservation_id": reservation.reservation_id,
+                "exact_action_key_digest": reservation.exact_action_key_digest,
+                "error_sha256": error_sha256,
+                "phase": "before_post",
+                "abort_sequence": abort_sequence,
+            },
+            evidence_refs=(error_sha256,),
+        )
+        self._poisoned = True
+        return receipt
+
+    @_writer_transaction
+    def abort_source_rollout_finalization(
+        self,
+        *,
+        group_id: str,
+        rollout_id: str,
+        error_sha256: str,
+    ) -> bytes:
+        """Durably terminate a rollout whose observed calls cannot form a source."""
+        self._require_writable()
+        if not group_id or not rollout_id:
+            raise ValueError("source finalization abort requires rollout identifiers")
+        if (group_id, rollout_id) in self._source_rollout_completed:
+            raise LedgerError("completed source rollout cannot be aborted")
+        completed = {
+            decision_id
+            for completed_rollout, decision_id in self._source_policy_completed
+            if completed_rollout == rollout_id
+        }
+        if not completed:
+            raise LedgerError("source finalization abort requires completed policy calls")
+        if any(pending_rollout == rollout_id for pending_rollout, _ in self._source_policy_pending):
+            raise LedgerError("source finalization abort cannot hide a pending policy call")
+        self._require_evidence(error_sha256)
+        abort_sequence = len(self._records)
+        receipt = self._append_receipt(
+            "source_rollout_finalization_aborted",
+            {
+                "ledger_id": self._ledger_id,
+                "ledger_offset": abort_sequence,
+                "prior_chain_sha256": self.head_sha256,
+                "group_id": group_id,
+                "rollout_id": rollout_id,
+                "decision_ids": sorted(completed),
+                "error_sha256": error_sha256,
+                "phase": "source_finalization",
+                "abort_sequence": abort_sequence,
+            },
+            evidence_refs=(error_sha256,),
+        )
+        self._poisoned = True
+        return receipt
+
+    @_writer_transaction
+    def record_source_rollout_completed(
+        self,
+        *,
+        group_id: str,
+        rollout_id: str,
+        source_sha256: str,
+        trace_sha256: str,
+        reward_evidence_sha256: str,
+        stock_sequences_evidence_sha256: str,
+        base_model_manifest_sha256: str,
+        decision_ids: Sequence[str],
+        decision_completion_receipt_sha256s: Sequence[str],
+    ) -> SourceRolloutCompletion:
+        """Seal one complete source rollout after all of its policy calls."""
+        self._require_writable()
+        if not group_id or not rollout_id:
+            raise ValueError("source rollout identifiers must be nonempty")
+        for value, name in (
+            (source_sha256, "source_sha256"),
+            (trace_sha256, "trace_sha256"),
+            (reward_evidence_sha256, "reward_evidence_sha256"),
+            (stock_sequences_evidence_sha256, "stock_sequences_evidence_sha256"),
+            (base_model_manifest_sha256, "base_model_manifest_sha256"),
+        ):
+            _require_sha256(value, name)
+        evidence_refs = tuple(
+            sorted(
+                {
+                    trace_sha256,
+                    reward_evidence_sha256,
+                    stock_sequences_evidence_sha256,
+                }
+            )
+        )
+        for digest in evidence_refs:
+            self._require_evidence(digest)
+        ids = tuple(decision_ids)
+        receipt_hashes = tuple(decision_completion_receipt_sha256s)
+        if not ids or len(ids) != len(receipt_hashes) or len(set(ids)) != len(ids):
+            raise ValueError("source rollout decision roster must be nonempty and unique")
+        if any(not decision_id for decision_id in ids):
+            raise ValueError("source rollout decision IDs must be nonempty")
+        if any(
+            _require_sha256(digest, "decision completion receipt sha256") != digest
+            for digest in receipt_hashes
+        ):
+            raise AssertionError("unreachable")
+        expected = {
+            decision_id: self._source_policy_completed.get((rollout_id, decision_id))
+            for decision_id in ids
+        }
+        if any(
+            expected[decision_id] != digest
+            for decision_id, digest in zip(ids, receipt_hashes, strict=True)
+        ):
+            raise LedgerError("source rollout names an unanchored policy completion")
+        completed_for_rollout = {
+            decision_id
+            for (completed_rollout, decision_id) in self._source_policy_completed
+            if completed_rollout == rollout_id
+        }
+        if completed_for_rollout != set(ids):
+            raise LedgerError("source rollout decision roster is incomplete")
+        completed_receipts = [
+            self._receipts.get(("source_policy_call_completed", digest))
+            for digest in receipt_hashes
+        ]
+        if any(
+            receipt is None or receipt.get("group_id") != group_id for receipt in completed_receipts
+        ):
+            raise LedgerError("source rollout policy completions cross groups")
+        request_sequences = [
+            cast(dict[str, Any], receipt)["request_sequence"] for receipt in completed_receipts
+        ]
+        if request_sequences != sorted(request_sequences):
+            raise LedgerError("source rollout decision roster changed request order")
+        key = (group_id, rollout_id)
+        if key in self._source_rollout_completed:
+            raise LedgerError("source rollout is already completed")
+        completion_sequence = len(self._records)
+        receipt = self._append_receipt(
+            "source_rollout_completed",
+            {
+                "ledger_id": self._ledger_id,
+                "ledger_offset": completion_sequence,
+                "prior_chain_sha256": self.head_sha256,
+                "group_id": group_id,
+                "rollout_id": rollout_id,
+                "source_sha256": source_sha256,
+                "trace_sha256": trace_sha256,
+                "reward_evidence_sha256": reward_evidence_sha256,
+                "stock_sequences_evidence_sha256": stock_sequences_evidence_sha256,
+                "base_model_manifest_sha256": base_model_manifest_sha256,
+                "decision_ids": list(ids),
+                "decision_completion_receipt_sha256s": list(receipt_hashes),
+                "completion_sequence": completion_sequence,
+            },
+            evidence_refs=evidence_refs,
+        )
+        completion = SourceRolloutCompletion(
+            self._ledger_id,
+            group_id,
+            rollout_id,
+            source_sha256,
+            receipt,
+        )
+        self._source_rollout_completed[key] = completion
+        return completion
+
+    @_writer_transaction
+    def record_branch_target_roster(self, roster_bytes: bytes) -> bytes:
+        """Freeze the complete source denominator and eligible target set before replay."""
+        self._require_writable()
+        roster = _strict_canonical_object(roster_bytes, "Stage D branch target roster")
+        expected_fields = {
+            "schema_version",
+            "domain",
+            "planned_source_count",
+            "completed_source_count",
+            "eligible_source_count",
+            "ineligible_source_count",
+            "minimum_eligible_sources",
+            "eligibility_passed",
+            "source_sha256s",
+            "targets",
+        }
+        if (
+            set(roster) != expected_fields
+            or roster.get("schema_version") != 1
+            or roster.get("domain") != "redco-stage-d-branch-target-roster-v1"
+        ):
+            raise ValueError("unsupported Stage D branch target roster")
+        if self._branch_target_roster_sha256 is not None:
+            raise LedgerError("branch target roster is already frozen")
+        if (
+            self._candidate_slots
+            or self._pending_candidates
+            or self._executions
+            or self._pending_executions
+            or self._branch_artifacts
+        ):
+            raise LedgerError("branch target roster must precede scientific activity")
+        planned = roster.get("planned_source_count")
+        completed = roster.get("completed_source_count")
+        eligible = roster.get("eligible_source_count")
+        ineligible = roster.get("ineligible_source_count")
+        minimum = roster.get("minimum_eligible_sources")
+        passed = roster.get("eligibility_passed")
+        if (
+            type(planned) is not int
+            or planned < 1
+            or type(completed) is not int
+            or completed != planned
+            or completed != len(self._source_rollout_completed)
+            or type(eligible) is not int
+            or eligible < 0
+            or type(ineligible) is not int
+            or ineligible != completed - eligible
+            or type(minimum) is not int
+            or minimum < 1
+            or minimum > planned
+            or type(passed) is not bool
+            or passed is not (eligible >= minimum)
+        ):
+            raise ValueError("branch target roster denominator is invalid")
+        source_sha256s = roster.get("source_sha256s")
+        expected_sources = self.completed_source_sha256s
+        if (
+            not isinstance(source_sha256s, list)
+            or source_sha256s != sorted(set(source_sha256s))
+            or tuple(source_sha256s) != expected_sources
+        ):
+            raise ValueError("branch target roster differs from completed sources")
+        targets = roster.get("targets")
+        if not isinstance(targets, list):
+            raise ValueError("branch target roster targets must be a list")
+        normalized_targets = tuple(self._validate_roster_target(item) for item in targets)
+        target_keys = {(item["group_id"], item["target_id"]) for item in normalized_targets}
+        if len(target_keys) != len(normalized_targets) or target_keys != set(self._commitments):
+            raise ValueError("branch target roster differs from committed targets")
+        if eligible != len({item["source_sha256"] for item in normalized_targets}):
+            raise ValueError("eligible-source count differs from target roster")
+        digest = self.put_evidence(roster_bytes)
+        offset = len(self._records)
+        receipt = self._append_receipt(
+            "branch_target_roster",
+            {
+                "ledger_id": self._ledger_id,
+                "ledger_offset": offset,
+                "prior_chain_sha256": self.head_sha256,
+                "roster_sha256": digest,
+                "planned_source_count": planned,
+                "completed_source_count": completed,
+                "eligible_source_count": eligible,
+                "ineligible_source_count": ineligible,
+                "minimum_eligible_sources": minimum,
+                "eligibility_passed": passed,
+                "source_sha256s": source_sha256s,
+                "targets": list(normalized_targets),
+                "roster_sequence": offset,
+            },
+            evidence_refs=(digest,),
+        )
+        self._branch_target_roster_sha256 = digest
+        self._branch_target_keys = target_keys
+        return receipt
 
     @_writer_transaction
     def commit_pre_action_and_reserve(
@@ -541,14 +1119,9 @@ class StageDReceiptLedger:
             {
                 "group_id": group_id,
                 "target_id": target_id,
-                "pre_action_snapshot_sha256": commitment[
-                    "pre_action_snapshot_sha256"
-                ],
+                "pre_action_snapshot_sha256": commitment["pre_action_snapshot_sha256"],
                 "recorded_action_digest": recorded_action.digest,
-                "matched_addresses": [
-                    _address_payload(address)
-                    for address in ordered_addresses
-                ],
+                "matched_addresses": [_address_payload(address) for address in ordered_addresses],
             },
             evidence_refs=(evidence_sha256,),
         )
@@ -582,9 +1155,7 @@ class StageDReceiptLedger:
             {
                 "group_id": group_id,
                 "target_id": target_id,
-                "pre_action_snapshot_sha256": commitment[
-                    "pre_action_snapshot_sha256"
-                ],
+                "pre_action_snapshot_sha256": commitment["pre_action_snapshot_sha256"],
                 "recorded_action_digest": recorded_action.digest,
                 "passed": passed,
                 "report_sha256": report_sha256,
@@ -612,6 +1183,9 @@ class StageDReceiptLedger:
         slot_key = (*key, action_slot)
         if slot_key in self._candidate_slots or slot_key in self._pending_candidates:
             raise LedgerError("candidate slot already has an attempt or outcome")
+        attempt_ordinal = self._candidate_zero_call_failures.get(slot_key, 0)
+        if attempt_ordinal > 1:
+            raise LedgerError("candidate slot exhausted its one bounded repair")
         action_seed = EventSeedScheduler(
             self._master_seed,
             commitment["rollout_id"],
@@ -625,6 +1199,7 @@ class StageDReceiptLedger:
             target_id,
             action_slot,
             action_seed,
+            attempt_ordinal,
             attempt_id,
         )
         self._append_event(
@@ -634,6 +1209,7 @@ class StageDReceiptLedger:
                 "target_id": target_id,
                 "action_slot": action_slot,
                 "action_seed": action_seed,
+                "attempt_ordinal": attempt_ordinal,
                 "attempt_id": attempt_id,
             },
             evidence_refs=(),
@@ -748,14 +1324,16 @@ class StageDReceiptLedger:
                 "target_id": attempt.target_id,
                 "action_slot": attempt.action_slot,
                 "action_seed": attempt.action_seed,
+                "attempt_ordinal": attempt.attempt_ordinal,
                 "attempt_id": attempt.attempt_id,
                 "scientific_model_calls": 0,
+                "successor_permitted": attempt.attempt_ordinal == 0,
                 "reason": reason,
             },
             evidence_refs=(supervisor_evidence_sha256,),
         )
         slot_key = (attempt.group_id, attempt.target_id, attempt.action_slot)
-        self._candidate_slots[slot_key] = "zero-call-failure"
+        self._candidate_zero_call_failures[slot_key] = attempt.attempt_ordinal + 1
         del self._pending_candidates[slot_key]
         return receipt
 
@@ -819,6 +1397,7 @@ class StageDReceiptLedger:
             "calls": [],
             "in_flight": None,
             "context_sha256": None,
+            "dispatched": False,
         }
         return attempt
 
@@ -851,6 +1430,29 @@ class StageDReceiptLedger:
         state["context_sha256"] = context_sha256
 
     @_writer_transaction
+    def mark_execution_dispatched(self, attempt: ExecutionAttempt) -> None:
+        """Close the zero-information repair window before sandbox/action dispatch."""
+        state = self._execution_state(attempt)
+        if state["context_sha256"] is None:
+            raise LedgerError("execution context must be bound before dispatch")
+        if state["dispatched"]:
+            raise LedgerError("execution was already dispatched")
+        if state["calls"] or state["in_flight"] is not None:
+            raise LedgerError("execution dispatch must precede downstream calls")
+        self._append_event(
+            "execution_dispatched",
+            {
+                "attempt_id": attempt.attempt_id,
+                "group_id": attempt.group_id,
+                "target_id": attempt.target_id,
+                "arm_id": attempt.arm_id,
+                "continuation_replicate": attempt.continuation_replicate,
+            },
+            evidence_refs=(),
+        )
+        state["dispatched"] = True
+
+    @_writer_transaction
     def mark_execution_model_call_started(
         self,
         attempt: ExecutionAttempt,
@@ -863,6 +1465,8 @@ class StageDReceiptLedger:
         self._require_evidence(request_sha256)
         if state["context_sha256"] is None:
             raise LedgerError("execution context must be bound before model dispatch")
+        if not state["dispatched"]:
+            raise LedgerError("execution must be dispatched before a model call")
         if state["in_flight"] is not None:
             raise LedgerError("one execution model call is already in flight")
         if any(call["address"] == address for call in state["calls"]):
@@ -952,6 +1556,8 @@ class StageDReceiptLedger:
         self._require_evidence(scorer_evidence_sha256)
         if state["context_sha256"] is None:
             raise LedgerError("execution context must be bound before its outcome")
+        if not state["dispatched"]:
+            raise LedgerError("execution must be dispatched before its outcome")
         if state["in_flight"] is not None:
             raise LedgerError("cannot finish with a model call in flight")
         if not isinstance(outcome_kind, OutcomeKind):
@@ -974,10 +1580,7 @@ class StageDReceiptLedger:
             else _finite_float(scored_reward, "scored_reward")
         )
         action: BehaviorAction = state["action"]
-        if (
-            action.parse_status == "malformed"
-            and outcome_kind is not OutcomeKind.MALFORMED_ACTION
-        ):
+        if action.parse_status == "malformed" and outcome_kind is not OutcomeKind.MALFORMED_ACTION:
             raise ValueError("malformed action must retain a malformed outcome")
         downstream_tokens = sum(call["completion_tokens"] for call in calls)
         logical = LogicalDeploymentCost(
@@ -1042,6 +1645,54 @@ class StageDReceiptLedger:
         return receipt
 
     @_writer_transaction
+    def record_branch_group_artifact_completed(
+        self,
+        *,
+        group_id: str,
+        target_id: str,
+        artifact_sha256: str,
+        training_batch_identity: str,
+    ) -> bytes:
+        """Anchor a fully materialized K-by-c artifact after every primitive receipt."""
+        key = self._require_scientific_ready(group_id, target_id)
+        self._require_evidence(artifact_sha256)
+        _require_sha256(training_batch_identity, "training_batch_identity")
+        if key in self._branch_artifacts:
+            raise LedgerError("branch group artifact is already completed")
+        commitment = self._commitments[key]
+        expected_candidate_slots = {
+            (*key, slot) for slot in range(1, commitment["branch_count"])
+        }
+        actual_candidate_slots = {
+            slot for slot in self._candidate_slots if slot[:2] == key
+        }
+        expected_executions = {
+            (*key, f"arm-{slot}", replicate)
+            for slot in range(commitment["branch_count"])
+            for replicate in range(1, commitment["continuation_replicates"] + 1)
+        }
+        actual_executions = {item for item in self._executions if item[:2] == key}
+        if (
+            actual_candidate_slots != expected_candidate_slots
+            or actual_executions != expected_executions
+        ):
+            raise LedgerError("branch artifact completion lacks its exact K-by-c denominator")
+        receipt = self._append_receipt(
+            "branch_group_artifact_completed",
+            {
+                "group_id": group_id,
+                "target_id": target_id,
+                "artifact_sha256": artifact_sha256,
+                "training_batch_identity": training_batch_identity,
+                "branch_count": commitment["branch_count"],
+                "continuation_replicates": commitment["continuation_replicates"],
+            },
+            evidence_refs=(artifact_sha256,),
+        )
+        self._branch_artifacts[key] = artifact_sha256
+        return receipt
+
+    @_writer_transaction
     def claim_training_batch(
         self,
         *,
@@ -1076,17 +1727,119 @@ class StageDReceiptLedger:
         return receipt
 
     @_writer_transaction
+    def authorize_stage_d_training_batch(
+        self,
+        *,
+        arm: Literal["stock", "branch-global", "local"],
+        training_batch_identity: str,
+        sealed_batch_sha256: str,
+        objective_sha256: str,
+        objective_authorization_sha256: str,
+        collection_plan_sha256: str,
+        collection_receipt_sha256: str,
+        source_sha256s: Sequence[str],
+        branch_artifact_sha256s: Sequence[str],
+        consumer_id: str,
+    ) -> StageDTrainingBatchAuthorization:
+        """Issue one same-ledger, single-use authorization for an exact live arm batch."""
+        self._require_writable()
+        if arm not in {"stock", "branch-global", "local"}:
+            raise ValueError("unsupported Stage D training arm")
+        for digest, name in (
+            (training_batch_identity, "training_batch_identity"),
+            (sealed_batch_sha256, "sealed_batch_sha256"),
+            (objective_sha256, "objective_sha256"),
+            (objective_authorization_sha256, "objective_authorization_sha256"),
+            (collection_plan_sha256, "collection_plan_sha256"),
+            (collection_receipt_sha256, "collection_receipt_sha256"),
+        ):
+            _require_sha256(digest, name)
+        if not consumer_id:
+            raise ValueError("consumer_id must be nonempty")
+        sources = tuple(source_sha256s)
+        artifacts = tuple(branch_artifact_sha256s)
+        if not sources or tuple(sorted(set(sources))) != sources:
+            raise ValueError("source SHA-256 roster must be sorted, unique, and nonempty")
+        if tuple(sorted(set(artifacts))) != artifacts:
+            raise ValueError("branch artifact SHA-256 roster must be sorted and unique")
+        if (arm == "stock") != (not artifacts):
+            raise ValueError("only the stock arm may have an empty branch-artifact roster")
+        for digest in (*sources, *artifacts):
+            _require_sha256(digest, "Stage D batch evidence SHA-256")
+        completed_sources = {
+            completion.source_sha256 for completion in self._source_rollout_completed.values()
+        }
+        if set(sources) != completed_sources:
+            raise LedgerError("Stage D batch source roster differs from completed rollouts")
+        evidence_refs = tuple(
+            sorted(
+                {
+                    sealed_batch_sha256,
+                    objective_authorization_sha256,
+                    collection_plan_sha256,
+                    collection_receipt_sha256,
+                    *artifacts,
+                }
+            )
+        )
+        for digest in evidence_refs:
+            self._require_evidence(digest)
+        if training_batch_identity in self._batch_claims:
+            raise BatchAlreadyClaimed(training_batch_identity)
+        claim_sequence = len(self._records)
+        receipt = self._append_receipt(
+            "stage_d_training_batch_authorization",
+            {
+                "ledger_id": self._ledger_id,
+                "ledger_offset": claim_sequence,
+                "prior_chain_sha256": self.head_sha256,
+                "arm": arm,
+                "training_batch_identity": training_batch_identity,
+                "sealed_batch_sha256": sealed_batch_sha256,
+                "objective_sha256": objective_sha256,
+                "objective_authorization_sha256": objective_authorization_sha256,
+                "collection_plan_sha256": collection_plan_sha256,
+                "collection_receipt_sha256": collection_receipt_sha256,
+                "source_sha256s": list(sources),
+                "branch_artifact_sha256s": list(artifacts),
+                "consumer_id": consumer_id,
+                "claim_sequence": claim_sequence,
+                "single_use": True,
+            },
+            evidence_refs=evidence_refs,
+        )
+        self._batch_claims.add(training_batch_identity)
+        return StageDTrainingBatchAuthorization(
+            self._ledger_id,
+            arm,
+            training_batch_identity,
+            sealed_batch_sha256,
+            receipt,
+        )
+
+    @_writer_transaction
     def seal(self) -> LedgerSeal:
         self._require_writable()
         if (
             self._pending_candidates
             or self._pending_executions
-            or any(
-                not state["materialized"]
-                for state in self._recorded_reservations.values()
-            )
+            or self._source_policy_pending
+            or any(not state["materialized"] for state in self._recorded_reservations.values())
         ):
             raise LedgerPoisoned("cannot seal with dangling scientific attempts")
+        covered = {
+            (completion.rollout_id, decision_id)
+            for completion in self._source_rollout_completed.values()
+            for decision_id in json.loads(completion.receipt)["decision_ids"]
+        }
+        if covered != set(self._source_policy_completed):
+            raise LedgerPoisoned("cannot seal with unbound source policy completions")
+        if (
+            self._source_rollout_completed
+            and self._commitments
+            and self._branch_target_roster_sha256 is None
+        ):
+            raise LedgerPoisoned("cannot seal completed sources without a target roster")
         receipt_count = len(self._receipts)
         genesis_sha256 = self._record_sha256s[0]
         seal_offset = len(self._records)
@@ -1119,9 +1872,7 @@ class StageDReceiptLedger:
     ) -> bytes:
         if not receipt_kind:
             raise ValueError("receipt_kind must be nonempty")
-        receipt = canonical_json(
-            {"schema_version": 1, "receipt_kind": receipt_kind, **payload}
-        )
+        receipt = canonical_json({"schema_version": 1, "receipt_kind": receipt_kind, **payload})
         if len(receipt) > _MAX_RECEIPT_BYTES:
             raise ValueError("receipt exceeds the one-MiB cap")
         digest = _sha256(receipt)
@@ -1207,9 +1958,60 @@ class StageDReceiptLedger:
 
     def _require_scientific_ready(self, group_id: str, target_id: str) -> tuple[str, str]:
         key = self._require_committed(group_id, target_id)
+        self._require_target_rostered(key)
         if key not in self._correspondence or self._qa_passed.get(key) is not True:
             raise LedgerError("group target is not ready for scientific activity")
         return key
+
+    def _require_target_rostered(self, key: tuple[str, str]) -> None:
+        if self._source_rollout_completed and self._branch_target_roster_sha256 is None:
+            raise LedgerError("completed source rollouts require a frozen branch target roster")
+        if self._branch_target_roster_sha256 is not None and key not in self._branch_target_keys:
+            raise LedgerError("scientific target is absent from the frozen branch target roster")
+
+    def _validate_roster_target(self, value: object) -> dict[str, Any]:
+        expected = {
+            "source_sha256",
+            "group_id",
+            "rollout_id",
+            "decision_id",
+            "target_id",
+            "target_ordinal",
+            "event_address",
+        }
+        if not isinstance(value, dict) or set(value) != expected:
+            raise ValueError("branch target roster entry fields differ")
+        target = cast(dict[str, Any], value)
+        for field in ("group_id", "rollout_id", "decision_id", "target_id"):
+            if not isinstance(target[field], str) or not target[field]:
+                raise ValueError("branch target roster identifiers must be nonempty")
+        _require_sha256(target["source_sha256"], "source_sha256")
+        if type(target["target_ordinal"]) is not int or target["target_ordinal"] < 0:
+            raise ValueError("branch target roster ordinal is invalid")
+        source = self._source_rollout_completed.get(
+            (target["group_id"], target["rollout_id"])
+        )
+        reservation = self._source_policy_reservations.get(
+            (target["rollout_id"], target["decision_id"])
+        )
+        commitment = self._commitments.get((target["group_id"], target["target_id"]))
+        if (
+            source is None
+            or source.source_sha256 != target["source_sha256"]
+            or reservation is None
+            or reservation.get("group_id") != target["group_id"]
+            or reservation.get("node_kind") != "child"
+            or reservation.get("branch_selected") is not True
+            or reservation.get("target_id") != target["target_id"]
+            or reservation.get("target_ordinal") != target["target_ordinal"]
+            or reservation.get("target_address") != target["event_address"]
+            or commitment is None
+            or commitment.get("rollout_id") != target["rollout_id"]
+            or commitment.get("target_ordinal") != target["target_ordinal"]
+            or commitment.get("target_address") != target["event_address"]
+        ):
+            raise ValueError("branch target roster entry lacks exact source provenance")
+        return target
 
     def _candidate_state(self, attempt: CandidateAttempt) -> dict[str, Any]:
         if attempt.ledger_id != self._ledger_id:
@@ -1274,9 +2076,17 @@ class StageDReceiptLedger:
         self._qa: set[tuple[str, str]] = set()
         self._qa_passed: dict[tuple[str, str], bool] = {}
         self._candidate_slots: dict[tuple[str, str, int], str] = {}
+        self._candidate_zero_call_failures: dict[tuple[str, str, int], int] = {}
         self._pending_candidates: dict[tuple[str, str, int], dict[str, Any]] = {}
         self._executions: set[tuple[str, str, str, int]] = set()
         self._pending_executions: dict[tuple[str, str, str, int], dict[str, Any]] = {}
+        self._source_policy_pending: dict[tuple[str, str], SourcePolicyCallReservation] = {}
+        self._source_policy_reservations: dict[tuple[str, str], dict[str, Any]] = {}
+        self._source_policy_completed: dict[tuple[str, str], str] = {}
+        self._source_rollout_completed: dict[tuple[str, str], SourceRolloutCompletion] = {}
+        self._branch_target_roster_sha256 = None
+        self._branch_target_keys = set()
+        self._branch_artifacts: dict[tuple[str, str], str] = {}
         self._batch_claims: set[str] = set()
         for record in self._records:
             if record["record_kind"] == "action_reservation":
@@ -1323,6 +2133,37 @@ class StageDReceiptLedger:
             if kind == "pre_action_group_commitment":
                 key = _group_key(receipt["group_id"], receipt["target_id"])
                 self._commitments[key] = receipt
+            elif kind == "source_policy_call_reserved":
+                key = (receipt["rollout_id"], receipt["decision_id"])
+                self._source_policy_reservations[key] = receipt
+                self._source_policy_pending[key] = SourcePolicyCallReservation(
+                    self._ledger_id,
+                    receipt["group_id"],
+                    receipt["rollout_id"],
+                    receipt["decision_id"],
+                    canonical_json(receipt),
+                    receipt["exact_action_key_digest"],
+                    receipt["request_sequence"],
+                )
+            elif kind == "source_policy_call_completed":
+                key = (receipt["rollout_id"], receipt["decision_id"])
+                self._source_policy_pending.pop(key)
+                self._source_policy_completed[key] = _sha256(canonical_json(receipt))
+            elif kind == "source_rollout_completed":
+                key = (receipt["group_id"], receipt["rollout_id"])
+                self._source_rollout_completed[key] = SourceRolloutCompletion(
+                    self._ledger_id,
+                    receipt["group_id"],
+                    receipt["rollout_id"],
+                    receipt["source_sha256"],
+                    canonical_json(receipt),
+                )
+            elif kind == "branch_target_roster":
+                self._branch_target_roster_sha256 = receipt["roster_sha256"]
+                self._branch_target_keys = {
+                    (target["group_id"], target["target_id"])
+                    for target in receipt["targets"]
+                }
             elif kind == "seed_correspondence_map":
                 key = _group_key(receipt["group_id"], receipt["target_id"])
                 self._correspondence.add(key)
@@ -1336,9 +2177,8 @@ class StageDReceiptLedger:
                     receipt["group_id"], receipt["target_id"], receipt["action_slot"]
                 ] = receipt["action_digest"]
             elif kind == "zero_call_infrastructure_failure":
-                self._candidate_slots[
-                    receipt["group_id"], receipt["target_id"], receipt["action_slot"]
-                ] = "zero-call-failure"
+                slot = (receipt["group_id"], receipt["target_id"], receipt["action_slot"])
+                self._candidate_zero_call_failures[slot] = receipt["attempt_ordinal"] + 1
             elif kind == "scientific_arm_execution":
                 self._executions.add(
                     (
@@ -1348,19 +2188,34 @@ class StageDReceiptLedger:
                         receipt["continuation_replicate"],
                     )
                 )
-            elif kind == "training_batch_consumption":
+            elif kind == "branch_group_artifact_completed":
+                self._branch_artifacts[
+                    receipt["group_id"], receipt["target_id"]
+                ] = receipt["artifact_sha256"]
+            elif kind in {
+                "training_batch_consumption",
+                "stage_d_training_batch_authorization",
+            }:
                 self._batch_claims.add(receipt["training_batch_identity"])
 
 
-def inspect_ledger(root: Path) -> _ScanResult:
+def inspect_ledger(
+    root: Path,
+    *,
+    allow_source_inflight: bool = False,
+) -> _ScanResult:
     """Scan a ledger without repairing it and classify its recovery state."""
     try:
-        return _scan_ledger(root)
+        return _scan_ledger(root, allow_source_inflight=allow_source_inflight)
     except BaseException as error:
         return _ScanResult("poisoned", str(error), (), (), {}, frozenset(), None)
 
 
-def _scan_ledger(root: Path) -> _ScanResult:
+def _scan_ledger(
+    root: Path,
+    *,
+    allow_source_inflight: bool = False,
+) -> _ScanResult:
     records_dir = root / "records"
     evidence_dir = root / "evidence"
     if not records_dir.is_dir() or not evidence_dir.is_dir():
@@ -1434,6 +2289,28 @@ def _scan_ledger(root: Path) -> _ScanResult:
                 or _sha256(receipt_bytes) != body["receipt_sha256"]
             ):
                 raise LedgerPoisoned("receipt record is internally inconsistent")
+            if receipt.get("receipt_kind") == "branch_target_roster":
+                roster_digest = receipt.get("roster_sha256")
+                if not _is_sha256(roster_digest):
+                    raise LedgerPoisoned("branch target roster evidence hash is invalid")
+                roster = _strict_canonical_object(
+                    (evidence_dir / cast(str, roster_digest)).read_bytes(),
+                    "Stage D branch target roster evidence",
+                )
+                expected_roster = {
+                    "schema_version": 1,
+                    "domain": "redco-stage-d-branch-target-roster-v1",
+                    "planned_source_count": receipt.get("planned_source_count"),
+                    "completed_source_count": receipt.get("completed_source_count"),
+                    "eligible_source_count": receipt.get("eligible_source_count"),
+                    "ineligible_source_count": receipt.get("ineligible_source_count"),
+                    "minimum_eligible_sources": receipt.get("minimum_eligible_sources"),
+                    "eligibility_passed": receipt.get("eligibility_passed"),
+                    "source_sha256s": receipt.get("source_sha256s"),
+                    "targets": receipt.get("targets"),
+                }
+                if roster != expected_roster:
+                    raise LedgerPoisoned("branch target roster receipt differs from its evidence")
             receipt_key = (body["receipt_kind"], body["receipt_sha256"])
             if receipt_key in receipts:
                 raise LedgerPoisoned("duplicate receipt anchoring is forbidden")
@@ -1455,7 +2332,10 @@ def _scan_ledger(root: Path) -> _ScanResult:
         digests.append(digest)
         prior = digest
     assert ledger_id is not None
-    _validate_state_machine(records)
+    _validate_state_machine(
+        records,
+        allow_source_inflight=allow_source_inflight,
+    )
     seal = _seal_from_records(records, digests, len(receipts))
     status: RecoveryStatus = "sealed-valid" if seal is not None else "active-clean"
     return _ScanResult(
@@ -1469,29 +2349,44 @@ def _scan_ledger(root: Path) -> _ScanResult:
     )
 
 
-def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
+def _validate_state_machine(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    allow_source_inflight: bool = False,
+) -> None:
     if records[0]["record_kind"] != "genesis" or records[0]["offset"] != 0:
         raise LedgerPoisoned("first record must be genesis")
     if any(record["record_kind"] == "genesis" for record in records[1:]):
         raise LedgerPoisoned("ledger contains multiple genesis records")
     if any(record["record_kind"] == "seal" for record in records[:-1]):
         raise LedgerPoisoned("seal must be the terminal record")
-    commitments: dict[tuple[str, str], tuple[int, str]] = {}
+    commitments: dict[tuple[str, str], tuple[int, str, Mapping[str, Any]]] = {}
     reservations: dict[tuple[str, str], dict[str, Any]] = {}
     recorded_action_materialized: set[str] = set()
     correspondence: set[tuple[str, str]] = set()
     candidate_attempts: dict[str, dict[str, Any]] = {}
-    candidate_attempt_slots: set[tuple[str, str, int]] = set()
+    candidate_attempt_counts: dict[tuple[str, str, int], int] = {}
+    candidate_zero_call_failures: dict[tuple[str, str, int], int] = {}
     execution_attempts: dict[str, dict[str, Any]] = {}
     execution_attempt_slots: set[tuple[str, str, str, int]] = set()
     bound_execution_contexts: set[str] = set()
+    dispatched_executions: set[str] = set()
     starts: dict[str, dict[str, Any]] = {}
     completed: set[str] = set()
     finished_candidates: set[str] = set()
     finished_executions: set[str] = set()
     candidate_slots: set[tuple[str, str, int]] = set()
     execution_slots: set[tuple[str, str, str, int]] = set()
+    branch_artifacts: dict[tuple[str, str], str] = {}
     batch_claims: set[str] = set()
+    source_reservations: dict[tuple[str, str], tuple[int, str, Mapping[str, Any]]] = {}
+    source_completions: dict[tuple[str, str], str] = {}
+    source_aborts: dict[tuple[str, str], str] = {}
+    source_pre_post_aborts: set[tuple[str, str]] = set()
+    source_finalization_aborts: set[tuple[str, str]] = set()
+    source_rollouts: dict[tuple[str, str], set[tuple[str, str]]] = {}
+    source_rollout_sha256s: dict[tuple[str, str], str] = {}
+    branch_target_roster_sha256: str | None = None
     for record in records[1:]:
         kind = record["record_kind"]
         body = _body(record)
@@ -1507,10 +2402,404 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
                     or receipt["action_reservation_sequence"] != record["offset"] + 1
                 ):
                     raise LedgerPoisoned("commitment/reservation ordering proof is invalid")
-                commitments[key] = (record["offset"], body["receipt_sha256"])
+                commitments[key] = (
+                    record["offset"],
+                    body["receipt_sha256"],
+                    receipt,
+                )
+            elif receipt_kind == "source_policy_call_reserved":
+                key = (receipt.get("rollout_id"), receipt.get("decision_id"))
+                if (
+                    not all(isinstance(value, str) and value for value in key)
+                    or key in source_reservations
+                    or receipt.get("request_sequence") != record["offset"]
+                    or not _is_sha256(receipt.get("exact_action_key_digest"))
+                    or not _is_sha256(receipt.get("request_sha256"))
+                    or receipt.get("node_kind") not in {"root", "child"}
+                    or type(receipt.get("branch_selected")) is not bool
+                ):
+                    raise LedgerPoisoned("source policy reservation is invalid")
+                node_kind = receipt["node_kind"]
+                target_id = receipt.get("target_id")
+                target_ordinal = receipt.get("target_ordinal")
+                if (
+                    node_kind == "root" and (target_id is not None or target_ordinal is not None)
+                ) or (
+                    node_kind == "child"
+                    and (
+                        not isinstance(target_id, str)
+                        or not target_id
+                        or type(target_ordinal) is not int
+                        or target_ordinal < 0
+                    )
+                ):
+                    raise LedgerPoisoned("source policy target fields are invalid")
+                commitment_hash = receipt.get("target_commitment_receipt_sha256")
+                recorded_reservation_id = receipt.get("recorded_action_reservation_id")
+                if receipt["branch_selected"]:
+                    commitment = commitments.get((receipt.get("group_id"), target_id))
+                    recorded_reservation = reservations.get((receipt.get("group_id"), target_id))
+                    if (
+                        commitment is None
+                        or commitment[0] >= record["offset"]
+                        or commitment[1] != commitment_hash
+                        or commitment[2].get("rollout_id") != receipt["rollout_id"]
+                        or commitment[2].get("target_ordinal") != target_ordinal
+                        or commitment[2].get("target_address") != receipt.get("target_address")
+                        or recorded_reservation is None
+                        or recorded_reservation.get("reservation_id") != recorded_reservation_id
+                        or recorded_reservation.get("exact_action_key_digest")
+                        != receipt.get("exact_action_key_digest")
+                        or recorded_reservation.get("request_sha256")
+                        != receipt.get("request_sha256")
+                    ):
+                        raise LedgerPoisoned(
+                            "selected source policy call lacks same-ledger pre-action proof"
+                        )
+                elif commitment_hash is not None or recorded_reservation_id is not None:
+                    raise LedgerPoisoned(
+                        "unselected source policy call names branch reservation evidence"
+                    )
+                source_reservations[key] = (
+                    record["offset"],
+                    body["receipt_sha256"],
+                    receipt,
+                )
+            elif receipt_kind == "source_policy_call_completed":
+                key = (receipt.get("rollout_id"), receipt.get("decision_id"))
+                source_reservation = source_reservations.get(key)
+                if (
+                    source_reservation is None
+                    or key in source_completions
+                    or receipt.get("completion_sequence") != record["offset"]
+                    or receipt.get("request_sequence") != source_reservation[0]
+                    or receipt.get("request_receipt_sha256") != source_reservation[1]
+                    or receipt.get("exact_action_key_digest")
+                    != source_reservation[2].get("exact_action_key_digest")
+                    or not _is_sha256(receipt.get("action_digest"))
+                    or not _is_sha256(receipt.get("response_sha256"))
+                ):
+                    raise LedgerPoisoned("source policy completion is invalid")
+                source_completions[key] = body["receipt_sha256"]
+            elif receipt_kind == "source_policy_call_aborted":
+                key = (receipt.get("rollout_id"), receipt.get("decision_id"))
+                source_reservation = source_reservations.get(key)
+                expected_fields = {
+                    "schema_version",
+                    "receipt_kind",
+                    "ledger_id",
+                    "ledger_offset",
+                    "prior_chain_sha256",
+                    "group_id",
+                    "rollout_id",
+                    "decision_id",
+                    "request_receipt_sha256",
+                    "exact_action_key_digest",
+                    "error_sha256",
+                    "phase",
+                    "request_sequence",
+                    "abort_sequence",
+                }
+                if (
+                    set(receipt) != expected_fields
+                    or source_reservation is None
+                    or key in source_completions
+                    or key in source_aborts
+                    or receipt.get("abort_sequence") != record["offset"]
+                    or receipt.get("request_sequence") != source_reservation[0]
+                    or receipt.get("request_receipt_sha256") != source_reservation[1]
+                    or receipt.get("exact_action_key_digest")
+                    != source_reservation[2].get("exact_action_key_digest")
+                    or not _is_sha256(receipt.get("error_sha256"))
+                    or receipt.get("phase")
+                    not in {
+                        "post_unknown",
+                        "response_received",
+                        "response_parsed",
+                        "typed_response",
+                    }
+                ):
+                    raise LedgerPoisoned("source policy abort is invalid")
+                source_aborts[key] = body["receipt_sha256"]
+            elif receipt_kind == "source_child_pre_post_aborted":
+                expected_fields = {
+                    "schema_version",
+                    "receipt_kind",
+                    "ledger_id",
+                    "ledger_offset",
+                    "prior_chain_sha256",
+                    "group_id",
+                    "rollout_id",
+                    "target_id",
+                    "reservation_id",
+                    "exact_action_key_digest",
+                    "error_sha256",
+                    "phase",
+                    "abort_sequence",
+                }
+                key = _group_key(receipt.get("group_id"), receipt.get("target_id"))
+                reservation = reservations.get(key)
+                if (
+                    set(receipt) != expected_fields
+                    or reservation is None
+                    or key in source_pre_post_aborts
+                    or receipt.get("reservation_id") != reservation["reservation_id"]
+                    or receipt.get("exact_action_key_digest")
+                    != reservation["exact_action_key_digest"]
+                    or not isinstance(receipt.get("rollout_id"), str)
+                    or not receipt["rollout_id"]
+                    or not _is_sha256(receipt.get("error_sha256"))
+                    or receipt.get("phase") != "before_post"
+                    or receipt.get("abort_sequence") != record["offset"]
+                    or receipt.get("ledger_offset") != record["offset"]
+                ):
+                    raise LedgerPoisoned("source child pre-POST abort is invalid")
+                source_pre_post_aborts.add(key)
+            elif receipt_kind == "source_rollout_finalization_aborted":
+                expected_fields = {
+                    "schema_version",
+                    "receipt_kind",
+                    "ledger_id",
+                    "ledger_offset",
+                    "prior_chain_sha256",
+                    "group_id",
+                    "rollout_id",
+                    "decision_ids",
+                    "error_sha256",
+                    "phase",
+                    "abort_sequence",
+                }
+                group_id = receipt.get("group_id")
+                rollout_id = receipt.get("rollout_id")
+                decision_ids = receipt.get("decision_ids")
+                key = (group_id, rollout_id)
+                completed_for_rollout = {
+                    decision_id
+                    for completed_rollout, decision_id in source_completions
+                    if completed_rollout == rollout_id
+                }
+                if (
+                    set(receipt) != expected_fields
+                    or not isinstance(group_id, str)
+                    or not group_id
+                    or not isinstance(rollout_id, str)
+                    or not rollout_id
+                    or key in source_finalization_aborts
+                    or key in source_rollouts
+                    or not isinstance(decision_ids, list)
+                    or decision_ids != sorted(completed_for_rollout)
+                    or any(
+                        source_reservations[(rollout_id, decision_id)][2].get("group_id")
+                        != group_id
+                        for decision_id in completed_for_rollout
+                    )
+                    or not _is_sha256(receipt.get("error_sha256"))
+                    or receipt.get("phase") != "source_finalization"
+                    or receipt.get("abort_sequence") != record["offset"]
+                ):
+                    raise LedgerPoisoned("source rollout finalization abort is invalid")
+                source_finalization_aborts.add(key)
+            elif receipt_kind == "source_rollout_completed":
+                group_id = receipt.get("group_id")
+                rollout_id = receipt.get("rollout_id")
+                decision_ids = receipt.get("decision_ids")
+                completion_hashes = receipt.get("decision_completion_receipt_sha256s")
+                key = (group_id, rollout_id)
+                expected_fields = {
+                    "schema_version",
+                    "receipt_kind",
+                    "ledger_id",
+                    "ledger_offset",
+                    "prior_chain_sha256",
+                    "group_id",
+                    "rollout_id",
+                    "source_sha256",
+                    "trace_sha256",
+                    "reward_evidence_sha256",
+                    "stock_sequences_evidence_sha256",
+                    "base_model_manifest_sha256",
+                    "decision_ids",
+                    "decision_completion_receipt_sha256s",
+                    "completion_sequence",
+                }
+                if (
+                    set(receipt) != expected_fields
+                    or not isinstance(group_id, str)
+                    or not group_id
+                    or not isinstance(rollout_id, str)
+                    or not rollout_id
+                    or key in source_rollouts
+                    or receipt.get("completion_sequence") != record["offset"]
+                    or not all(
+                        _is_sha256(receipt.get(field))
+                        for field in (
+                            "source_sha256",
+                            "trace_sha256",
+                            "reward_evidence_sha256",
+                            "stock_sequences_evidence_sha256",
+                            "base_model_manifest_sha256",
+                        )
+                    )
+                    or not isinstance(decision_ids, list)
+                    or not decision_ids
+                    or len(set(decision_ids)) != len(decision_ids)
+                    or not all(isinstance(item, str) and item for item in decision_ids)
+                    or not isinstance(completion_hashes, list)
+                    or len(completion_hashes) != len(decision_ids)
+                    or not all(_is_sha256(item) for item in completion_hashes)
+                    or set(body["evidence_refs"])
+                    != {
+                        receipt.get("trace_sha256"),
+                        receipt.get("reward_evidence_sha256"),
+                        receipt.get("stock_sequences_evidence_sha256"),
+                    }
+                ):
+                    raise LedgerPoisoned("source rollout completion is invalid")
+                named = {
+                    (rollout_id, decision_id): digest
+                    for decision_id, digest in zip(
+                        decision_ids,
+                        completion_hashes,
+                        strict=True,
+                    )
+                }
+                completion_roster = {
+                    completion_key: digest
+                    for completion_key, digest in source_completions.items()
+                    if completion_key[0] == rollout_id
+                }
+                if named != completion_roster:
+                    raise LedgerPoisoned(
+                        "source rollout completion roster differs from policy calls"
+                    )
+                request_order = [
+                    source_reservations[(rollout_id, decision_id)][0]
+                    for decision_id in decision_ids
+                ]
+                if request_order != sorted(request_order) or any(
+                    source_reservations[(rollout_id, decision_id)][2].get("group_id") != group_id
+                    for decision_id in decision_ids
+                ):
+                    raise LedgerPoisoned("source rollout completion changed group or request order")
+                source_rollouts[key] = set(named)
+                source_rollout_sha256s[key] = receipt["source_sha256"]
+            elif receipt_kind == "branch_target_roster":
+                expected_fields = {
+                    "schema_version",
+                    "receipt_kind",
+                    "ledger_id",
+                    "ledger_offset",
+                    "prior_chain_sha256",
+                    "roster_sha256",
+                    "planned_source_count",
+                    "completed_source_count",
+                    "eligible_source_count",
+                    "ineligible_source_count",
+                    "minimum_eligible_sources",
+                    "eligibility_passed",
+                    "source_sha256s",
+                    "targets",
+                    "roster_sequence",
+                }
+                planned = receipt.get("planned_source_count")
+                completed_count = receipt.get("completed_source_count")
+                eligible = receipt.get("eligible_source_count")
+                ineligible = receipt.get("ineligible_source_count")
+                minimum = receipt.get("minimum_eligible_sources")
+                passed = receipt.get("eligibility_passed")
+                sources = receipt.get("source_sha256s")
+                targets = receipt.get("targets")
+                if (
+                    set(receipt) != expected_fields
+                    or branch_target_roster_sha256 is not None
+                    or receipt.get("ledger_offset") != record["offset"]
+                    or receipt.get("roster_sequence") != record["offset"]
+                    or not _is_sha256(receipt.get("roster_sha256"))
+                    or set(body["evidence_refs"]) != {receipt.get("roster_sha256")}
+                    or type(planned) is not int
+                    or planned < 1
+                    or type(completed_count) is not int
+                    or completed_count != planned
+                    or completed_count != len(source_rollouts)
+                    or type(eligible) is not int
+                    or eligible < 0
+                    or type(ineligible) is not int
+                    or ineligible != completed_count - eligible
+                    or type(minimum) is not int
+                    or minimum < 1
+                    or minimum > planned
+                    or type(passed) is not bool
+                    or passed is not (eligible >= minimum)
+                    or not isinstance(sources, list)
+                    or sources != sorted(set(sources))
+                    or set(sources) != set(source_rollout_sha256s.values())
+                    or not isinstance(targets, list)
+                    or candidate_attempts
+                    or execution_attempts
+                ):
+                    raise LedgerPoisoned("branch target roster is invalid or late")
+                target_keys: set[tuple[str, str]] = set()
+                target_source_hashes: set[str] = set()
+                for target in targets:
+                    expected_target_fields = {
+                        "source_sha256",
+                        "group_id",
+                        "rollout_id",
+                        "decision_id",
+                        "target_id",
+                        "target_ordinal",
+                        "event_address",
+                    }
+                    if not isinstance(target, dict) or set(target) != expected_target_fields:
+                        raise LedgerPoisoned("branch target roster entry fields differ")
+                    group_id = target.get("group_id")
+                    rollout_id = target.get("rollout_id")
+                    decision_id = target.get("decision_id")
+                    target_id = target.get("target_id")
+                    if not all(
+                        isinstance(item, str) and item
+                        for item in (group_id, rollout_id, decision_id, target_id)
+                    ):
+                        raise LedgerPoisoned("branch target roster identifiers are invalid")
+                    assert isinstance(group_id, str)
+                    assert isinstance(rollout_id, str)
+                    assert isinstance(decision_id, str)
+                    assert isinstance(target_id, str)
+                    key = (group_id, target_id)
+                    source_key = (group_id, rollout_id)
+                    reservation_key = (rollout_id, decision_id)
+                    source_reservation = source_reservations.get(reservation_key)
+                    commitment = commitments.get(key)
+                    if (
+                        key in target_keys
+                        or not _is_sha256(target.get("source_sha256"))
+                        or source_rollout_sha256s.get(source_key) != target["source_sha256"]
+                        or source_reservation is None
+                        or source_reservation[2].get("group_id") != target["group_id"]
+                        or source_reservation[2].get("node_kind") != "child"
+                        or source_reservation[2].get("branch_selected") is not True
+                        or source_reservation[2].get("target_id") != target["target_id"]
+                        or source_reservation[2].get("target_ordinal")
+                        != target["target_ordinal"]
+                        or source_reservation[2].get("target_address")
+                        != target["event_address"]
+                        or commitment is None
+                        or commitment[2].get("rollout_id") != target["rollout_id"]
+                        or commitment[2].get("target_ordinal") != target["target_ordinal"]
+                        or commitment[2].get("target_address") != target["event_address"]
+                    ):
+                        raise LedgerPoisoned("branch target roster lacks exact source provenance")
+                    target_keys.add(key)
+                    target_source_hashes.add(target["source_sha256"])
+                if target_keys != set(commitments) or len(target_source_hashes) != eligible:
+                    raise LedgerPoisoned("branch target roster differs from committed denominator")
+                branch_target_roster_sha256 = receipt["roster_sha256"]
             elif receipt_kind == "seed_correspondence_map":
                 key = _group_key(receipt["group_id"], receipt["target_id"])
-                if key not in reservations or key in correspondence:
+                if (
+                    key not in reservations
+                    or key in correspondence
+                ):
                     raise LedgerPoisoned("correspondence is missing its unique reservation")
                 if reservations[key]["reservation_id"] not in recorded_action_materialized:
                     raise LedgerPoisoned("correspondence predates the recorded action output")
@@ -1545,13 +2834,22 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
             elif receipt_kind == "zero_call_infrastructure_failure":
                 attempt_id = receipt["attempt_id"]
                 attempt = candidate_attempts.get(attempt_id)
-                if attempt is None or attempt_id in finished_candidates:
+                slot = (receipt["group_id"], receipt["target_id"], receipt["action_slot"])
+                ordinal = receipt.get("attempt_ordinal")
+                if (
+                    attempt is None
+                    or attempt_id in finished_candidates
+                    or ordinal != attempt.get("attempt_ordinal")
+                    or type(ordinal) is not int
+                    or ordinal not in {0, 1}
+                    or receipt.get("successor_permitted") is not (ordinal == 0)
+                ):
                     raise LedgerPoisoned("zero-call receipt lacks one candidate attempt")
                 if any(start["attempt_id"] == attempt_id for start in starts.values()):
                     raise LedgerPoisoned("zero-call receipt follows model_call_started")
                 finished_candidates.add(attempt_id)
-                candidate_slots.add(
-                    (receipt["group_id"], receipt["target_id"], receipt["action_slot"])
+                candidate_zero_call_failures[slot] = (
+                    candidate_zero_call_failures.get(slot, 0) + 1
                 )
             elif receipt_kind == "scientific_arm_execution":
                 execution_key = (
@@ -1575,6 +2873,8 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
                     raise LedgerPoisoned("execution receipt lacks one unique attempt")
                 if matching[0] not in bound_execution_contexts:
                     raise LedgerPoisoned("execution receipt lacks a frozen context binding")
+                if matching[0] not in dispatched_executions:
+                    raise LedgerPoisoned("execution receipt predates action dispatch")
                 expected_calls = {
                     call_id
                     for call_id, start in starts.items()
@@ -1585,10 +2885,103 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
                     raise LedgerPoisoned("execution receipt does not cover completed calls exactly")
                 finished_executions.add(matching[0])
                 execution_slots.add(execution_key)
+            elif receipt_kind == "branch_group_artifact_completed":
+                key = _group_key(receipt["group_id"], receipt["target_id"])
+                commitment = commitments.get(key)
+                if commitment is None or key in branch_artifacts:
+                    raise LedgerPoisoned("branch artifact lacks one unique commitment")
+                branch_count = commitment[2]["branch_count"]
+                continuation_replicates = commitment[2]["continuation_replicates"]
+                expected_candidates = {
+                    (*key, slot) for slot in range(1, branch_count)
+                }
+                expected_executions = {
+                    (*key, f"arm-{slot}", replicate)
+                    for slot in range(branch_count)
+                    for replicate in range(1, continuation_replicates + 1)
+                }
+                if (
+                    receipt.get("branch_count") != branch_count
+                    or receipt.get("continuation_replicates")
+                    != continuation_replicates
+                    or not _is_sha256(receipt.get("artifact_sha256"))
+                    or not _is_sha256(receipt.get("training_batch_identity"))
+                    or expected_candidates
+                    != {slot for slot in candidate_slots if slot[:2] == key}
+                    or expected_executions
+                    != {item for item in execution_slots if item[:2] == key}
+                    or set(body["evidence_refs"]) != {receipt.get("artifact_sha256")}
+                ):
+                    raise LedgerPoisoned("branch artifact completion changed its denominator")
+                branch_artifacts[key] = receipt["artifact_sha256"]
             elif receipt_kind == "training_batch_consumption":
                 identity = receipt["training_batch_identity"]
                 if identity in batch_claims:
                     raise LedgerPoisoned("training batch was claimed twice")
+                batch_claims.add(identity)
+            elif receipt_kind == "stage_d_training_batch_authorization":
+                expected_fields = {
+                    "schema_version",
+                    "receipt_kind",
+                    "ledger_id",
+                    "ledger_offset",
+                    "prior_chain_sha256",
+                    "arm",
+                    "training_batch_identity",
+                    "sealed_batch_sha256",
+                    "objective_sha256",
+                    "objective_authorization_sha256",
+                    "collection_plan_sha256",
+                    "collection_receipt_sha256",
+                    "source_sha256s",
+                    "branch_artifact_sha256s",
+                    "consumer_id",
+                    "claim_sequence",
+                    "single_use",
+                }
+                identity = receipt.get("training_batch_identity")
+                arm = receipt.get("arm")
+                sources = receipt.get("source_sha256s")
+                artifacts = receipt.get("branch_artifact_sha256s")
+                if (
+                    set(receipt) != expected_fields
+                    or arm not in {"stock", "branch-global", "local"}
+                    or not _is_sha256(identity)
+                    or identity in batch_claims
+                    or receipt.get("claim_sequence") != record["offset"]
+                    or receipt.get("single_use") is not True
+                    or not isinstance(receipt.get("consumer_id"), str)
+                    or not receipt["consumer_id"]
+                    or not all(
+                        _is_sha256(receipt.get(field))
+                        for field in (
+                            "sealed_batch_sha256",
+                            "objective_sha256",
+                            "objective_authorization_sha256",
+                            "collection_plan_sha256",
+                            "collection_receipt_sha256",
+                        )
+                    )
+                    or not isinstance(sources, list)
+                    or not sources
+                    or sources != sorted(set(sources))
+                    or not all(_is_sha256(item) for item in sources)
+                    or set(sources) != set(source_rollout_sha256s.values())
+                    or not isinstance(artifacts, list)
+                    or artifacts != sorted(set(artifacts))
+                    or not all(_is_sha256(item) for item in artifacts)
+                    or (arm == "stock") != (not artifacts)
+                    or set(body["evidence_refs"])
+                    != {
+                        receipt.get("sealed_batch_sha256"),
+                        receipt.get("objective_authorization_sha256"),
+                        receipt.get("collection_plan_sha256"),
+                        receipt.get("collection_receipt_sha256"),
+                        *artifacts,
+                    }
+                ):
+                    raise LedgerPoisoned("Stage D training batch authorization is invalid")
+                assert isinstance(identity, str)
                 batch_claims.add(identity)
         elif kind == "action_reservation":
             event = _event(body)
@@ -1615,8 +3008,7 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
             if (
                 reservation is None
                 or event.get("reservation_id") != reservation["reservation_id"]
-                or event.get("exact_action_key_digest")
-                != reservation["exact_action_key_digest"]
+                or event.get("exact_action_key_digest") != reservation["exact_action_key_digest"]
                 or not _is_sha256(event.get("action_digest"))
                 or call_id not in completed
                 or starts.get(call_id, {}).get("attempt_id") != event["reservation_id"]
@@ -1628,10 +3020,29 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
             event = _event(body)
             attempt_id = event["attempt_id"]
             slot = (event["group_id"], event["target_id"], event["action_slot"])
-            if attempt_id in candidate_attempts or slot in candidate_attempt_slots:
+            ordinal = event.get("attempt_ordinal")
+            unfinished_same_slot = any(
+                (
+                    attempt["group_id"],
+                    attempt["target_id"],
+                    attempt["action_slot"],
+                )
+                == slot
+                and existing_id not in finished_candidates
+                for existing_id, attempt in candidate_attempts.items()
+            )
+            if (
+                attempt_id in candidate_attempts
+                or slot in candidate_slots
+                or unfinished_same_slot
+                or type(ordinal) is not int
+                or ordinal not in {0, 1}
+                or ordinal != candidate_attempt_counts.get(slot, 0)
+                or ordinal != candidate_zero_call_failures.get(slot, 0)
+            ):
                 raise LedgerPoisoned("duplicate candidate attempt")
             candidate_attempts[attempt_id] = event
-            candidate_attempt_slots.add(slot)
+            candidate_attempt_counts[slot] = ordinal + 1
         elif kind == "execution_attempt":
             event = _event(body)
             attempt_id = event["attempt_id"]
@@ -1648,11 +3059,7 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
         elif kind == "execution_context_bound":
             event = _event(body)
             attempt_id = event.get("attempt_id")
-            attempt = (
-                execution_attempts.get(attempt_id)
-                if isinstance(attempt_id, str)
-                else None
-            )
+            attempt = execution_attempts.get(attempt_id) if isinstance(attempt_id, str) else None
             if (
                 attempt is None
                 or attempt_id in bound_execution_contexts
@@ -1671,6 +3078,28 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
                 raise LedgerPoisoned("execution context binding is invalid or late")
             assert isinstance(attempt_id, str)
             bound_execution_contexts.add(attempt_id)
+        elif kind == "execution_dispatched":
+            event = _event(body)
+            attempt_id = event.get("attempt_id")
+            attempt = execution_attempts.get(attempt_id) if isinstance(attempt_id, str) else None
+            if (
+                attempt is None
+                or attempt_id not in bound_execution_contexts
+                or attempt_id in dispatched_executions
+                or any(start["attempt_id"] == attempt_id for start in starts.values())
+                or any(
+                    event.get(name) != attempt.get(name)
+                    for name in (
+                        "group_id",
+                        "target_id",
+                        "arm_id",
+                        "continuation_replicate",
+                    )
+                )
+            ):
+                raise LedgerPoisoned("execution dispatch is invalid or out of order")
+            assert isinstance(attempt_id, str)
+            dispatched_executions.add(attempt_id)
         elif kind == "model_call_started":
             event = _event(body)
             call_id = event["call_id"]
@@ -1679,15 +3108,13 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
             attempt_kind = event.get("attempt_kind")
             attempt_id = event.get("attempt_id")
             if (
-                (
-                    attempt_kind == "candidate"
-                    and attempt_id not in candidate_attempts
-                )
+                (attempt_kind == "candidate" and attempt_id not in candidate_attempts)
                 or (
                     attempt_kind == "execution"
                     and (
                         attempt_id not in execution_attempts
                         or attempt_id not in bound_execution_contexts
+                        or attempt_id not in dispatched_executions
                     )
                 )
                 or (
@@ -1715,14 +3142,55 @@ def _validate_state_machine(records: Sequence[Mapping[str, Any]]) -> None:
         raise LedgerPoisoned("ledger has a dangling execution attempt")
     if set(execution_attempts) != bound_execution_contexts:
         raise LedgerPoisoned("execution attempt lacks one frozen context binding")
-    if set(starts) != completed:
+    if set(execution_attempts) != dispatched_executions:
+        raise LedgerPoisoned("execution attempt lacks one irreversible dispatch marker")
+    unresolved_call_ids = set(starts) - completed
+    pending_source_recorded_attempts = {
+        reservation[2]["recorded_action_reservation_id"]
+        for key, reservation in source_reservations.items()
+        if key not in source_completions
+        and key not in source_aborts
+        and reservation[2].get("recorded_action_reservation_id") is not None
+    }
+    if completed - set(starts) or (
+        unresolved_call_ids
+        and (
+            not allow_source_inflight
+            or any(
+                starts[call_id].get("attempt_kind") != "recorded_action"
+                or starts[call_id].get("attempt_id") not in pending_source_recorded_attempts
+                for call_id in unresolved_call_ids
+            )
+        )
+    ):
         raise LedgerPoisoned("ledger has a dangling model_call_started record")
+    terminal_source_calls = set(source_completions) | set(source_aborts)
+    if set(source_completions) & set(source_aborts):
+        raise LedgerPoisoned("source policy call has conflicting terminal receipts")
+    if not allow_source_inflight and set(source_reservations) != terminal_source_calls:
+        raise LedgerPoisoned("ledger has a dangling source policy call")
+    if source_aborts:
+        raise LedgerPoisoned("ledger records an aborted source policy call")
+    if source_pre_post_aborts:
+        raise LedgerPoisoned("ledger records an aborted source child before POST")
+    if source_finalization_aborts:
+        raise LedgerPoisoned("ledger records an aborted source rollout finalization")
+    if records[-1]["record_kind"] == "seal":
+        covered = set().union(*source_rollouts.values()) if source_rollouts else set()
+        if covered != set(source_completions):
+            raise LedgerPoisoned("sealed ledger has unbound source policy completions")
+        if source_rollouts and commitments and branch_target_roster_sha256 is None:
+            raise LedgerPoisoned("sealed source ledger lacks its branch target roster")
     started_recorded_actions = {
         start["attempt_id"]
         for start in starts.values()
         if start["attempt_kind"] == "recorded_action"
     }
-    if started_recorded_actions != recorded_action_materialized:
+    if (
+        recorded_action_materialized - started_recorded_actions
+        or (started_recorded_actions - recorded_action_materialized)
+        - pending_source_recorded_attempts
+    ):
         raise LedgerPoisoned("recorded action call lacks a materialized action output")
 
 
