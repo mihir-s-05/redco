@@ -25,6 +25,19 @@ DEFAULT_DATASET_SHA256 = (
 )
 
 
+def _episode_cache_salt(
+    master_seed: str,
+    example_id: str,
+    replicate: int,
+) -> str:
+    address = json.dumps(
+        [master_seed, example_id, replicate],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    return f"redco-stage-d-feasibility:{address}"
+
+
 def build_config(args: argparse.Namespace) -> EvalConfig:
     harness: dict[str, Any] = {
         "id": "rlm",
@@ -66,6 +79,7 @@ def build_config(args: argparse.Namespace) -> EvalConfig:
     env = vf.SingleAgentEnvConfig.model_validate(
         {
             "id": "single-agent",
+            "retries": {"max_retries": 0},
             "taskset": {
                 "id": "redco-evidence-selection-v2",
                 "dataset_path": args.dataset.resolve(),
@@ -80,6 +94,7 @@ def build_config(args: argparse.Namespace) -> EvalConfig:
                 "scaffold_prompt_sha256": args.scaffold_prompt_sha256,
             },
             "agent": {
+                "retries": {"max_retries": 0},
                 "max_total_tokens": args.max_total_tokens,
                 "timeout": {
                     "setup": args.setup_timeout,
@@ -108,6 +123,9 @@ def build_config(args: argparse.Namespace) -> EvalConfig:
             "top_p": args.top_p,
             "seed": 1,
             "max_tokens": args.max_completion_tokens,
+            "extra_body": {
+                "cache_salt": "placeholder-only-before-episode-addressing"
+            },
         },
         env=env,
         num_tasks=args.num_tasks,
@@ -137,6 +155,11 @@ async def run_grouped(args: argparse.Namespace) -> int:
             "example_id": _task_example_id(task),
             "replicate": replicate,
             "seed": derive_episode_seed(
+                args.master_seed,
+                _task_example_id(task),
+                replicate,
+            ),
+            "cache_salt": _episode_cache_salt(
                 args.master_seed,
                 _task_example_id(task),
                 replicate,
@@ -180,7 +203,18 @@ async def run_grouped(args: argparse.Namespace) -> int:
                         _task_example_id(task),
                         replicate,
                     )
-                    sampling = config.sampling.model_copy(update={"seed": seed})
+                    cache_salt = _episode_cache_salt(
+                        args.master_seed,
+                        _task_example_id(task),
+                        replicate,
+                    )
+                    sampling = config.sampling.model_copy(
+                        update={
+                            "seed": seed,
+                            "extra_body": {"cache_salt": cache_salt},
+                        },
+                        deep=True,
+                    )
                     context = ModelContext(
                         client=client,
                         model=config.model,

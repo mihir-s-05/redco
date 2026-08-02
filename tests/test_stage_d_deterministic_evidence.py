@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import sys
 from argparse import Namespace
+from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -253,6 +256,11 @@ def test_served_snapshot_and_renderer_identity_are_separate(
     config = build_config(args)
     assert type(config.env).__name__ == "SingleAgentEnvConfig"
     assert config.env.id == "single-agent"
+    assert config.env.retries.max_retries == 0
+    assert config.env.agent.retries.max_retries == 0
+    assert config.sampling.extra_body == {
+        "cache_salt": "placeholder-only-before-episode-addressing"
+    }
     assert config.model == "/workspace/models/exact-snapshot"
     assert (
         config.client.renderer_model_name
@@ -302,3 +310,78 @@ def test_feasibility_forwards_complete_frozen_rlm_bundle(tmp_path: Path) -> None
         args.rlm_uv_cache_archive.resolve()
     )
     assert harness.checkout_launcher_path == str(args.rlm_launcher.resolve())
+
+
+def test_run_grouped_installs_distinct_episode_cache_salts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("verifiers.v1")
+    from redco_evidence_selection_v2 import run_feasibility as runner
+
+    tasks = [
+        SimpleNamespace(data=SimpleNamespace(idx=index, example_id=example_id))
+        for index, example_id in enumerate(("example-a", "example-b"))
+    ]
+    contexts = []
+
+    class FakeEnv:
+        taskset = SimpleNamespace(select=lambda _count, _shuffle: tasks)
+
+        @asynccontextmanager
+        async def serving(self):
+            yield
+
+        def slots(self, _task, *, n):
+            return [object() for _ in range(n)]
+
+        async def run_slot(self, _slot, context, _semaphore, _persist):
+            contexts.append(context)
+            return SimpleNamespace(
+                id=f"episode-{len(contexts)}",
+                traces=[],
+                ok=True,
+            )
+
+    class FakeClient:
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(runner.vf, "load_environment", lambda _config: FakeEnv())
+    monkeypatch.setattr(runner, "resolve_client", lambda _config: FakeClient())
+    monkeypatch.setattr(runner, "save_config", lambda _config, _output: None)
+
+    args = Namespace(
+        model="model",
+        renderer_model_name="model",
+        base_url="http://127.0.0.1:8000/v1",
+        dataset=tmp_path / "dataset.jsonl",
+        dataset_sha256="a" * 64,
+        split="train",
+        prompt_profile="natural",
+        scaffold_prompt=None,
+        scaffold_prompt_sha256=None,
+        output_dir=tmp_path / "output",
+        num_tasks=2,
+        replicates=2,
+        master_seed="master",
+        temperature=0.7,
+        top_p=1.0,
+        max_completion_tokens=768,
+        max_total_tokens=8192,
+        rlm_version="56218f33796ecbe465445bc43948886354fde196",
+        setup_timeout=900.0,
+        harness_timeout=900.0,
+        dry_run=False,
+    )
+    assert asyncio.run(runner.run_grouped(args)) == 0
+
+    salts = [context.sampling.extra_body["cache_salt"] for context in contexts]
+    assert salts == [
+        runner._episode_cache_salt("master", example_id, replicate)
+        for example_id in ("example-a", "example-b")
+        for replicate in range(2)
+    ]
+    assert len(set(salts)) == 4
+    assert all(salt and "placeholder" not in salt for salt in salts)
+    assert runner._episode_cache_salt("master", "example-a", 0) == salts[0]
