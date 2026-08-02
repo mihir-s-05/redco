@@ -206,6 +206,7 @@ class StageDPreparedCallObserver:
                 branch_count=self._protocol.branch_count,
                 continuation_replicates=self._protocol.continuation_replicates,
                 failure_reward=self._protocol.failure_reward,
+                raw_response_required=True,
             )
         else:
             pending = self._producer.reserve_policy_call(
@@ -214,6 +215,7 @@ class StageDPreparedCallObserver:
                 node_kind=node_kind,
                 target_id=target_id,
                 branch_selected=False,
+                raw_response_required=True,
             )
         if node_kind == "root":
             self._root_turns.add(provenance.session_call_ordinal)
@@ -275,6 +277,14 @@ class StageDPreparedCallObserver:
             request_id=request_id,
         )
         self._producer.complete_policy_call(ticket.pending, action=action)
+
+    async def after_raw_response(self, ticket: object, response_content: bytes) -> None:
+        if type(ticket) is not StageDPreparedTicket:
+            raise ValueError("prepared raw-response ticket has the wrong type")
+        self._producer.mark_policy_response_observed(
+            ticket.pending,
+            response_content=response_content,
+        )
 
     async def abort(
         self,
@@ -363,6 +373,9 @@ class StageDForwardDirectiveObserver:
 
     async def after_response(self, ticket: object, response: object) -> None:
         await self._delegate.after_response(ticket, response)
+
+    async def after_raw_response(self, ticket: object, response_content: bytes) -> None:
+        await self._delegate.after_raw_response(ticket, response_content)
 
     async def abort(
         self,

@@ -14,6 +14,7 @@ import pytest
 
 import redco.analysis.stage_d_receipt_ledger as receipt_ledger_module
 from redco.analysis.stage_d_exact_action import BehaviorAction, ExactActionKey
+from redco.analysis.stage_d_ledger_validation import validate_state_machine
 from redco.analysis.stage_d_receipt_ledger import (
     BatchAlreadyClaimed,
     GenesisBinding,
@@ -372,8 +373,14 @@ def test_source_policy_receipts_roundtrip_reopen_seal_and_verify(tmp_path: Path)
         recorded_action_key=key,
         request_sha256=request,
         branch_selected=False,
+        raw_response_required=True,
     )
     action = _materialize(key)
+    raw_response = writer.put_evidence(b"exact-provider-response")
+    writer.mark_source_policy_response_observed(
+        reservation,
+        response_sha256=raw_response,
+    )
     response = writer.put_evidence(action.to_bytes())
     completion = writer.complete_source_policy_call(
         reservation,
@@ -382,6 +389,24 @@ def test_source_policy_receipts_roundtrip_reopen_seal_and_verify(tmp_path: Path)
     )
     _bind_source_rollout(writer, completion)
     writer.close()
+
+    records = [
+        json.loads(path.read_bytes())
+        for path in sorted((root / "records").glob("*.json"))
+    ]
+    validate_state_machine(records)
+    tampered = json.loads(json.dumps(records))
+    witness_record = next(
+        record
+        for record in tampered
+        if record["record_kind"] == "receipt"
+        and record["body"]["receipt"]["receipt_kind"]
+        == "source_policy_response_observed"
+    )
+    witness_record["body"]["receipt"]["raw_response_sha256"] = "f" * 64
+    witness_record["body"]["evidence_refs"] = ["f" * 64]
+    with pytest.raises(LedgerPoisoned, match="source policy completion is invalid"):
+        validate_state_machine(tampered)
 
     reopened = StageDReceiptLedger(root, master_seed=MASTER_SEED)
     seal = reopened.seal()
@@ -395,6 +420,57 @@ def test_source_policy_receipts_roundtrip_reopen_seal_and_verify(tmp_path: Path)
     assert provenance.request_sequence < provenance.completion_sequence
     assert provenance.exact_action_key_digest == key.digest
     assert provenance.action_digest == action.digest
+
+
+def test_source_policy_raw_response_is_required_exactly_once_and_survives_reopen(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "source-raw-response"
+    writer = _create(root)
+    key = _key(17)
+    request = writer.put_evidence(key.request)
+    reservation = writer.reserve_source_policy_call(
+        group_id="group-1",
+        rollout_id="rollout-1",
+        decision_id="root-turn-0",
+        node_kind="root",
+        target_id=None,
+        target_ordinal=None,
+        target_address=PolicyEventAddress(0, "root", 0, 0),
+        recorded_action_key=key,
+        request_sha256=request,
+        branch_selected=False,
+        raw_response_required=True,
+    )
+    action = _materialize(key)
+    action_evidence = writer.put_evidence(action.to_bytes())
+    with pytest.raises(LedgerError, match="lacks its durable raw response witness"):
+        writer.complete_source_policy_call(
+            reservation,
+            action=action,
+            response_sha256=action_evidence,
+        )
+    raw_response = writer.put_evidence(b"exact-provider-response")
+    witness = writer.mark_source_policy_response_observed(
+        reservation,
+        response_sha256=raw_response,
+    )
+    assert json.loads(witness)["receipt_kind"] == "source_policy_response_observed"
+    with pytest.raises(LedgerError, match="observed twice"):
+        writer.mark_source_policy_response_observed(
+            reservation,
+            response_sha256=raw_response,
+        )
+    writer.close()
+
+    with pytest.raises(LedgerError, match="requires active-clean"):
+        StageDReceiptLedger(root, master_seed=MASTER_SEED)
+    witness_receipts = [
+        json.loads(path.read_bytes())["body"]["receipt"]
+        for path in sorted((root / "records").glob("*.json"))
+        if json.loads(path.read_bytes())["record_kind"] == "receipt"
+    ]
+    assert witness_receipts[-1]["raw_response_sha256"] == raw_response
 
 
 def test_selected_source_policy_call_requires_same_ledger_commitment(

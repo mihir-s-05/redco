@@ -120,6 +120,7 @@ class PendingSourcePolicyCall:
     target_ordinal: int | None
     outer_weight: Fraction
     recorded_action_reservation: RecordedActionReservation | None
+    raw_response_required: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +192,7 @@ class StageDSourceRolloutProducer:
         self._root_policy_turn_count = root_policy_turn_count
         self._base_model_manifest_sha256 = base_model_manifest_sha256
         self._pending: dict[str, PendingSourcePolicyCall] = {}
+        self._observed_responses: set[str] = set()
         self._completed: dict[str, RolloutDecision] = {}
         self._aborted = False
         self._rollout_completed = False
@@ -207,6 +209,7 @@ class StageDSourceRolloutProducer:
         node_kind: Literal["root", "child"],
         target_id: str | None,
         branch_selected: bool,
+        raw_response_required: bool = False,
         recorded_action_reservation: RecordedActionReservation | None = None,
     ) -> PendingSourcePolicyCall:
         """Persist the exact request before the caller is allowed to send it."""
@@ -231,6 +234,7 @@ class StageDSourceRolloutProducer:
             recorded_action_key=action_key,
             request_sha256=request_sha256,
             branch_selected=branch_selected,
+            raw_response_required=raw_response_required,
             recorded_action_reservation=recorded_action_reservation,
         )
         if recorded_action_reservation is not None:
@@ -246,6 +250,7 @@ class StageDSourceRolloutProducer:
             target_ordinal,
             outer_weight,
             recorded_action_reservation,
+            raw_response_required,
         )
         self._pending[decision_id] = pending
         return pending
@@ -308,6 +313,7 @@ class StageDSourceRolloutProducer:
         branch_count: int,
         continuation_replicates: int,
         failure_reward: float,
+        raw_response_required: bool = False,
     ) -> PendingSourcePolicyCall:
         """Commit and reserve one selected child before a single allowed POST."""
         self._validate_policy_call(
@@ -335,6 +341,7 @@ class StageDSourceRolloutProducer:
                 node_kind="child",
                 target_id=target_id,
                 branch_selected=True,
+                raw_response_required=raw_response_required,
                 recorded_action_reservation=recorded,
             )
         except BaseException as error:
@@ -401,6 +408,8 @@ class StageDSourceRolloutProducer:
         decision_id = pending.reservation.decision_id
         if self._pending.get(decision_id) != pending:
             raise ValueError("source policy completion is not pending in this producer")
+        if pending.raw_response_required and decision_id not in self._observed_responses:
+            raise ValueError("source policy completion lacks its raw response witness")
         response_sha256 = self._ledger.put_evidence(action.to_bytes())
         if pending.recorded_action_reservation is not None:
             self._ledger.complete_recorded_action(
@@ -429,8 +438,31 @@ class StageDSourceRolloutProducer:
             provenance,
         )
         del self._pending[decision_id]
+        self._observed_responses.discard(decision_id)
         self._completed[decision_id] = decision
         return decision
+
+    def mark_policy_response_observed(
+        self,
+        pending: PendingSourcePolicyCall,
+        *,
+        response_content: bytes,
+    ) -> str:
+        """Persist exact provider bytes before the renderer parses them."""
+        decision_id = pending.reservation.decision_id
+        if self._pending.get(decision_id) != pending:
+            raise ValueError("source policy response is not pending in this producer")
+        if decision_id in self._observed_responses:
+            raise ValueError("source policy response was observed twice")
+        if type(response_content) is not bytes or not response_content:
+            raise ValueError("source policy raw response must be nonempty bytes")
+        response_sha256 = self._ledger.put_evidence(response_content)
+        self._ledger.mark_source_policy_response_observed(
+            pending.reservation,
+            response_sha256=response_sha256,
+        )
+        self._observed_responses.add(decision_id)
+        return response_sha256
 
     def abort_policy_call(
         self,
@@ -464,6 +496,7 @@ class StageDSourceRolloutProducer:
             error_sha256=error_sha256,
         )
         del self._pending[decision_id]
+        self._observed_responses.discard(decision_id)
         self._aborted = True
         return receipt
 

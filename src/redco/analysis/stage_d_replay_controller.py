@@ -221,6 +221,7 @@ class StageDReconstructionQAController:
         self._records = records
         self._actions = actions
         self._pending: dict[PolicyEventAddress, BehaviorAction] = {}
+        self._raw_observed: set[PolicyEventAddress] = set()
         self._consumed: set[PolicyEventAddress] = set()
         self._lock = threading.Lock()
         self._pre_forward_guard = pre_forward_guard
@@ -256,11 +257,25 @@ class StageDReconstructionQAController:
     async def after_response(self, ticket: object, response: object) -> None:
         if type(ticket) is not _ReconstructionQATicket:
             raise ValueError("QA response ticket has the wrong type")
+        with self._lock:
+            if ticket.address not in self._raw_observed:
+                raise ValueError("QA typed response predates its exact raw response")
         _require_typed_action_response(response, ticket.action)
         with self._lock:
             if ticket.address in self._consumed:
                 raise ValueError("QA source event was delivered twice")
+            self._raw_observed.remove(ticket.address)
             self._consumed.add(ticket.address)
+
+    async def after_raw_response(self, ticket: object, response_content: bytes) -> None:
+        if type(ticket) is not _ReconstructionQATicket:
+            raise ValueError("QA raw-response ticket has the wrong type")
+        if response_content != frozen_engine_response_content(ticket.action):
+            raise ValueError("QA frozen response bytes changed before parsing")
+        with self._lock:
+            if ticket.address in self._raw_observed or ticket.address in self._consumed:
+                raise ValueError("QA raw response was delivered twice")
+            self._raw_observed.add(ticket.address)
 
     async def abort(self, ticket: object, phase: str, error: BaseException) -> None:
         if type(ticket) is not _ReconstructionQATicket:
@@ -271,7 +286,7 @@ class StageDReconstructionQAController:
     def finalize(self) -> None:
         self._director.assert_drained()
         with self._lock:
-            if self._pending or self._consumed != set(self._records):
+            if self._pending or self._raw_observed or self._consumed != set(self._records):
                 raise ValueError("QA did not consume the complete frozen source trace")
 
     def _plan(self, provenance: RecordedRLMProvenanceV2) -> SamplingOverride:

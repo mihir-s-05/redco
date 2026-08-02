@@ -565,6 +565,7 @@ class StageDReceiptLedger:
         recorded_action_key: ExactActionKey,
         request_sha256: str,
         branch_selected: bool,
+        raw_response_required: bool = False,
         recorded_action_reservation: RecordedActionReservation | None = None,
     ) -> SourcePolicyCallReservation:
         """Durably reserve one source-rollout policy call before forwarding it."""
@@ -580,6 +581,8 @@ class StageDReceiptLedger:
             raise ValueError("source policy target fields disagree with node kind")
         if type(branch_selected) is not bool:
             raise ValueError("branch_selected must be bool")
+        if type(raw_response_required) is not bool:
+            raise ValueError("raw_response_required must be bool")
         if branch_selected and node_kind != "child":
             raise ValueError("only child decisions can be selected for branching")
         self._require_evidence(request_sha256)
@@ -634,6 +637,7 @@ class StageDReceiptLedger:
                 "exact_action_key_digest": recorded_action_key.digest,
                 "request_sha256": request_sha256,
                 "branch_selected": branch_selected,
+                "raw_response_required": raw_response_required,
                 "target_commitment_receipt_sha256": commitment_sha256,
                 "recorded_action_reservation_id": recorded_action_reservation_id,
                 "request_sequence": request_sequence,
@@ -671,6 +675,13 @@ class StageDReceiptLedger:
             or action.key.digest != reservation.exact_action_key_digest
         ):
             raise LedgerError("source policy completion differs from its reservation")
+        raw_response_sha256 = self._source_policy_responses.get(key)
+        raw_response_required = self._source_policy_reservations[key].get(
+            "raw_response_required",
+            False,
+        )
+        if raw_response_required and raw_response_sha256 is None:
+            raise LedgerError("source policy completion lacks its durable raw response witness")
         self._require_evidence(response_sha256)
         if response_sha256 != _sha256(action.to_bytes()):
             raise ValueError("source policy response evidence differs from exact action")
@@ -688,14 +699,56 @@ class StageDReceiptLedger:
                 "exact_action_key_digest": reservation.exact_action_key_digest,
                 "action_digest": action.digest,
                 "response_sha256": response_sha256,
+                "raw_response_sha256": raw_response_sha256,
                 "request_sequence": reservation.request_sequence,
                 "completion_sequence": completion_sequence,
             },
-            evidence_refs=(response_sha256,),
+            evidence_refs=tuple(
+                sorted(
+                    {response_sha256}
+                    | ({raw_response_sha256} if raw_response_sha256 is not None else set())
+                )
+            ),
         )
         del self._source_policy_pending[key]
         self._source_policy_completed[key] = _sha256(receipt)
         self._source_policy_action_digests[key] = action.digest
+        return receipt
+
+    @_writer_transaction
+    def mark_source_policy_response_observed(
+        self,
+        reservation: SourcePolicyCallReservation,
+        *,
+        response_sha256: str,
+    ) -> bytes:
+        """Anchor exact provider bytes before source-response parsing."""
+        self._require_writable()
+        key = (reservation.rollout_id, reservation.decision_id)
+        if self._source_policy_pending.get(key) != reservation:
+            raise LedgerError("source policy response does not match the pending reservation")
+        if reservation.ledger_id != self._ledger_id:
+            raise LedgerError("source policy response belongs to another ledger")
+        if key in self._source_policy_responses:
+            raise LedgerError("source policy response was observed twice")
+        self._require_evidence(response_sha256)
+        receipt = self._append_receipt(
+            "source_policy_response_observed",
+            {
+                "ledger_id": self._ledger_id,
+                "ledger_offset": len(self._records),
+                "prior_chain_sha256": self.head_sha256,
+                "group_id": reservation.group_id,
+                "rollout_id": reservation.rollout_id,
+                "decision_id": reservation.decision_id,
+                "request_receipt_sha256": _sha256(reservation.receipt),
+                "exact_action_key_digest": reservation.exact_action_key_digest,
+                "raw_response_sha256": response_sha256,
+                "request_sequence": reservation.request_sequence,
+            },
+            evidence_refs=(response_sha256,),
+        )
+        self._source_policy_responses[key] = response_sha256
         return receipt
 
     @_writer_transaction
@@ -2672,6 +2725,7 @@ class StageDReceiptLedger:
         self._pending_executions: dict[tuple[str, str, str, int], dict[str, Any]] = {}
         self._source_policy_pending: dict[tuple[str, str], SourcePolicyCallReservation] = {}
         self._source_policy_reservations: dict[tuple[str, str], dict[str, Any]] = {}
+        self._source_policy_responses: dict[tuple[str, str], str] = {}
         self._source_policy_completed: dict[tuple[str, str], str] = {}
         self._source_policy_action_digests: dict[tuple[str, str], str] = {}
         self._source_rollout_completed: dict[tuple[str, str], SourceRolloutCompletion] = {}
@@ -2841,6 +2895,11 @@ class StageDReceiptLedger:
                 self._source_policy_pending.pop(key)
                 self._source_policy_completed[key] = _sha256(canonical_json(receipt))
                 self._source_policy_action_digests[key] = receipt["action_digest"]
+            elif kind == "source_policy_response_observed":
+                key = (receipt["rollout_id"], receipt["decision_id"])
+                if key not in self._source_policy_pending or key in self._source_policy_responses:
+                    raise LedgerError("source policy response witness is out of order")
+                self._source_policy_responses[key] = receipt["raw_response_sha256"]
             elif kind == "source_rollout_completed":
                 key = (receipt["group_id"], receipt["rollout_id"])
                 self._source_rollout_completed[key] = SourceRolloutCompletion(

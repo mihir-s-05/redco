@@ -310,6 +310,15 @@ def test_reconstruction_qa_replays_complete_source_with_zero_forward(
         ),
         raw={"choices": [{"message": action.message}]},
     )
+    with pytest.raises(ValueError, match="predates its exact raw response"):
+        __import__("asyncio").run(controller.after_response(directive.ticket, response))
+    with pytest.raises(ValueError, match="frozen response bytes changed"):
+        __import__("asyncio").run(
+            controller.after_raw_response(directive.ticket, b"changed")
+        )
+    __import__("asyncio").run(
+        controller.after_raw_response(directive.ticket, directive.response_content)
+    )
     __import__("asyncio").run(controller.after_response(directive.ticket, response))
     controller.finalize()
 

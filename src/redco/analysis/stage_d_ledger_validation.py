@@ -146,6 +146,7 @@ def validate_state_machine(
     batch_claims: set[str] = set()
     stage_d_training_authorization_arms: set[str] = set()
     source_reservations: dict[tuple[str, str], tuple[int, str, Mapping[str, Any]]] = {}
+    source_responses: dict[tuple[str, str], tuple[int, str, Mapping[str, Any]]] = {}
     source_completions: dict[tuple[str, str], str] = {}
     source_action_digests: dict[tuple[str, str], str] = {}
     source_aborts: dict[tuple[str, str], str] = {}
@@ -185,6 +186,7 @@ def validate_state_machine(
                     or not _is_sha256(receipt.get("request_sha256"))
                     or receipt.get("node_kind") not in {"root", "child"}
                     or type(receipt.get("branch_selected")) is not bool
+                    or type(receipt.get("raw_response_required", False)) is not bool
                 ):
                     raise LedgerPoisoned("source policy reservation is invalid")
                 node_kind = receipt["node_kind"]
@@ -233,12 +235,73 @@ def validate_state_machine(
                     body["receipt_sha256"],
                     receipt,
                 )
+            elif receipt_kind == "source_policy_response_observed":
+                key = (receipt.get("rollout_id"), receipt.get("decision_id"))
+                source_reservation = source_reservations.get(key)
+                expected_fields = {
+                    "schema_version",
+                    "receipt_kind",
+                    "ledger_id",
+                    "ledger_offset",
+                    "prior_chain_sha256",
+                    "group_id",
+                    "rollout_id",
+                    "decision_id",
+                    "request_receipt_sha256",
+                    "exact_action_key_digest",
+                    "raw_response_sha256",
+                    "request_sequence",
+                }
+                if (
+                    set(receipt) != expected_fields
+                    or source_reservation is None
+                    or key in source_responses
+                    or key in source_completions
+                    or key in source_aborts
+                    or receipt.get("ledger_offset") != record["offset"]
+                    or receipt.get("request_sequence") != source_reservation[0]
+                    or source_reservation[0] >= record["offset"]
+                    or receipt.get("request_receipt_sha256") != source_reservation[1]
+                    or receipt.get("group_id") != source_reservation[2].get("group_id")
+                    or receipt.get("exact_action_key_digest")
+                    != source_reservation[2].get("exact_action_key_digest")
+                    or not _is_sha256(receipt.get("raw_response_sha256"))
+                    or set(body["evidence_refs"])
+                    != {receipt.get("raw_response_sha256")}
+                ):
+                    raise LedgerPoisoned("source policy raw response witness is invalid")
+                source_responses[key] = (
+                    record["offset"],
+                    body["receipt_sha256"],
+                    receipt,
+                )
             elif receipt_kind == "source_policy_call_completed":
                 key = (receipt.get("rollout_id"), receipt.get("decision_id"))
                 source_reservation = source_reservations.get(key)
+                source_response = source_responses.get(key)
+                raw_response_sha256 = receipt.get("raw_response_sha256")
+                legacy_fields = {
+                    "schema_version",
+                    "receipt_kind",
+                    "ledger_id",
+                    "ledger_offset",
+                    "prior_chain_sha256",
+                    "group_id",
+                    "rollout_id",
+                    "decision_id",
+                    "request_receipt_sha256",
+                    "exact_action_key_digest",
+                    "action_digest",
+                    "response_sha256",
+                    "request_sequence",
+                    "completion_sequence",
+                }
+                witnessed_fields = legacy_fields | {"raw_response_sha256"}
                 if (
-                    source_reservation is None
+                    set(receipt) not in (legacy_fields, witnessed_fields)
+                    or source_reservation is None
                     or key in source_completions
+                    or key in source_aborts
                     or receipt.get("completion_sequence") != record["offset"]
                     or receipt.get("request_sequence") != source_reservation[0]
                     or receipt.get("request_receipt_sha256") != source_reservation[1]
@@ -246,6 +309,28 @@ def validate_state_machine(
                     != source_reservation[2].get("exact_action_key_digest")
                     or not _is_sha256(receipt.get("action_digest"))
                     or not _is_sha256(receipt.get("response_sha256"))
+                    or (
+                        source_reservation[2].get("raw_response_required", False)
+                        and source_response is None
+                    )
+                    or (
+                        source_response is not None
+                        and (
+                            source_response[0] >= record["offset"]
+                            or raw_response_sha256
+                            != source_response[2].get("raw_response_sha256")
+                        )
+                    )
+                    or (source_response is None and raw_response_sha256 is not None)
+                    or set(body["evidence_refs"])
+                    != {
+                        receipt.get("response_sha256"),
+                        *(
+                            [raw_response_sha256]
+                            if raw_response_sha256 is not None
+                            else []
+                        ),
+                    }
                 ):
                     raise LedgerPoisoned("source policy completion is invalid")
                 source_completions[key] = body["receipt_sha256"]

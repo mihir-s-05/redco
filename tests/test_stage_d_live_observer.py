@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -226,7 +227,7 @@ def test_observer_accepts_bridge_boundary_only_on_returning_root(tmp_path: Path)
     async def scenario() -> None:
         observer, _ledger, _producer = _observer(tmp_path / "ledger")
         first = await observer.before_forward(_prepared(17, "root", _root_rlm()))
-        await observer.after_response(first, _response(finish_reason="tool_calls"))
+        await _deliver_response(observer, first, _response(finish_reason="tool_calls"))
         for spawn in (0, 1):
             child = await observer.before_forward(
                 _prepared(
@@ -235,7 +236,7 @@ def test_observer_accepts_bridge_boundary_only_on_returning_root(tmp_path: Path)
                     _child_rlm(spawn, f"midpoint-shard-{spawn}"),
                 )
             )
-            await observer.after_response(child, _response())
+            await _deliver_response(observer, child, _response())
         returned = await observer.before_forward(
             _prepared(
                 20,
@@ -244,7 +245,7 @@ def test_observer_accepts_bridge_boundary_only_on_returning_root(tmp_path: Path)
                 routed_experts_prompt_start=1,
             )
         )
-        await observer.after_response(returned, _response())
+        await _deliver_response(observer, returned, _response())
 
     asyncio.run(scenario())
 
@@ -288,6 +289,18 @@ def _response(*, finish_reason: str = "stop") -> SimpleNamespace:
     )
 
 
+async def _deliver_response(
+    observer: StageDPreparedCallObserver,
+    ticket: object,
+    response: SimpleNamespace,
+) -> None:
+    await observer.after_raw_response(
+        ticket,
+        canonical_json({"fixture": "exact-provider-response"}),
+    )
+    await observer.after_response(ticket, response)
+
+
 def test_actual_interception_train_renderer_path_observes_bytes_once(
     tmp_path: Path,
 ) -> None:
@@ -298,6 +311,9 @@ def test_actual_interception_train_renderer_path_observes_bytes_once(
     from verifiers.v1.dialects.chat import ChatDialect
     from verifiers.v1.interception.server import InterceptionServer
     from verifiers.v1.session import RolloutSession
+
+    if "observer" not in inspect.signature(RolloutSession).parameters:
+        pytest.skip("prepared-observer patch is not applied to the local verifier stack")
 
     class Renderer:
         supports_tools = True
@@ -420,6 +436,62 @@ def test_actual_interception_train_renderer_path_observes_bytes_once(
     (completed,) = producer._completed.values()
     assert completed.action.key.prompt_token_ids == (10, 11)
     assert completed.action.action_token_ids == (20, 2)
+    receipt_kinds = []
+    for record_path in sorted((tmp_path / "ledger" / "records").glob("*.json")):
+        record = json.loads(record_path.read_bytes())
+        if record["record_kind"] == "receipt":
+            receipt_kinds.append(record["body"]["receipt"]["receipt_kind"])
+    assert receipt_kinds == [
+        "source_policy_call_reserved",
+        "source_policy_response_observed",
+        "source_policy_call_completed",
+    ]
+    assert (tmp_path / "ledger" / "evidence" / _sha256(raw_response)).read_bytes() == raw_response
+
+
+def test_raw_response_is_witnessed_once_before_parse_failure(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        observer, ledger, _producer = _observer(tmp_path / "ledger")
+        ticket = await observer.before_forward(_prepared(17, "root", _root_rlm()))
+        raw_response = b"malformed-provider-response"
+        with pytest.raises(ValueError, match="wrong type"):
+            await observer.after_raw_response(object(), raw_response)
+        with pytest.raises(ValueError, match="nonempty bytes"):
+            await observer.after_raw_response(ticket, b"")
+        await observer.after_raw_response(ticket, raw_response)
+        with pytest.raises(ValueError, match="observed twice"):
+            await observer.after_raw_response(ticket, raw_response)
+        await observer.abort(ticket, "response_received", ValueError("malformed response"))
+        ledger.close()
+        assert (
+            tmp_path / "ledger" / "evidence" / _sha256(raw_response)
+        ).read_bytes() == raw_response
+
+    asyncio.run(scenario())
+
+
+def test_selected_typed_completion_cannot_mutate_before_raw_witness(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        observer, ledger, _producer = _observer(tmp_path / "ledger")
+        root = await observer.before_forward(_prepared(17, "root", _root_rlm()))
+        await _deliver_response(observer, root, _response(finish_reason="tool_calls"))
+        child = await observer.before_forward(
+            _prepared(18, "child-zero", _child_rlm(0, "diagnostic"))
+        )
+        with pytest.raises(ValueError, match="lacks its raw response witness"):
+            await observer.after_response(child, _response())
+        record_kinds = [
+            json.loads(path.read_bytes())["record_kind"]
+            for path in sorted((tmp_path / "ledger" / "records").glob("*.json"))
+        ]
+        assert "recorded_action_materialized" not in record_kinds
+        assert "model_call_completed" not in record_kinds
+        await observer.abort(child, "post_unknown", RuntimeError("fixture stop"))
+        ledger.close()
+
+    asyncio.run(scenario())
 
 
 def test_observer_reserves_before_forward_and_completes_children_out_of_order(
@@ -428,17 +500,17 @@ def test_observer_reserves_before_forward_and_completes_children_out_of_order(
     async def scenario() -> None:
         observer, ledger, _producer = _observer(tmp_path / "ledger")
         root = await observer.before_forward(_prepared(17, "root", _root_rlm()))
-        await observer.after_response(root, _response(finish_reason="tool_calls"))
+        await _deliver_response(observer, root, _response(finish_reason="tool_calls"))
         first = await observer.before_forward(
             _prepared(18, "child-zero", _child_rlm(0, "misleading-b"))
         )
         second = await observer.before_forward(
             _prepared(19, "child-one", _child_rlm(1, "misleading-a"))
         )
-        await observer.after_response(second, _response())
-        await observer.after_response(first, _response())
+        await _deliver_response(observer, second, _response())
+        await _deliver_response(observer, first, _response())
         returning = await observer.before_forward(_prepared(20, "returning-root", _root_rlm(1)))
-        await observer.after_response(returning, _response())
+        await _deliver_response(observer, returning, _response())
         assert inspect_ledger(tmp_path / "ledger").status == "active-clean"
         ledger.close()
 
@@ -452,7 +524,7 @@ def test_observer_duplicate_and_out_of_scaffold_calls_fail_before_forward(
         observer, ledger, _producer = _observer(tmp_path / "ledger")
         prepared = _prepared(17, "root", _root_rlm())
         ticket = await observer.before_forward(prepared)
-        await observer.after_response(ticket, _response(finish_reason="tool_calls"))
+        await _deliver_response(observer, ticket, _response(finish_reason="tool_calls"))
         with pytest.raises(ValueError, match="outside the frozen root"):
             await observer.before_forward(prepared)
         bad = _child_rlm(0, "diagnostic")
@@ -471,7 +543,7 @@ def test_child_commit_then_reservation_failure_is_terminal_before_post(
     async def scenario() -> None:
         observer, ledger, producer = _observer(tmp_path / "ledger")
         root = await observer.before_forward(_prepared(17, "root", _root_rlm()))
-        await observer.after_response(root, _response(finish_reason="tool_calls"))
+        await _deliver_response(observer, root, _response(finish_reason="tool_calls"))
 
         def fail_after_commit(**_kwargs: object) -> object:
             raise RuntimeError("injected reservation failure")
@@ -503,7 +575,7 @@ def test_observer_refuses_max_token_truncation(tmp_path: Path) -> None:
         observer, ledger, _producer = _observer(tmp_path / "ledger")
         ticket = await observer.before_forward(_prepared(17, "root", _root_rlm()))
         with pytest.raises(ValueError, match="refuses truncated"):
-            await observer.after_response(ticket, _response(finish_reason="length"))
+            await _deliver_response(observer, ticket, _response(finish_reason="length"))
         await observer.abort(ticket, "typed_response", ValueError("truncated"))
         assert inspect_ledger(tmp_path / "ledger").status == "poisoned"
         ledger.close()

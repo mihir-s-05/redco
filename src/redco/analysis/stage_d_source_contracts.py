@@ -153,7 +153,7 @@ class DecisionProvenance:
             "source_policy_call_completed",
             verifier,
         )
-        reservation_fields = {
+        legacy_reservation_fields = {
             "schema_version",
             "receipt_kind",
             "ledger_id",
@@ -173,7 +173,10 @@ class DecisionProvenance:
             "recorded_action_reservation_id",
             "request_sequence",
         }
-        completion_fields = {
+        witnessed_reservation_fields = legacy_reservation_fields | {
+            "raw_response_required"
+        }
+        legacy_completion_fields = {
             "schema_version",
             "receipt_kind",
             "ledger_id",
@@ -189,8 +192,24 @@ class DecisionProvenance:
             "request_sequence",
             "completion_sequence",
         }
-        if set(reserved) != reservation_fields or set(completed) != completion_fields:
+        witnessed_completion_fields = legacy_completion_fields | {"raw_response_sha256"}
+        if (
+            set(reserved)
+            not in (legacy_reservation_fields, witnessed_reservation_fields)
+            or set(completed)
+            not in (legacy_completion_fields, witnessed_completion_fields)
+        ):
             raise ValueError("source policy receipt fields differ")
+        if (
+            "raw_response_required" in reserved
+            and type(reserved["raw_response_required"]) is not bool
+        ):
+            raise ValueError("source policy response witness requirement is not bool")
+        raw_response_sha256 = completed.get("raw_response_sha256")
+        if reserved.get("raw_response_required", False) and raw_response_sha256 is None:
+            raise ValueError("source policy response witness fields differ")
+        if raw_response_sha256 is not None:
+            _require_sha256(raw_response_sha256, "raw_response_sha256")
         shared = ("ledger_id", "group_id", "rollout_id", "decision_id")
         if any(
             not isinstance(reserved[field], str)
