@@ -18,6 +18,20 @@ def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def derive_scientific_group_id(*, namespace: str, example_id: str) -> str:
+    """Derive the stable group identity shared by planning and live collection."""
+    if not namespace or not example_id:
+        raise ValueError("scientific group identity fields must be nonempty")
+    identity = canonical_json(
+        {
+            "domain": "redco-stage-d-scientific-group-v1",
+            "namespace": namespace,
+            "example_id": example_id,
+        }
+    )
+    return f"stage-d-group-{_sha256(identity)[:24]}"
+
+
 def derive_source_episode_seed_and_salt(
     *,
     master_seed: str,

@@ -13,7 +13,10 @@ from typing import Any
 import verifiers.v1 as vf
 from pydantic import model_validator
 
-from redco.analysis.stage_d_collection import derive_source_episode_seed_and_salt
+from redco.analysis.stage_d_collection import (
+    derive_scientific_group_id,
+    derive_source_episode_seed_and_salt,
+)
 from redco.analysis.stage_d_live_observer import (
     StageDForwardDirectiveObserver,
     StageDObserverIdentity,
@@ -143,17 +146,9 @@ class StageDSourceTaskset(vf.Taskset[StageDSourceTask, StageDSourceTasksetConfig
         base_tasks = EvidenceSelectionTaskset(self.config).load()
         tasks: list[StageDSourceTask] = []
         for task in base_tasks:
-            group_id = (
-                "stage-d-group-"
-                + _sha256(
-                    canonical_json(
-                        {
-                            "domain": "redco-stage-d-scientific-group-v1",
-                            "namespace": self.config.scientific_group_namespace,
-                            "example_id": task.data.example_id,
-                        }
-                    )
-                )[:24]
+            group_id = derive_scientific_group_id(
+                namespace=self.config.scientific_group_namespace,
+                example_id=task.data.example_id,
             )
             for rollout_slot in range(self.config.rollouts_per_task):
                 data = StageDSourceData.model_validate(

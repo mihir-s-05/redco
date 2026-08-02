@@ -22,6 +22,7 @@ from test_stage_d_three_arm_bridge import (
 
 from redco.analysis.stage_d_collection import (
     StageDCollectionPlan,
+    derive_scientific_group_id,
     derive_source_episode_seed_and_salt,
     run_exact_source_collection,
     verify_collection_outcomes,
@@ -39,6 +40,13 @@ class _Data:
     def model_dump(self, *, mode: str) -> dict[str, object]:
         assert mode == "json"
         return dict(self.payload)
+
+
+def test_scientific_group_identity_matches_frozen_stage_d_plan() -> None:
+    assert derive_scientific_group_id(
+        namespace="redco-stage-d1-support-v1",
+        example_id="qasper-71f2b368228a748fd348f1abf540236568a61b07",
+    ) == "stage-d-group-4346a8ce81f1b4968e5be9a3"
 
 
 def _plan_and_episodes():
