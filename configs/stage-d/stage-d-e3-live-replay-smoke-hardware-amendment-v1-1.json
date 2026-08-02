@@ -3,7 +3,7 @@
   "experiment": "stage-d-e3-live-event-replay-smoke-v1-hardware-1",
   "status": "frozen_after_failed_pre-provision lookup and before provisioning",
   "controlling_protocol": "configs/stage-d/stage-d-e3-live-replay-smoke-preregistration-v1.json",
-  "controlling_commit": "0a8062b3e12b89ec8ea53a93e4cfb89f421f84d1",
+  "controlling_commit": "0a8062ba791e254872c790d0e156f935ebe463ee",
   "failed_resource_id": "7574d6",
   "failed_resource_disposition": "Prime reported no valid GPU configuration and created no pod or disk.",
   "selected_resource": {
