@@ -65,6 +65,7 @@ def build_config(args: argparse.Namespace) -> EvalConfig:
         )
     env = vf.SingleAgentEnvConfig.model_validate(
         {
+            "id": "single-agent",
             "taskset": {
                 "id": "redco-evidence-selection-v2",
                 "dataset_path": args.dataset.resolve(),
