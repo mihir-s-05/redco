@@ -8,7 +8,11 @@ import json
 import subprocess
 from pathlib import Path
 
-from redco.analysis.stage_d_dependency_stack import canonical_tree_manifest_bytes
+from redco.analysis.stage_d_dependency_stack import (
+    StageDDependencyStackManifest,
+    canonical_tree_manifest_bytes,
+)
+from redco.analysis.stage_d_protocol_manifest import StageDProtocolManifest
 
 
 def _sha256(value: bytes) -> str:
@@ -88,12 +92,31 @@ def _apply_component(
     return actual
 
 
-def verify(repo: Path, stack_path: Path, amendment_path: Path) -> dict[str, object]:
+def verify(
+    repo: Path,
+    stack_path: Path,
+    amendment_path: Path,
+    *,
+    expected_amendment_sha256: str,
+    protocol_path: Path,
+    expected_protocol_sha256: str,
+) -> dict[str, object]:
     stack_bytes = stack_path.read_bytes()
     amendment_bytes = amendment_path.read_bytes()
-    stack = json.loads(stack_bytes)
+    protocol_bytes = protocol_path.read_bytes()
+    stack = StageDDependencyStackManifest.from_bytes(stack_bytes)
+    protocol = StageDProtocolManifest.from_bytes(protocol_bytes)
     amendment = json.loads(amendment_bytes)
-    if amendment["dependency_stack_sha256"] != _sha256(stack_bytes):
+    amendment_sha256 = _sha256(amendment_bytes)
+    protocol_sha256 = _sha256(protocol_bytes)
+    stack_sha256 = _sha256(stack_bytes)
+    if amendment_sha256 != expected_amendment_sha256:
+        raise RuntimeError("deployment amendment external digest differs")
+    if protocol_sha256 != expected_protocol_sha256:
+        raise RuntimeError("protocol external digest differs")
+    if protocol.dependency_stack_sha256 != stack_sha256:
+        raise RuntimeError("protocol binds a different dependency stack")
+    if amendment["dependency_stack_sha256"] != stack_sha256:
         raise RuntimeError("deployment amendment binds a different dependency stack")
     verifier = repo / amendment["verifier"]["path"]
     if _sha256(verifier.read_bytes()) != amendment["verifier"]["sha256"]:
@@ -116,28 +139,30 @@ def verify(repo: Path, stack_path: Path, amendment_path: Path) -> dict[str, obje
         _require_clean(prime / path, path)
 
     observed: dict[str, str] = {}
-    for component in stack["components"]:
-        name = component["name"]
+    for binding in stack.components:
+        name = binding.name
         if name == "rlm":
             continue
-        expected = (
-            amendment["prime_binding"]["post_tree_sha256"]
-            if name == "prime-rl"
-            else component["post_tree_sha256"]
-        )
+        expected = binding.post_tree_sha256
+        if (
+            name == "prime-rl"
+            and amendment["prime_binding"]["post_tree_sha256"] != expected
+        ):
+            raise RuntimeError("Prime amendment and dependency stack hashes differ")
         excluded = tuple(expected_gitlinks) if name == "prime-rl" else ()
         observed[name] = _apply_component(
             root=roots[name],
             repo=repo,
-            component=component,
+            component=binding.to_payload(),
             expected_tree=expected,
             excluded_roots=excluded,
         )
     return {
         "schema_version": 1,
         "domain": "redco-stage-d-dependency-deployment-verification-v1",
-        "dependency_stack_sha256": _sha256(stack_bytes),
-        "amendment_sha256": _sha256(amendment_bytes),
+        "dependency_stack_sha256": stack_sha256,
+        "amendment_sha256": amendment_sha256,
+        "protocol_sha256": protocol_sha256,
         "component_tree_sha256s": observed,
         "gitlinks": expected_gitlinks,
         "status": "pass",
@@ -149,12 +174,18 @@ def main() -> None:
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--dependency-stack", type=Path, required=True)
     parser.add_argument("--amendment", type=Path, required=True)
+    parser.add_argument("--expected-amendment-sha256", required=True)
+    parser.add_argument("--protocol", type=Path, required=True)
+    parser.add_argument("--expected-protocol-sha256", required=True)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     report = verify(
         args.repo.resolve(),
         args.dependency_stack.resolve(),
         args.amendment.resolve(),
+        expected_amendment_sha256=args.expected_amendment_sha256,
+        protocol_path=args.protocol.resolve(),
+        expected_protocol_sha256=args.expected_protocol_sha256,
     )
     encoded = _canonical(report) + b"\n"
     if args.output:
