@@ -111,6 +111,14 @@ def test_frozen_support_successor_preserves_rows_and_addresses() -> None:
     [
         (1, 2, 7, 2, ["1911.03894"]),
         (2, 3, 8, 3, ["1911.03894", "2001.09899"]),
+        (3, 4, 9, 4, ["1710.01492", "1911.03894", "2001.09899"]),
+        (
+            4,
+            5,
+            10,
+            5,
+            ["1710.01492", "1911.03894", "1912.01673", "2001.09899"],
+        ),
     ],
 )
 def test_later_support_successors_preserve_history_and_addresses(
@@ -378,6 +386,13 @@ def test_successor_protocol_freezes_only_authorized_changes() -> None:
             "b7cdd5a0998dcfde739fe5a542b2e8b4dc6e8ef6c18ed7100df81860be3a1735",
             4,
         ),
+        (
+            10,
+            5,
+            9,
+            "bb576082ba15535d7b0a996ea5c14dd008ebde634a0d8c5c7258f81d5ac9577d",
+            5,
+        ),
     ],
 )
 def test_later_successor_protocols_freeze_only_authorized_changes(
@@ -408,7 +423,7 @@ def test_later_successor_protocols_freeze_only_authorized_changes(
         "source_config": ROOT
         / f"configs/stage-d/stage-d1-support-source-eval-v{version}.toml",
     }
-    if version in (8, 9):
+    if version in (8, 9, 10):
         paths["inference_amendment"] = (
             ROOT
             / f"configs/stage-d/stage-d1-support-inference-amendment-v{version}-1.json"
@@ -538,6 +553,56 @@ def test_later_successor_protocols_freeze_only_authorized_changes(
         )
         assert amendment["changes"]["roster_contract"] == (
             "active-and-excluded-target-partition-v2"
+        )
+        for name in ("source_config", "replay_config"):
+            config = tomllib.loads(paths[name].read_text(encoding="utf-8"))
+            assert config["env"]["maximum_captured_session_call_count"] == 16
+    if version == 10:
+        assert preregistration["parent_terminal"] == {
+            "branch_replays": 0,
+            "downstream_model_generations": 3,
+            "evidence_archive_sha256": (
+                "09df217c974aeec9c1eae9485c78877697edc5691a78058f3533e2d9d5ae514f"
+            ),
+            "negative_support_trace_observed": False,
+            "offline_finalizer_audit_sha256": (
+                "8b383973b0aaa63c6dd6636580e7108b8244112549e4da9d4c85bcde0c9a78e9"
+            ),
+            "report_sha256": (
+                "f7203c119d89bdcc11178fcc0233f8e3f0e9e14d06600b934e25bbfb3c7cbb7b"
+            ),
+            "request_contract_failure": True,
+            "scientific_arm_outcomes": 0,
+            "source_rollouts_committed": 0,
+            "support_gate_evaluations": 0,
+        }
+        assert preregistration["user_authorization"]["date"] == "2026-08-02"
+        assert "no automatic successor" in preregistration[
+            "failure_dispositions"
+        ]["future_successors"].lower()
+        assert set(preregistration["failure_dispositions"]) == {
+            "pre_response_infrastructure",
+            "post_response_infrastructure",
+            "ordinary_negative_support",
+            "terminal_invariant",
+            "future_successors",
+        }
+        assert set(preregistration["forward_plan"]) == {
+            "capacity_unavailable",
+            "pre_response_infrastructure_failure",
+            "post_response_infrastructure_failure",
+            "support_fail",
+            "support_pass",
+            "terminal_invariant",
+        }
+        assert (
+            "tests/test_stage_d_live_observer.py::"
+            "test_actual_two_turn_child_finalizes_as_excluded_without_replay"
+            in preregistration["preflight"]["mandatory_prime_tests"]
+        )
+        amendment = json.loads(paths["amendment"].read_bytes())
+        assert amendment["changes"]["request_contract"] == (
+            "canonical-compact-or-openai-function-tools-plus-exact-tool-choice-v1"
         )
         for name in ("source_config", "replay_config"):
             config = tomllib.loads(paths[name].read_text(encoding="utf-8"))
