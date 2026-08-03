@@ -68,8 +68,8 @@ def test_live_candidate_marks_exact_post_and_returns_typed_action(
         ),
     )
     client._pool = renderer
-    client.encode_assistant_action = (  # type: ignore[method-assign]
-        lambda _request, _message, **_kwargs: (20, 2)
+    client.validate_assistant_action = (  # type: ignore[method-assign]
+        lambda _request, _message, **_kwargs: None
     )
     posted: list[bytes] = []
     responses: list[bytes] = []

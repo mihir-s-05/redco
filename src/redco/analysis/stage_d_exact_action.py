@@ -699,9 +699,13 @@ class ExactActionKey:
             if tuple(raw_engine.get("token_ids", ())) != prompt:
                 raise ExactActionMismatch("prepared engine request prompt differs")
             _verify_prepared_engine_request(raw_engine, request, prompt)
-        rendered_prompt = _token_tuple(render_prompt(request), "rendered_prompt_token_ids")
-        if rendered_prompt != prompt:
-            raise ExactActionMismatch("stored request does not render to prompt tokens")
+        if schema_version == SCHEMA_VERSION:
+            rendered_prompt = _token_tuple(
+                render_prompt(request),
+                "rendered_prompt_token_ids",
+            )
+            if rendered_prompt != prompt:
+                raise ExactActionMismatch("stored request does not render to prompt tokens")
         validated = {
             "schema_version": schema_version,
             "checkpoint_id": checkpoint_id,
@@ -800,7 +804,12 @@ class BehaviorAction:
         completion_tokens: int,
         termination_kind: TerminationKind,
         eos_token_id: int | None,
-        encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], Sequence[int]],
+        encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], Sequence[int]]
+        | None = None,
+        validate_action: Callable[
+            [Mapping[str, Any], Mapping[str, Any], Sequence[int]], None
+        ]
+        | None = None,
         request_id: str | None = None,
     ) -> BehaviorAction:
         if type(key) is not ExactActionKey:
@@ -826,9 +835,22 @@ class BehaviorAction:
         request = json.loads(key.request)
         if not isinstance(request, dict):
             raise ValueError("exact key request is not an object")
-        rendered = _token_tuple(encode_action(request, message), "rendered_action_token_ids")
-        if rendered != action:
-            raise ExactActionMismatch("typed message does not round-trip to action tokens")
+        prepared = key.schema_version == EXACT_ACTION_KEY_PREPARED_SCHEMA_VERSION
+        if prepared and (validate_action is None or encode_action is not None):
+            raise ValueError("prepared actions require token-semantic validation")
+        if not prepared and (encode_action is None or validate_action is not None):
+            raise ValueError("legacy actions require typed-message re-encoding")
+        if prepared:
+            assert validate_action is not None
+            validate_action(request, message, action)
+        else:
+            assert encode_action is not None
+            rendered = _token_tuple(
+                encode_action(request, message),
+                "rendered_action_token_ids",
+            )
+            if rendered != action:
+                raise ExactActionMismatch("typed message does not round-trip to action tokens")
         if not isinstance(finish_reason, str) or not finish_reason:
             raise ValueError("finish_reason must be nonempty")
         if request_id is None:
@@ -948,7 +970,12 @@ class BehaviorAction:
         cls,
         payload: bytes,
         *,
-        encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], Sequence[int]],
+        encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], Sequence[int]]
+        | None = None,
+        validate_action: Callable[
+            [Mapping[str, Any], Mapping[str, Any], Sequence[int]], None
+        ]
+        | None = None,
         render_prompt: Callable[[Mapping[str, Any]], Sequence[int]],
     ) -> BehaviorAction:
         if type(payload) is not bytes:
@@ -1002,6 +1029,7 @@ class BehaviorAction:
             termination_kind=action_payload["termination_kind"],
             eos_token_id=action_payload["eos_token_id"],
             encode_action=encode_action,
+            validate_action=validate_action,
             request_id=action_payload.get("request_id"),
         )
         if schema_version == SCHEMA_VERSION:

@@ -91,7 +91,12 @@ def compile_authorize_seal_campaign(
     branch_artifact_bytes: Sequence[bytes],
     support_report_bytes: bytes,
     support_rules_bytes: bytes,
-    encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], tuple[int, ...]],
+    encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], Sequence[int]]
+    | None = None,
+    validate_action: Callable[
+        [Mapping[str, Any], Mapping[str, Any], Sequence[int]], None
+    ]
+    | None = None,
     render_prompt: Callable[[Mapping[str, Any]], tuple[int, ...]],
     master_seed: str,
     objective_binding_bytes: Mapping[ArmName, bytes],
@@ -152,6 +157,7 @@ def compile_authorize_seal_campaign(
             verifier=ledger,
             evidence_loader=lambda digest: (ledger_root / "evidence" / digest).read_bytes(),
             encode_action=encode_action,
+            validate_action=validate_action,
             render_prompt=render_prompt,
         )
         for value in source_rollout_bytes
@@ -178,6 +184,7 @@ def compile_authorize_seal_campaign(
                 value,
                 verifier=ledger,
                 encode_action=encode_action,
+                validate_action=validate_action,
                 render_prompt=render_prompt,
                 master_seed=master_seed,
             ),
@@ -270,6 +277,7 @@ def compile_authorize_seal_campaign(
         verifier=verifier,
         evidence_loader=lambda digest: (ledger_root / "evidence" / digest).read_bytes(),
         encode_action=encode_action,
+        validate_action=validate_action,
         render_prompt=render_prompt,
         master_seed=master_seed,
         objective_bindings=bindings,
@@ -319,7 +327,12 @@ def recover_sealed_campaign(
     collection_plan: StageDCollectionPlan,
     collection_receipt_bytes: bytes,
     branch_artifact_bytes: Sequence[bytes],
-    encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], tuple[int, ...]],
+    encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], Sequence[int]]
+    | None = None,
+    validate_action: Callable[
+        [Mapping[str, Any], Mapping[str, Any], Sequence[int]], None
+    ]
+    | None = None,
     render_prompt: Callable[[Mapping[str, Any]], tuple[int, ...]],
     master_seed: str,
     objective_binding_bytes: Mapping[ArmName, bytes],
@@ -377,6 +390,7 @@ def recover_sealed_campaign(
             verifier=verifier,
             evidence_loader=evidence_loader,
             encode_action=encode_action,
+            validate_action=validate_action,
             render_prompt=render_prompt,
         )
         for value in source_rollout_bytes
@@ -414,6 +428,7 @@ def recover_sealed_campaign(
         verifier=verifier,
         evidence_loader=evidence_loader,
         encode_action=encode_action,
+        validate_action=validate_action,
         render_prompt=render_prompt,
         master_seed=master_seed,
         objective_bindings=bindings,

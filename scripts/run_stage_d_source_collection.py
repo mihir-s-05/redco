@@ -14,6 +14,7 @@ from typing import Any
 import verifiers.v1 as vf
 from verifiers.v1.cli.eval.runner import run_eval
 from verifiers.v1.configs.eval import EvalConfig
+from verifiers.v1.runtimes import make_runtime
 
 from redco.analysis.stage_d_branch_artifacts import (
     StageDBranchArtifactStore,
@@ -35,7 +36,6 @@ from redco.analysis.stage_d_source_artifacts import StageDSourceArtifactStore
 from redco.analysis.stage_d_source_contracts import SourceRollout
 from redco.analysis.stage_d_support_gate import load_support_rules
 from redco.integrations.write_once import write_once
-from verifiers.v1.runtimes import make_runtime
 
 
 def _sha256(value: bytes) -> str:
@@ -238,21 +238,17 @@ async def _recover_verified_sources(
                 raise ValueError("recovery renderer returned invalid prompt tokens")
             return rendered
 
-        def encode_action(
+        def validate_action(
             request: Mapping[str, Any],
             message: Mapping[str, Any],
-        ) -> tuple[int, ...]:
-            action = tuple(
-                client.encode_assistant_action(
-                    request,
-                    message,
-                    model=config.model,
-                    prompt_token_ids=render_prompt(request),
-                )
+            action_token_ids: tuple[int, ...],
+        ) -> None:
+            client.validate_assistant_action(
+                request,
+                message,
+                model=config.model,
+                action_token_ids=action_token_ids,
             )
-            if not action or any(type(token) is not int or token < 0 for token in action):
-                raise ValueError("recovery renderer returned invalid action tokens")
-            return action
 
         evidence_root = Path(config.env.ledger_path) / "evidence"
 
@@ -269,7 +265,7 @@ async def _recover_verified_sources(
                 path.read_bytes(),
                 verifier=ledger,
                 evidence_loader=evidence_loader,
-                encode_action=encode_action,
+                validate_action=validate_action,
                 render_prompt=render_prompt,
             )
             for path in store.source_paths()

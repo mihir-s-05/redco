@@ -13,6 +13,8 @@ from test_stage_d_scientific_branch_group import (
     Fixture,
     _fixture,
     _run,
+    _unexpected_prompt_render,
+    _validate_prepared_action,
 )
 
 from redco.analysis.stage_d_prime_bridge import audit_prime_cpu_batch, verify_prime_payload
@@ -41,19 +43,51 @@ def _sha256(value: bytes) -> str:
 def _artifacts(
     *,
     second_temperature: float = 0.7,
+    prepared: bool = False,
 ) -> tuple[tuple[bytes, bytes], Fixture]:
-    first_artifact, _, _, first = _run(_fixture(target_ordinal=0))
+    first_artifact, _, _, first = _run(
+        _fixture(target_ordinal=0, prepared=prepared)
+    )
     second_artifact, _, _, second = _run(
         _fixture(
             target_ordinal=1,
             prompt_content="different target prompt",
             temperature=second_temperature,
+            prepared=prepared,
         ),
         rewards=(0.5, 0.5, 0.5, 0.5),
     )
     for kind, digests in second.store.allowed.items():
         first.store.allowed.setdefault(kind, set()).update(digests)
     return (first_artifact.to_bytes(), second_artifact.to_bytes()), first
+
+
+def test_prepared_actions_reverify_through_branch_artifact_and_training_batch() -> None:
+    values, fixture = _artifacts(prepared=True)
+    batch = compile_training_batch(
+        values,
+        verification_context=ArtifactVerificationContext(
+            verifier=fixture.store,
+            encode_action=None,
+            render_prompt=_unexpected_prompt_render,
+            master_seed="master",
+            validate_action=_validate_prepared_action,
+        ),
+        binding=TrainingBridgeBinding(
+            producer_seal_sha256="1" * 64,
+            bridge_source_sha256="2" * 64,
+            prime_runtime_sha256="3" * 64,
+            trainer_config_sha256="4" * 64,
+            expected_policy_sha256=policy_identity_sha256(
+                fixture.spec.recorded_action.key
+            ),
+        ),
+        trainer_step=1,
+        seq_len=8,
+    )
+
+    assert len(batch.records) == 8
+    assert all(record.mask == (False, False, True, True) for record in batch.records)
 
 
 def _batch(*, seq_len: int = 8) -> SealedTrainingBatch:

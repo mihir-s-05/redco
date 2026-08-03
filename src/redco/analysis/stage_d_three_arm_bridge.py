@@ -90,7 +90,12 @@ def compile_verified_three_arm_batches(
     *,
     verifier: ReceiptVerifier,
     evidence_loader: Callable[[str], bytes],
-    encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], tuple[int, ...]],
+    encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], Sequence[int]]
+    | None = None,
+    validate_action: Callable[
+        [Mapping[str, Any], Mapping[str, Any], Sequence[int]], None
+    ]
+    | None = None,
     render_prompt: Callable[[Mapping[str, Any]], tuple[int, ...]],
     master_seed: str,
     objective_bindings: Mapping[ArmName, ObjectiveBinding],
@@ -108,6 +113,7 @@ def compile_verified_three_arm_batches(
             verifier=verifier,
             evidence_loader=evidence_loader,
             encode_action=encode_action,
+            validate_action=validate_action,
             render_prompt=render_prompt,
         )
         for value in source_rollout_bytes
@@ -119,6 +125,7 @@ def compile_verified_three_arm_batches(
                 value,
                 verifier=verifier,
                 encode_action=encode_action,
+                validate_action=validate_action,
                 render_prompt=render_prompt,
                 master_seed=master_seed,
             ),

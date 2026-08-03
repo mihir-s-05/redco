@@ -113,7 +113,7 @@ def _observer(
                 "domain": "redco-stage-d-test-runtime-snapshot-v1",
             }
         ),
-        encode_action=lambda _request, _message, _prompt_token_ids: (20, 2),
+        validate_action=lambda _request, _message, _action_token_ids: None,
     )
     return observer, ledger, producer
 
@@ -280,6 +280,7 @@ def _response(*, finish_reason: str = "stop") -> SimpleNamespace:
         }
     return SimpleNamespace(
         tokens=SimpleNamespace(
+            prompt_ids=[10, 11],
             completion_ids=[20, 2],
             completion_logprobs=[-0.2, -0.1],
         ),

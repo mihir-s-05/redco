@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from fractions import Fraction
@@ -965,7 +965,12 @@ class BranchGroupArtifact:
         value: bytes,
         *,
         verifier: ReceiptVerifier,
-        encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], tuple[int, ...]],
+        encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], Sequence[int]]
+        | None = None,
+        validate_action: Callable[
+            [Mapping[str, Any], Mapping[str, Any], Sequence[int]], None
+        ]
+        | None = None,
         render_prompt: Callable[[Mapping[str, Any]], tuple[int, ...]],
         master_seed: str,
     ) -> BranchGroupArtifact:
@@ -1009,6 +1014,7 @@ class BranchGroupArtifact:
         recorded_action = BehaviorAction.from_bytes(
             canonical_json(artifact["recorded_action"]),
             encode_action=encode_action,
+            validate_action=validate_action,
             render_prompt=render_prompt,
         )
         correspondence = SeedCorrespondenceMap.from_receipt(
@@ -1042,6 +1048,7 @@ class BranchGroupArtifact:
             action = BehaviorAction.from_bytes(
                 canonical_json(raw_arm.get("action")),
                 encode_action=encode_action,
+                validate_action=validate_action,
                 render_prompt=render_prompt,
             )
             if slot == 0:

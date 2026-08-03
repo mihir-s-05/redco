@@ -347,11 +347,50 @@ def test_prepared_engine_request_is_bound_and_round_trips() -> None:
     assert key.prepared_engine_request is not None
     assert key.prepared_engine_request_sha256 is not None
     payload = key.to_payload()
-    loaded = ExactActionKey.from_payload(payload, render_prompt=lambda _: (10, 11))
+    loaded = ExactActionKey.from_payload(payload, render_prompt=lambda _: (99,))
     assert loaded == key
     payload["prepared_engine_request"]["token_ids"] = [99]  # type: ignore[index]
     with pytest.raises(ExactActionMismatch, match="prompt differs"):
         ExactActionKey.from_payload(payload, render_prompt=lambda _: (10, 11))
+
+
+def test_prepared_action_requires_token_semantic_validation() -> None:
+    key = _prepared_key()
+    observed: list[tuple[int, ...]] = []
+    action = BehaviorAction.build(
+        key=key,
+        action_token_ids=(20, 2),
+        behavior_logprobs=(-0.2, -0.1),
+        raw_transport_message={"role": "assistant", "content": "ok"},
+        finish_reason="stop",
+        prompt_tokens=2,
+        completion_tokens=2,
+        termination_kind="eos",
+        eos_token_id=2,
+        validate_action=lambda _request, _message, tokens: observed.append(tuple(tokens)),
+    )
+    assert observed == [(20, 2)]
+    assert (
+        BehaviorAction.from_bytes(
+            action.to_bytes(),
+            validate_action=lambda _request, _message, _tokens: None,
+            render_prompt=lambda _: (99,),
+        )
+        == action
+    )
+    with pytest.raises(ValueError, match="token-semantic validation"):
+        BehaviorAction.build(
+            key=key,
+            action_token_ids=(20, 2),
+            behavior_logprobs=(-0.2, -0.1),
+            raw_transport_message={"role": "assistant", "content": "ok"},
+            finish_reason="stop",
+            prompt_tokens=2,
+            completion_tokens=2,
+            termination_kind="eos",
+            eos_token_id=2,
+            encode_action=lambda _request, _message: (20, 2),
+        )
 
 
 def test_prepared_resampling_changes_only_seed_salt_and_derived_hashes() -> None:

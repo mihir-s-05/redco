@@ -1,5 +1,5 @@
 diff --git a/tests/test_rlm_structure_v2.py b/tests/test_rlm_structure_v2.py
-index 9f3751f..7a6e801 100644
+index 9f3751f..e54f10a 100644
 --- a/tests/test_rlm_structure_v2.py
 +++ b/tests/test_rlm_structure_v2.py
 @@ -1,22 +1,35 @@
@@ -77,7 +77,7 @@ index 9f3751f..7a6e801 100644
      session = RolloutSession(ModelContext("test-model", client), trace)
      server = InterceptionServer()
      server.sessions["secret"] = session
-@@ -234,3 +239,565 @@ async def test_handler_replays_delayed_retry_without_coalescing_sibling() -> Non
+@@ -234,3 +239,548 @@ async def test_handler_replays_delayed_retry_without_coalescing_sibling() -> Non
          _sibling_headers(2)["X-RLM-Lineage"],
          _sibling_headers(3)["X-RLM-Lineage"],
      ]
@@ -307,40 +307,26 @@ index 9f3751f..7a6e801 100644
 +    assert agents.agent.config.retries.max_retries == 1
 +
 +
-+def test_train_client_reencodes_assistant_with_initialized_live_renderer() -> None:
++def test_train_client_validates_assistant_from_sampled_tokens() -> None:
 +    class Renderer:
-+        def render_ids(self, messages, *, tools=None, add_generation_prompt=False):
-+            del tools
-+            if len(messages) == 1 and add_generation_prompt:
-+                return [11, 12]
-+            if len(messages) == 1:
-+                return [11]
-+            if not add_generation_prompt:
-+                return [11, 12, 20, 2]
-+            raise AssertionError((messages, add_generation_prompt))
-+
-+        def render(self, messages, *, tools=None, add_generation_prompt=False):
++        def parse_response(self, token_ids, *, tools=None):
 +            assert tools is None
-+            assert len(messages) == 2
-+            assert add_generation_prompt is False
++            assert tuple(token_ids) == (20, 2)
 +            return SimpleNamespace(
-+                token_ids=[11, 12, 20, 2, 13],
-+                sampled_mask=[False, False, True, True, False],
-+                message_indices=[0, -1, 1, 1, 1],
-+                is_content=[True, False, True, True, False],
++                content="done",
++                reasoning_content=None,
++                tool_calls=[],
 +            )
 +
 +    client = TrainClient(SimpleNamespace())
 +    client._pool = Renderer()
 +
-+    encoded = client.encode_assistant_action(
++    client.validate_assistant_action(
 +        {"messages": [{"role": "user", "content": "hello"}]},
 +        {"role": "assistant", "content": "done"},
 +        model="resolved-model",
-+        prompt_token_ids=[11, 12],
++        action_token_ids=[20, 2],
 +    )
-+
-+    assert encoded == (20, 2)
 +
 +
 +def test_train_client_retains_sanitized_connection_identity() -> None:
@@ -601,29 +587,26 @@ index 9f3751f..7a6e801 100644
 +    assert observed[0]["seed"] == 71
 +
 +
-+def test_train_client_rejects_nonidentical_prepared_prompt_boundary() -> None:
++def test_train_client_rejects_action_tokens_with_different_typed_semantics() -> None:
 +    class Renderer:
-+        def render_ids(self, messages, *, tools=None, add_generation_prompt=False):
-+            del tools
-+            if len(messages) == 1 and add_generation_prompt:
-+                return [11, 12]
-+            if len(messages) > 1 and not add_generation_prompt:
-+                return [11, 12, 20, 2]
-+            raise AssertionError((messages, add_generation_prompt))
-+
-+        def render(self, messages, *, tools=None, add_generation_prompt=False):
-+            del messages, tools, add_generation_prompt
-+            raise AssertionError("full render must not run after a prompt mismatch")
++        def parse_response(self, token_ids, *, tools=None):
++            assert tuple(token_ids) == (20, 2)
++            assert tools is None
++            return SimpleNamespace(
++                content="different",
++                reasoning_content=None,
++                tool_calls=[],
++            )
 +
 +    client = TrainClient(SimpleNamespace())
 +    client._pool = Renderer()
 +
-+    with pytest.raises(ValueError, match="exact prepared prompt boundary"):
-+        client.encode_assistant_action(
++    with pytest.raises(ValueError, match="do not parse to the typed response"):
++        client.validate_assistant_action(
 +            {"messages": [{"role": "user", "content": "hello"}]},
 +            {"role": "assistant", "content": "done"},
 +            model="resolved-model",
-+            prompt_token_ids=[11, 99],
++            action_token_ids=[20, 2],
 +        )
 +
 +
@@ -825,7 +808,7 @@ index 6a7df33..ec213db 100644
              self.base_url + dialect.upstream_path,
              dialect.apply_overrides(body, model, sampling_args),
 diff --git a/verifiers/v1/clients/train.py b/verifiers/v1/clients/train.py
-index 6b7e7fa..c823493 100644
+index 6b7e7fa..96e84bb 100644
 --- a/verifiers/v1/clients/train.py
 +++ b/verifiers/v1/clients/train.py
 @@ -9,13 +9,16 @@ needs a running vLLM engine.
@@ -1022,34 +1005,73 @@ index 6b7e7fa..c823493 100644
      return {
          "id": response.id or "vf-intercept",
          "object": "chat.completion",
-@@ -93,23 +243,15 @@ def serialize_completion(response: Response, model: str) -> dict:
+@@ -93,27 +243,36 @@ def serialize_completion(response: Response, model: str) -> dict:
      }
  
  
 -def response_from_generate(
 -    result: dict, model: str, bridged_turn: PendingTurn | None = None
 -) -> Response:
-+def response_from_generate(result: dict, model: str, bridged_turn: PendingTurn | None = None) -> Response:
-     """Parse a `renderers.client.generate` result dict into a typed `Response`,
-     mirroring the chat client's `response_from_wire` (plus the token encoding)."""
+-    """Parse a `renderers.client.generate` result dict into a typed `Response`,
+-    mirroring the chat client's `response_from_wire` (plus the token encoding)."""
 -    finish: FinishReason = (
 -        result["finish_reason"]
 -        if result.get("finish_reason") in FINISH_REASONS
 -        else None
 -    )
-+    finish: FinishReason = result["finish_reason"] if result.get("finish_reason") in FINISH_REASONS else None
++def _assistant_message_from_parsed(
++    content: str | None,
++    reasoning_content: str | None,
++    parsed_tool_calls: Sequence[Any],
++) -> AssistantMessage:
++    """Normalize renderer output once for live responses and token validation."""
      tool_calls = [
          ToolCall(
-             id=tc.id or f"call_{i}",
-             name=tc.name,
+-            id=tc.id or f"call_{i}",
+-            name=tc.name,
 -            arguments=tc.arguments
 -            if isinstance(tc.arguments, str)
 -            else json.dumps(tc.arguments or {}),
-+            arguments=tc.arguments if isinstance(tc.arguments, str) else json.dumps(tc.arguments or {}),
++            id=call.id or f"call_{index}",
++            name=call.name,
++            arguments=(
++                call.arguments
++                if isinstance(call.arguments, str)
++                else json.dumps(call.arguments or {})
++            ),
          )
-         for i, tc in enumerate(result.get("tool_calls") or [])
-         if getattr(tc, "name", None)
-@@ -137,9 +279,7 @@ def response_from_generate(
+-        for i, tc in enumerate(result.get("tool_calls") or [])
+-        if getattr(tc, "name", None)
++        for index, call in enumerate(parsed_tool_calls)
++        if getattr(call, "name", None)
+     ] or None
++    return AssistantMessage(
++        content=content or None,
++        reasoning_content=reasoning_content,
++        tool_calls=tool_calls,
++    )
++
++
++def response_from_generate(result: dict, model: str, bridged_turn: PendingTurn | None = None) -> Response:
++    """Parse a `renderers.client.generate` result dict into a typed `Response`,
++    mirroring the chat client's `response_from_wire` (plus the token encoding)."""
++    finish: FinishReason = result["finish_reason"] if result.get("finish_reason") in FINISH_REASONS else None
+     prompt_ids = result.get("prompt_ids") or []
+     completion_ids = result.get("completion_ids") or []
+     # Per-message token spans (the renderer's attribution) let the trace graph store each
+@@ -129,17 +288,15 @@ def response_from_generate(
+         id=result.get("request_id", ""),
+         created=0,
+         model=model,
+-        message=AssistantMessage(
+-            content=result.get("content") or None,
+-            reasoning_content=result.get("reasoning_content"),
+-            tool_calls=tool_calls,
++        message=_assistant_message_from_parsed(
++            result.get("content"),
++            result.get("reasoning_content"),
++            result.get("tool_calls") or [],
+         ),
          finish_reason=finish,
          # /inference/v1/generate returns exact token ids but no usage details, so the
          # completion's reasoning-token subset is unknown.
@@ -1060,7 +1082,7 @@ index 6b7e7fa..c823493 100644
          # generate() returns owned, typed lists. Skip revalidation here to avoid copying
          # million-token contexts synchronously on the event loop.
          tokens=TurnTokens.model_construct(
-@@ -150,9 +290,7 @@ def response_from_generate(
+@@ -150,9 +307,7 @@ def response_from_generate(
              is_content=attribution.is_content if attribution is not None else None,
              multi_modal_data=result.get("multi_modal_data"),
              routed_experts=result.get("routed_experts"),
@@ -1071,7 +1093,7 @@ index 6b7e7fa..c823493 100644
          ),
      )
  
-@@ -189,11 +327,15 @@ class TrainClient(Client):
+@@ -189,11 +344,15 @@ class TrainClient(Client):
          pool_size: int = 1,
          config: RendererConfig | None = None,
          renderer_model_name: str | None = None,
@@ -1087,77 +1109,47 @@ index 6b7e7fa..c823493 100644
          self._pool = None
  
      def _renderer_pool(
-@@ -216,6 +358,69 @@ class TrainClient(Client):
+@@ -216,6 +375,39 @@ class TrainClient(Client):
              )
          return self._pool
  
-+    def encode_assistant_action(
++    def validate_assistant_action(
 +        self,
 +        request: Mapping[str, Any],
 +        message: Mapping[str, Any],
 +        *,
 +        model: str,
-+        prompt_token_ids: Sequence[int],
-+    ) -> tuple[int, ...]:
-+        """Re-encode one typed assistant response with the live renderer instance."""
++        action_token_ids: Sequence[int],
++    ) -> None:
++        """Validate typed assistant semantics from the exact sampled token sequence."""
 +        if self._pool is None:
-+            raise RuntimeError("assistant action encoding requires an initialized renderer")
++            raise RuntimeError("assistant action validation requires an initialized renderer")
 +        messages = request.get("messages")
 +        if not isinstance(messages, list) or not all(isinstance(item, dict) for item in messages):
-+            raise ValueError("assistant action encoding requires wire chat messages")
++            raise ValueError("assistant action validation requires wire chat messages")
 +        if message.get("role") != "assistant":
-+            raise ValueError("assistant action encoding requires an assistant message")
++            raise ValueError("assistant action validation requires an assistant message")
++        action = tuple(action_token_ids)
++        if not action or any(type(token) is not int or token < 0 for token in action):
++            raise ValueError("assistant action validation requires sampled token IDs")
 +        tools = parse_tools(request.get("tools"))
 +        wire_tools = [tool_to_wire(tool) for tool in tools] if tools else None
 +        renderer = self._renderer_pool(model)
-+        rendered_prompt_ids = renderer.render_ids(
-+            messages,
-+            tools=wire_tools,
-+            add_generation_prompt=True,
++        parsed = renderer.parse_response(action, tools=wire_tools)
++        normalized = message_to_wire(
++            _assistant_message_from_parsed(
++                parsed.content,
++                parsed.reasoning_content,
++                parsed.tool_calls,
++            )
 +        )
-+        prepared_prompt_ids = tuple(prompt_token_ids)
-+        if tuple(rendered_prompt_ids) != prepared_prompt_ids:
-+            raise ValueError("assistant action encoding changed the exact prepared prompt boundary")
-+        rendered = renderer.render(
-+            [*messages, dict(message)],
-+            tools=wire_tools,
-+            add_generation_prompt=False,
-+        )
-+        full_ids = tuple(rendered.token_ids)
-+        if full_ids[: len(prepared_prompt_ids)] != prepared_prompt_ids:
-+            raise ValueError("assistant action encoding changed the rendered prompt prefix")
-+        if not rendered.sampled_mask or not rendered.message_indices or not rendered.is_content:
-+            raise ValueError("assistant action encoding requires exact renderer attribution")
-+        if not (
-+            len(full_ids) == len(rendered.sampled_mask) == len(rendered.message_indices) == len(rendered.is_content)
-+        ):
-+            raise ValueError("assistant action renderer attribution is misaligned")
-+        assistant_index = len(messages)
-+        action: list[int] = []
-+        for token, sampled, message_index, is_content in zip(
-+            full_ids[len(prepared_prompt_ids) :],
-+            rendered.sampled_mask[len(prepared_prompt_ids) :],
-+            rendered.message_indices[len(prepared_prompt_ids) :],
-+            rendered.is_content[len(prepared_prompt_ids) :],
-+            strict=True,
-+        ):
-+            if message_index != assistant_index:
-+                raise ValueError("assistant action suffix changed message attribution")
-+            if sampled:
-+                if not is_content:
-+                    raise ValueError("sampled assistant action token is template scaffolding")
-+                action.append(token)
-+            elif is_content:
-+                raise ValueError("unsampled assistant suffix token is marked as content")
-+        action_ids = tuple(action)
-+        if not action_ids:
-+            raise ValueError("assistant action encoding produced no tokens")
-+        return action_ids
++        if normalized != dict(message):
++            raise ValueError("assistant action tokens do not parse to the typed response")
 +
      async def get_response(
          self,
          dialect: Dialect,
-@@ -225,6 +430,9 @@ class TrainClient(Client):
+@@ -225,6 +417,9 @@ class TrainClient(Client):
          session_id: str | None = None,
          turn: PendingTurn | None = None,
          headers: Mapping[str, str] | None = None,
@@ -1167,7 +1159,7 @@ index 6b7e7fa..c823493 100644
      ) -> Response:
          # The renderer tokenizes the typed prompt for training (it needs per-token ids + logprobs
          # back), so it can't forward the raw request — it parses `body` via the dialect and renders
-@@ -248,18 +456,16 @@ class TrainClient(Client):
+@@ -248,18 +443,16 @@ class TrainClient(Client):
          from renderers.client import _maybe_offload, generate
  
          wire_tools = [tool_to_wire(t) for t in tools] if tools else None
@@ -1193,7 +1185,7 @@ index 6b7e7fa..c823493 100644
          renderer = self._renderer_pool(
              model,
              chat_template_kwargs=chat_template_kwargs,
-@@ -269,9 +475,7 @@ class TrainClient(Client):
+@@ -269,9 +462,7 @@ class TrainClient(Client):
          # Only build the (O(context)) previous-turn token ids once the cheap guards pass — a
          # multimodal prompt or a tail that isn't a clean `[tool*, user?]` extension can't bridge.
          can_bridge = (
@@ -1204,7 +1196,7 @@ index 6b7e7fa..c823493 100644
          )
          previous_ids = turn.previous_token_ids() if can_bridge else None
          if previous_ids is not None:
-@@ -300,6 +504,14 @@ class TrainClient(Client):
+@@ -300,6 +491,14 @@ class TrainClient(Client):
          if prompt_ids is None:
              wire_messages = [message_to_wire(m) for m in prompt]
  
@@ -1219,7 +1211,7 @@ index 6b7e7fa..c823493 100644
          try:
              result = await generate(
                  client=self.openai,
-@@ -311,17 +523,37 @@ class TrainClient(Client):
+@@ -311,17 +510,37 @@ class TrainClient(Client):
                  prompt_attribution=prompt_attribution,
                  tools=wire_tools,
                  sampling_params=sampling_params,

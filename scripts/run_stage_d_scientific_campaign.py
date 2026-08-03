@@ -263,17 +263,16 @@ def _run(args: argparse.Namespace) -> None:
                 )
             )
 
-        def encode_action(
+        def validate_action(
             request: Mapping[str, object],
             message: Mapping[str, object],
-        ) -> tuple[int, ...]:
-            return tuple(
-                client.encode_assistant_action(
-                    request,
-                    message,
-                    model=config.model,
-                    prompt_token_ids=render_prompt(request),
-                )
+            action_token_ids: tuple[int, ...],
+        ) -> None:
+            client.validate_assistant_action(
+                request,
+                message,
+                model=config.model,
+                action_token_ids=action_token_ids,
             )
 
         def decode_action(value: bytes):
@@ -281,7 +280,7 @@ def _run(args: argparse.Namespace) -> None:
 
             return BehaviorAction.from_bytes(
                 value,
-                encode_action=encode_action,
+                validate_action=validate_action,
                 render_prompt=render_prompt,
             )
 
@@ -290,7 +289,7 @@ def _run(args: argparse.Namespace) -> None:
                 path.read_bytes(),
                 verifier=ledger,
                 evidence_loader=lambda digest: _evidence_loader(args.ledger, digest),
-                encode_action=encode_action,
+                validate_action=validate_action,
                 render_prompt=render_prompt,
             )
             for path in sorted((args.source_artifacts / "sources").glob("*.json"))

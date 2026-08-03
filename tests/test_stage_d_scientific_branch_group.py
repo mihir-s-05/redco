@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -123,24 +123,60 @@ def _key(
     *,
     temperature: float = 0.7,
     prompt_content: str = "q",
+    prepared: bool = False,
 ) -> ExactActionKey:
+    request = _request(
+        seed,
+        temperature=temperature,
+        prompt_content=prompt_content,
+    )
+    shared = {
+        "checkpoint_id": "model@commit",
+        "base_model_manifest": b"base",
+        "adapter_manifest": b"adapter",
+        "tokenizer_manifest": b"tokenizer",
+        "renderer_manifest": b"renderer",
+        "sampler_conformance_manifest": _conformance(),
+        "action_selection_policy": "direct_single_sample",
+        "transport_retry_policy": "fail_before_action_no_resample",
+        "request": request,
+        "prompt_token_ids": (10, 11),
+    }
+    if prepared:
+        return ExactActionKey.build_prepared(
+            **shared,
+            prepared_engine_request={
+                "model": "model@commit",
+                "token_ids": [10, 11],
+                "sampling_params": {
+                    "temperature": temperature,
+                    "top_p": 1.0,
+                    "seed": seed,
+                    "max_tokens": 2,
+                    "logprobs": 1,
+                    "skip_special_tokens": False,
+                    "stop_token_ids": [2],
+                    "cache_salt": f"seed-{seed}",
+                },
+            },
+        )
     return ExactActionKey.build(
-        checkpoint_id="model@commit",
-        base_model_manifest=b"base",
-        adapter_manifest=b"adapter",
-        tokenizer_manifest=b"tokenizer",
-        renderer_manifest=b"renderer",
-        sampler_conformance_manifest=_conformance(),
-        action_selection_policy="direct_single_sample",
-        transport_retry_policy="fail_before_action_no_resample",
-        request=_request(
-            seed,
-            temperature=temperature,
-            prompt_content=prompt_content,
-        ),
-        prompt_token_ids=(10, 11),
+        **shared,
         render_prompt=lambda _: (10, 11),
     )
+
+
+def _validate_prepared_action(
+    _request: Mapping[str, Any],
+    _message: Mapping[str, Any],
+    action_ids: Sequence[int],
+) -> None:
+    if tuple(action_ids) != (20, 2):
+        raise ValueError("prepared action IDs changed")
+
+
+def _unexpected_prompt_render(_request: Mapping[str, Any]) -> tuple[int, ...]:
+    raise AssertionError("prepared reload must trust stored engine prompt IDs")
 
 
 def _action(
@@ -148,22 +184,31 @@ def _action(
     *,
     temperature: float = 0.7,
     prompt_content: str = "q",
+    prepared: bool = False,
 ) -> BehaviorAction:
+    key = _key(
+        seed,
+        temperature=temperature,
+        prompt_content=prompt_content,
+        prepared=prepared,
+    )
+    kwargs: dict[str, Any] = {
+        "key": key,
+        "action_token_ids": (20, 2),
+        "behavior_logprobs": (-0.2, -0.1),
+        "raw_transport_message": {"role": "assistant", "content": "duplicate"},
+        "finish_reason": "stop",
+        "prompt_tokens": 2,
+        "completion_tokens": 2,
+        "termination_kind": "eos",
+        "eos_token_id": 2,
+    }
+    if prepared:
+        kwargs["validate_action"] = _validate_prepared_action
+    else:
+        kwargs["encode_action"] = lambda _request, _message: (20, 2)
     return BehaviorAction.build(
-        key=_key(
-            seed,
-            temperature=temperature,
-            prompt_content=prompt_content,
-        ),
-        action_token_ids=(20, 2),
-        behavior_logprobs=(-0.2, -0.1),
-        raw_transport_message={"role": "assistant", "content": "duplicate"},
-        finish_reason="stop",
-        prompt_tokens=2,
-        completion_tokens=2,
-        termination_kind="eos",
-        eos_token_id=2,
-        encode_action=lambda _request, _message: (20, 2),
+        **kwargs,
     )
 
 
@@ -175,6 +220,7 @@ class Fixture:
     dynamic: PolicyEventAddress
     prompt_content: str
     temperature: float
+    prepared: bool
 
 
 def _fixture(
@@ -187,12 +233,14 @@ def _fixture(
     target_address: PolicyEventAddress | None = None,
     rollout_id: str = "rollout-1",
     group_id: str | None = None,
+    prepared: bool = False,
 ) -> Fixture:
     store = TrustedReceiptStore()
     recorded = _action(
         17,
         prompt_content=prompt_content,
         temperature=temperature,
+        prepared=prepared,
     )
     target = target_address or PolicyEventAddress(1, "root/child", 0, 0)
     master_seed = "master"
@@ -247,6 +295,7 @@ def _fixture(
         dynamic,
         prompt_content,
         temperature,
+        prepared,
     )
 
 
@@ -289,6 +338,7 @@ def _sampler(fixture: Fixture) -> tuple[list[tuple[int, int]], CandidateSampler]
             action_seed,
             prompt_content=fixture.prompt_content,
             temperature=fixture.temperature,
+            prepared=fixture.prepared,
         )
         receipt = fixture.store.issue(
             "candidate_action_inference",

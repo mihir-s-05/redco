@@ -120,7 +120,8 @@ def test_renderer_and_verifier_patch_stacks_apply_in_deployment_order(
         ),
     )
     train = (verifier / "verifiers/v1/clients/train.py").read_text()
-    assert "prompt_token_ids: Sequence[int]" in train
+    assert "def validate_assistant_action(" in train
+    assert "action_token_ids: Sequence[int]" in train
     assert (verifier / "verifiers/v1/sampling_director.py").is_file()
     docker_runtime = (verifier / "verifiers/v1/runtimes/docker/__init__.py").read_text()
     assert "execution_user: str | None" in docker_runtime
@@ -133,7 +134,7 @@ def test_renderer_and_verifier_patch_stacks_apply_in_deployment_order(
     rollout = (verifier / "verifiers/v1/rollout.py").read_text()
     assert "await invoke(" in rollout
     assert "self.task.pre_generation" in rollout
-    assert "add_generation_prompt=True" in train
+    assert "renderer.parse_response(action, tools=wire_tools)" in train
     pytest.importorskip("anthropic", reason="full Verifiers runtime is validated in pinned WSL")
     environment = os.environ.copy()
     environment["PYTHONPATH"] = os.pathsep.join(

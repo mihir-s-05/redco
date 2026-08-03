@@ -5,6 +5,7 @@ import io
 import json
 import shutil
 import zipfile
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -579,6 +580,19 @@ def _tool_action(seed: int) -> BehaviorAction:
     return _prepared_action(seed, message=message, tool_call=True)
 
 
+def _validate_prepared_action(
+    _request: Mapping[str, object],
+    _message: Mapping[str, object],
+    action_ids: Sequence[int],
+) -> None:
+    if tuple(action_ids) != (20, 2):
+        raise ValueError("prepared action IDs changed")
+
+
+def _unexpected_prompt_render(_request: Mapping[str, object]) -> tuple[int, ...]:
+    raise AssertionError("prepared source reload must use stored engine prompt IDs")
+
+
 def _prepared_action(
     seed: int,
     *,
@@ -624,7 +638,7 @@ def _prepared_action(
         completion_tokens=2,
         termination_kind="tool_calls" if tool_call else "eos",
         eos_token_id=None if tool_call else 2,
-        encode_action=lambda _request, _message: (20, 2),
+        validate_action=_validate_prepared_action,
     )
 
 
@@ -1318,6 +1332,14 @@ def test_strict_source_uses_two_structural_slots_despite_reverse_completion(
     assert prepared["source"] == source.to_payload()
     (recovered,) = store.recover_completed(ledger_root)
     assert recovered.read_bytes() == source.to_bytes()
+    restored = SourceRollout.verify_bytes(
+        source.to_bytes(),
+        verifier=writer,
+        evidence_loader=lambda digest: (ledger_root / "evidence" / digest).read_bytes(),
+        render_prompt=_unexpected_prompt_render,
+        validate_action=_validate_prepared_action,
+    )
+    assert restored == source
     store.assert_no_pending()
 
     tampered = json.loads(prepared_sources[0])

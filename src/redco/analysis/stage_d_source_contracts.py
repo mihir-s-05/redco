@@ -424,8 +424,13 @@ class SourceRollout:
         *,
         verifier: ReceiptVerifier,
         evidence_loader: Callable[[str], bytes],
-        encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], tuple[int, ...]],
         render_prompt: Callable[[Mapping[str, Any]], tuple[int, ...]],
+        encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], Sequence[int]]
+        | None = None,
+        validate_action: Callable[
+            [Mapping[str, Any], Mapping[str, Any], Sequence[int]], None
+        ]
+        | None = None,
     ) -> SourceRollout:
         """Reconstruct one live source only from canonical, anchored evidence."""
         if type(value) is not bytes:
@@ -460,6 +465,7 @@ class SourceRollout:
             canonical_json(producer),
             verifier=verifier,
             encode_action=encode_action,
+            validate_action=validate_action,
             render_prompt=render_prompt,
         )
         if source.evidence_class != "live":
@@ -722,8 +728,13 @@ def _source_from_payload(
     producer_receipt: bytes,
     *,
     verifier: ReceiptVerifier,
-    encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], tuple[int, ...]],
     render_prompt: Callable[[Mapping[str, Any]], tuple[int, ...]],
+    encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], Sequence[int]]
+    | None = None,
+    validate_action: Callable[
+        [Mapping[str, Any], Mapping[str, Any], Sequence[int]], None
+    ]
+    | None = None,
 ) -> SourceRollout:
     expected = {
         "group_id",
@@ -766,6 +777,7 @@ def _source_from_payload(
             value,
             verifier=verifier,
             encode_action=encode_action,
+            validate_action=validate_action,
             render_prompt=render_prompt,
         )
         for value in raw_decisions
@@ -838,8 +850,13 @@ def _rollout_decision_from_payload(
     value: object,
     *,
     verifier: ReceiptVerifier,
-    encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], tuple[int, ...]],
     render_prompt: Callable[[Mapping[str, Any]], tuple[int, ...]],
+    encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], Sequence[int]]
+    | None = None,
+    validate_action: Callable[
+        [Mapping[str, Any], Mapping[str, Any], Sequence[int]], None
+    ]
+    | None = None,
 ) -> RolloutDecision:
     expected = {
         "decision_id",
@@ -876,6 +893,7 @@ def _rollout_decision_from_payload(
     behavior_action = BehaviorAction.from_bytes(
         canonical_json(action),
         encode_action=encode_action,
+        validate_action=validate_action,
         render_prompt=render_prompt,
     )
     return RolloutDecision(

@@ -27,10 +27,13 @@ class ArtifactVerificationContext:
     verifier: ReceiptVerifier
     encode_action: Callable[
         [Mapping[str, Any], Mapping[str, Any]],
-        tuple[int, ...],
-    ]
+        Sequence[int],
+    ] | None
     render_prompt: Callable[[Mapping[str, Any]], tuple[int, ...]]
     master_seed: str
+    validate_action: Callable[
+        [Mapping[str, Any], Mapping[str, Any], Sequence[int]], None
+    ] | None = None
 
     def __post_init__(self) -> None:
         if not self.master_seed:
@@ -251,6 +254,7 @@ def compile_training_batch(
             value,
             verifier=verification_context.verifier,
             encode_action=verification_context.encode_action,
+            validate_action=verification_context.validate_action,
             render_prompt=verification_context.render_prompt,
             master_seed=verification_context.master_seed,
         )

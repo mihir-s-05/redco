@@ -167,12 +167,12 @@ class LiveVLLMCandidateEngine:
             completion_tokens=len(result["completion_ids"]),
             termination_kind=termination_kind,
             eos_token_id=eos_token_id,
-            encode_action=lambda request, assistant: tuple(
-                self._client.encode_assistant_action(
+            validate_action=lambda request, assistant, action_ids: (
+                self._client.validate_assistant_action(
                     request,
                     assistant,
                     model=key.checkpoint_id,
-                    prompt_token_ids=key.prompt_token_ids,
+                    action_token_ids=action_ids,
                 )
             ),
             request_id=request_id,

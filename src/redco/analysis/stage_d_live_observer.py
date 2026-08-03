@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
@@ -117,9 +117,9 @@ class StageDPreparedCallObserver:
         identity: StageDObserverIdentity,
         protocol: StageDObserverProtocol,
         runtime_snapshot: bytes,
-        encode_action: Callable[
-            [Mapping[str, Any], Mapping[str, Any], tuple[int, ...]],
-            tuple[int, ...],
+        validate_action: Callable[
+            [Mapping[str, Any], Mapping[str, Any], Sequence[int]],
+            None,
         ],
     ) -> None:
         if not trace_id:
@@ -132,7 +132,7 @@ class StageDPreparedCallObserver:
             runtime_snapshot,
             "frozen runtime snapshot",
         )
-        self._encode_action = encode_action
+        self._validate_action = validate_action
         self._root_turns: set[int] = set()
 
     async def before_forward(self, prepared: PreparedRequestLike) -> object:
@@ -235,6 +235,12 @@ class StageDPreparedCallObserver:
             or getattr(tokens, "kept_tokens", None) is not None
         ):
             raise ValueError("Stage-D source collection forbids token sidecars")
+        prompt_token_ids = _integer_tuple(
+            getattr(tokens, "prompt_ids", None),
+            "prompt token IDs",
+        )
+        if prompt_token_ids != ticket.action_key.prompt_token_ids:
+            raise ValueError("typed prepared response changed prompt token IDs")
         action_token_ids = _integer_tuple(
             getattr(tokens, "completion_ids", None), "completion token IDs"
         )
@@ -269,10 +275,10 @@ class StageDPreparedCallObserver:
             completion_tokens=completion_tokens,
             termination_kind=termination_kind,
             eos_token_id=eos_token_id,
-            encode_action=lambda request, typed_message: self._encode_action(
+            validate_action=lambda request, typed_message, action_ids: self._validate_action(
                 request,
                 typed_message,
-                ticket.action_key.prompt_token_ids,
+                tuple(action_ids),
             ),
             request_id=request_id,
         )
@@ -364,7 +370,7 @@ class StageDForwardDirectiveObserver:
         self._pre_forward_guard = pre_forward_guard
 
     async def before_forward(self, prepared: PreparedRequestLike) -> object:
-        from renderers.client import PreparedGenerateForward  # type: ignore[import-not-found]
+        from renderers.client import PreparedGenerateForward  # type: ignore[import-untyped]
 
         if self._pre_forward_guard is not None:
             self._pre_forward_guard()

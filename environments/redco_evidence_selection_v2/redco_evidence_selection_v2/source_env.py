@@ -545,12 +545,12 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
                     parent_tool_call_slot=self.config.parent_tool_call_slot,
                 ),
                 runtime_snapshot=self._runtime_snapshot(task, agent_config),
-                encode_action=lambda request, message, prompt_token_ids: (
-                    client.encode_assistant_action(
+                validate_action=lambda request, message, action_token_ids: (
+                    client.validate_assistant_action(
                         request,
                         message,
                         model=str(agent_config.model),
-                        prompt_token_ids=prompt_token_ids,
+                        action_token_ids=action_token_ids,
                     )
                 ),
             ),

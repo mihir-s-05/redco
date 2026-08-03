@@ -239,6 +239,7 @@ def materialize_support_successor(
     retired_example_id: str,
     maximum_paper_characters: int,
     minimum_span_characters: int,
+    historically_retired_paper_ids: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Replace one observed support address while preserving the other rows exactly."""
     prior_counts = Counter(str(row["split"]) for row in prior_rows)
@@ -252,7 +253,11 @@ def materialize_support_successor(
         raise ValueError("the observed retired address must be the first support row")
     retained = [row for row in support if row["example_id"] != retired_example_id]
     forbidden_rows = [*old_rows, *prior_rows]
-    excluded_paper_ids = {str(row["paper_id"]) for row in forbidden_rows}
+    retired_history = set(historically_retired_paper_ids or ())
+    excluded_paper_ids = {
+        *(str(row["paper_id"]) for row in forbidden_rows),
+        *retired_history,
+    }
     excluded_reference_spans = {
         str(span)
         for row in forbidden_rows
@@ -329,6 +334,8 @@ def materialize_support_successor(
         },
         "reserve_excluded_from_immutable_snapshot": reserve["paper_id"]
         not in {str(row["paper_id"]) for row in old_rows},
+        "reserve_excluded_from_retired_history": reserve["paper_id"]
+        not in retired_history,
         "reserve_reference_fresh": not set(reserve["reference_evidence"])
         & {
             str(span)
@@ -358,6 +365,7 @@ def materialize_support_successor(
             "row_sha256": _sha256(_encode_rows([reserve])),
         },
         "selection_receipt": selection_receipts[0],
+        "historically_retired_paper_ids": sorted(retired_history),
         "exclusion_hashes": exclusion_hashes,
         "retained": [
             {
@@ -384,6 +392,12 @@ def main() -> None:
     parser.add_argument("--address-audit", type=Path)
     parser.add_argument("--master-seed")
     parser.add_argument("--group-namespace")
+    parser.add_argument(
+        "--historically-retired-paper-id",
+        action="append",
+        default=[],
+        help="Previously observed paper ID that may never be selected as a reserve.",
+    )
     parser.add_argument("--maximum-paper-characters", type=int, default=60_000)
     parser.add_argument("--minimum-span-characters", type=int, default=20)
     args = parser.parse_args()
@@ -448,6 +462,7 @@ def main() -> None:
             retired_example_id=args.retired_example_id,
             maximum_paper_characters=args.maximum_paper_characters,
             minimum_span_characters=args.minimum_span_characters,
+            historically_retired_paper_ids=set(args.historically_retired_paper_id),
         )
     else:
         validation_rows = load_dataset(
