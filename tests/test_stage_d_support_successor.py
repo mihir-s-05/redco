@@ -307,3 +307,92 @@ def test_successor_protocol_freezes_only_authorized_changes() -> None:
         ]
         assert config["env"]["config_sha256"] == audit["hashes"]["genesis"]
         assert "stage-d1-support-v4" in config["output_dir"]
+
+
+def test_second_successor_protocol_freezes_action_boundary_only() -> None:
+    paths = {
+        "address_audit": ROOT / "reports/stage-d1-support-successor-address-audit-v2.json",
+        "amendment": ROOT / "configs/stage-d/stage-d1-support-repair-amendment-v7.json",
+        "collection_plan": ROOT / "configs/stage-d/stage-d1-support-collection-plan-v7.json",
+        "dependency_stack": ROOT / "configs/stage-d/stage-d1-dependency-stack-v7.json",
+        "genesis": ROOT / "configs/stage-d/stage-d1-support-genesis-v7.json",
+        "preregistration": ROOT / "configs/stage-d/stage-d1-support-preregistration-v7.json",
+        "protocol": ROOT / "configs/stage-d/stage-d1-support-protocol-v7.json",
+        "replay_config": ROOT / "configs/stage-d/stage-d1-support-replay-eval-v7.toml",
+        "source": ROOT / "configs/stage-d/stage-d1-support-source-v7.json",
+        "source_config": ROOT / "configs/stage-d/stage-d1-support-source-eval-v7.toml",
+    }
+    audit = json.loads(
+        (ROOT / "reports/stage-d1-support-successor-preregistration-audit-v7.json").read_bytes()
+    )
+    assert {name: _sha256(path.read_bytes()) for name, path in paths.items()} == audit[
+        "hashes"
+    ]
+    dependency = StageDDependencyStackManifest.from_bytes(
+        paths["dependency_stack"].read_bytes()
+    )
+    protocol = StageDProtocolManifest.from_bytes(paths["protocol"].read_bytes())
+    assert dependency.manifest_sha256 == audit["hashes"]["dependency_stack"]
+    assert protocol.manifest_sha256 == audit["hashes"]["protocol"]
+    assert dependency.redco_commit == audit["redco_commit"]
+
+    old_protocol = json.loads(
+        (ROOT / "configs/stage-d/stage-d1-support-protocol-v6.json").read_bytes()
+    )
+    new_protocol = json.loads(paths["protocol"].read_bytes())
+    assert {
+        key for key in new_protocol if new_protocol[key] != old_protocol[key]
+    } == {
+        "collection_plan_sha256",
+        "dependency_stack_sha256",
+        "genesis_config_sha256",
+        "preregistration_sha256",
+        "scientific_eval_config_sha256",
+        "source_eval_config_sha256",
+        "source_sha256",
+    }
+    preregistration = json.loads(paths["preregistration"].read_bytes())
+    assert preregistration["replacement"]["preserved_addresses"] == 63
+    assert len(preregistration["replacement"]["cumulative_retired_example_ids"]) == 2
+    assert preregistration["parent_terminal"]["scientific_outputs"] == 0
+    assert preregistration["preflight"]["require_zero_skips"] is True
+    assert "tests/test_stage_d_qwen_action_regression.py" in preregistration["preflight"][
+        "mandatory_prime_tests"
+    ]
+    assert preregistration["preflight"]["runner"] == {
+        "argv_prefix": [
+            "uv",
+            "run",
+            "--active",
+            "--no-sync",
+            "--with",
+            "pytest-asyncio==1.3.0",
+            "python",
+            "-m",
+            "pytest",
+            "--asyncio-mode=auto",
+        ],
+        "apply_pinned_dependency_patches_before_import": True,
+        "single_fresh_process": True,
+    }
+    source = json.loads(paths["source"].read_bytes())
+    assert source["action_contract"] == (
+        "canonical-engine-token-ids-with-exact-parser-validation-v1"
+    )
+    frozen_runner = subprocess.run(
+        ["git", "show", f"{dependency.redco_commit}:{source['source_runner']}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert _sha256(frozen_runner) == source["source_runner_sha256"]
+    assert any(
+        binding.name == "redco.analysis.stage_d_exact_action"
+        for binding in dependency.imported_modules
+    )
+    for name in ("source_config", "replay_config"):
+        config = tomllib.loads(paths[name].read_text(encoding="utf-8"))
+        assert config["env"]["taskset"]["dataset_sha256"] == (
+            "f5b762a5380c976995517a556400f12c44afb4e77d73b1291991762519508408"
+        )
+        assert "stage-d1-support-v7" in config["output_dir"]
