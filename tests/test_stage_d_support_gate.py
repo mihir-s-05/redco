@@ -22,9 +22,11 @@ from redco.analysis.stage_d_support_gate import (
     evaluate_support_gate,
     load_support_rules,
     verify_support_pass,
+    verify_support_report,
 )
 from redco.contracts import canonical_json
 from redco.integrations.write_once import write_once
+from scripts.run_stage_d_scientific_campaign import _run_branch_groups
 
 
 def _rules(*, papers: int = 1, successes: int = 1) -> StageDSupportRules:
@@ -184,6 +186,61 @@ def test_support_taxonomy_reports_first_gate_without_causal_overclaim() -> None:
         "lower": None,
         "upper": None,
     }
+
+
+def test_zero_eligible_sources_produce_a_verified_failure_report() -> None:
+    source, _roster, _artifact = _fixture()
+    source.branch_eligible = False
+    source.child_target_roster = ()
+    source.decisions = ()
+    roster = StageDBranchTargetRoster(
+        1,
+        0,
+        1,
+        1,
+        1,
+        False,
+        (source.source_sha256,),
+        (),
+    )
+    report_bytes = evaluate_support_gate(
+        (source,),  # type: ignore[arg-type]
+        (),
+        roster,
+        paper_ids={source.source_sha256: "paper-1"},
+        rules=_rules(),
+    )
+
+    report = json.loads(report_bytes)
+    report_sha256, decision = verify_support_report(
+        report_bytes,
+        expected_rules_sha256=_rules().rules_sha256,
+        source_sha256s=(source.source_sha256,),
+        artifact_sha256s=(),
+    )
+    assert decision == "fail"
+    assert report_sha256 == hashlib.sha256(report_bytes).hexdigest()
+    assert report["nested_support"]["N_scaffold"] == 0
+    assert report["nested_support"]["N_eligible"] == 0
+    assert report["nested_support"]["N_joint"] == 0
+    assert report["nested_support"]["rates_95pct_wilson"]["joint_given_eligible"] == {
+        "successes": 0,
+        "total": 0,
+        "lower": None,
+        "upper": None,
+    }
+
+
+def test_zero_branch_groups_make_no_campaign_calls() -> None:
+    def forbidden_campaign_runner(*_args, **_kwargs):
+        raise AssertionError("zero eligible sources must not call a model")
+
+    assert _run_branch_groups(
+        (),
+        campaign_runner=forbidden_campaign_runner,
+        ledger=SimpleNamespace(),  # type: ignore[arg-type]
+        event_loop=SimpleNamespace(),  # type: ignore[arg-type]
+    ) == ()
 
 
 def test_support_gate_rejects_an_incomplete_artifact_roster() -> None:

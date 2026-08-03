@@ -8,8 +8,9 @@ import asyncio
 import hashlib
 import json
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from redco.analysis.stage_d_branch_artifacts import StageDBranchTargetRoster
@@ -35,7 +36,7 @@ from redco.analysis.stage_d_source_contracts import SourceRollout
 from redco.analysis.stage_d_support_gate import (
     evaluate_support_gate,
     load_support_rules,
-    verify_support_pass,
+    verify_support_report,
 )
 from redco.analysis.stage_d_zero_call_recovery import (
     recover_or_open_scientific_ledger,
@@ -46,6 +47,24 @@ from redco.integrations.write_once import write_once
 
 def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def _run_branch_groups(
+    groups: Sequence[Any],
+    *,
+    campaign_runner: Callable[..., Any],
+    ledger: StageDReceiptLedger,
+    event_loop: asyncio.AbstractEventLoop,
+) -> tuple[Any, ...]:
+    if not groups:
+        return ()
+    return tuple(
+        campaign_runner(
+            groups,
+            ledger=ledger,
+            event_loop=event_loop,
+        ).artifacts
+    )
 
 
 def _arguments() -> argparse.Namespace:
@@ -403,12 +422,13 @@ def _run(args: argparse.Namespace) -> None:
                     artifact_path=args.artifact_output / f"{group_id}--{target_id}.json",
                 )
             )
-        result = run_live_scientific_campaign(
+        artifacts = _run_branch_groups(
             groups,
+            campaign_runner=run_live_scientific_campaign,
             ledger=ledger,
             event_loop=event_loop,
         )
-        if len(result.artifacts) != len(ledger.branch_target_keys):
+        if len(artifacts) != len(ledger.branch_target_keys):
             raise RuntimeError("scientific campaign returned an incomplete artifact roster")
         scan = inspect_ledger(args.ledger)
         if scan.status != "active-clean":
@@ -422,7 +442,7 @@ def _run(args: argparse.Namespace) -> None:
             raise ValueError("support target roster differs from the durable ledger")
         report = evaluate_support_gate(
             sources,
-            result.artifacts,
+            artifacts,
             roster,
             paper_ids=paper_ids,
             rules=support_rules,
@@ -432,19 +452,19 @@ def _run(args: argparse.Namespace) -> None:
                 raise RuntimeError("existing support report differs")
         else:
             write_once(args.support_report, report)
-        verify_support_pass(
+        _report_sha256, decision = verify_support_report(
             report,
             expected_rules_sha256=support_rules.rules_sha256,
             source_sha256s=tuple(source.source_sha256 for source in sources),
             artifact_sha256s=tuple(
-                _sha256(artifact.to_bytes()) for artifact in result.artifacts
+                _sha256(artifact.to_bytes()) for artifact in artifacts
             ),
         )
         print(
             canonical_json(
                 {
-                    "status": "support-pass",
-                    "artifact_count": len(result.artifacts),
+                    "status": f"support-{decision}",
+                    "artifact_count": len(artifacts),
                     "ledger_head_sha256": scan.record_sha256s[-1],
                     "record_count": len(scan.records),
                 }

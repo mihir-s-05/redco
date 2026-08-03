@@ -277,13 +277,13 @@ def evaluate_support_gate(
     )
 
 
-def verify_support_pass(
+def verify_support_report(
     report: bytes,
     *,
     expected_rules_sha256: str,
     source_sha256s: Sequence[str],
     artifact_sha256s: Sequence[str],
-) -> str:
+) -> tuple[str, str]:
     payload = json.loads(report)
     if not isinstance(payload, dict) or canonical_json(payload) != report:
         raise ValueError("support report is not canonical JSON")
@@ -331,8 +331,16 @@ def verify_support_pass(
             "minimum_reward_range": payload.get("minimum_reward_range"),
         }
     )
+    valid_rule_counts = (
+        type(required_papers) is int
+        and type(required_successes) is int
+        and 1 <= required_successes <= required_papers
+    )
+    expected_decision = (
+        "pass" if successes >= required_successes else "fail"
+    ) if valid_rule_counts else None
     if (
-        payload.get("decision") != "pass"
+        payload.get("decision") != expected_decision
         or payload.get("rules_sha256") != expected_rules_sha256
         or signature != hashlib.sha256(canonical_json(unsigned)).hexdigest()
         or sorted(typed_sources) != sorted(source_sha256s)
@@ -341,11 +349,8 @@ def verify_support_pass(
         or len(typed_paper_ids) != len(set(typed_paper_ids))
         or sorted(typed_artifacts) != sorted(artifact_sha256s)
         or len(typed_artifacts) != len(set(typed_artifacts))
-        or type(required_papers) is not int
-        or type(required_successes) is not int
+        or not valid_rule_counts
         or len(typed_sources) != required_papers
-        or not 1 <= required_successes <= required_papers
-        or successes < required_successes
         or payload.get("paper_successes") != successes
         or payload.get("paper_failures") != required_papers - successes
         or expected_rules_sha256
@@ -355,4 +360,22 @@ def verify_support_pass(
         }
     ):
         raise RuntimeError("frozen Stage-D support gate failed authentication")
-    return hashlib.sha256(report).hexdigest()
+    return hashlib.sha256(report).hexdigest(), expected_decision
+
+
+def verify_support_pass(
+    report: bytes,
+    *,
+    expected_rules_sha256: str,
+    source_sha256s: Sequence[str],
+    artifact_sha256s: Sequence[str],
+) -> str:
+    report_sha256, decision = verify_support_report(
+        report,
+        expected_rules_sha256=expected_rules_sha256,
+        source_sha256s=source_sha256s,
+        artifact_sha256s=artifact_sha256s,
+    )
+    if decision != "pass":
+        raise RuntimeError("frozen Stage-D support gate did not pass")
+    return report_sha256
