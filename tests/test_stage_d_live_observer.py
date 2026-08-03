@@ -1053,6 +1053,51 @@ def test_observer_accepts_max_token_action_and_next_rollout(tmp_path: Path) -> N
     asyncio.run(scenario())
 
 
+def test_observer_rejects_tool_finish_without_a_tool_call(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        observer, ledger, producer = _observer(tmp_path / "ledger")
+        ticket = await observer.before_forward(_prepared(17, "root", _root_rlm()))
+        response = _response(finish_reason="tool_calls")
+        response.raw["choices"][0]["message"] = {
+            "role": "assistant",
+            "content": "I cannot call that tool.",
+        }
+        await observer.after_raw_response(
+            ticket,
+            canonical_json({"fixture": "content-only-tool-finish"}),
+        )
+        with pytest.raises(ValueError, match="requires a nonempty tool-call"):
+            await observer.after_response(ticket, response)
+        assert not producer._completed
+        await observer.abort(
+            ticket,
+            "typed_response",
+            ValueError("tool finish without a tool call"),
+        )
+        ledger.close()
+
+    asyncio.run(scenario())
+
+
+def test_observer_accepts_textual_refusal_as_ordinary_content(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        observer, ledger, producer = _observer(tmp_path / "ledger")
+        ticket = await observer.before_forward(_prepared(17, "root", _root_rlm()))
+        response = _response()
+        response.raw["choices"][0]["message"]["content"] = (
+            "I cannot answer that request."
+        )
+        await _deliver_response(observer, ticket, response)
+        (decision,) = producer._completed.values()
+        assert decision.action.finish_reason == "stop"
+        assert decision.action.termination_kind == "eos"
+        assert not producer._pending
+        assert inspect_ledger(tmp_path / "ledger").status == "active-clean"
+        ledger.close()
+
+    asyncio.run(scenario())
+
+
 def test_observer_rejects_noncanonical_or_mismatched_prepared_evidence(
     tmp_path: Path,
 ) -> None:

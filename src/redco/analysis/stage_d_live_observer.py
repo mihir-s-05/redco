@@ -282,6 +282,13 @@ class StageDPreparedCallObserver:
             getattr(usage, "completion_tokens", None), "completion usage"
         )
         message = _raw_message(raw)
+        tool_calls = message.get("tool_calls")
+        if finish_reason == "tool_calls" and (
+            not isinstance(tool_calls, list) or not tool_calls
+        ):
+            raise ValueError(
+                "tool_calls finish reason requires a nonempty tool-call message"
+            )
         request_id = raw.get("id")
         if not isinstance(request_id, str) or not request_id:
             raise ValueError("typed prepared response lacks its request ID")

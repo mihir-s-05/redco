@@ -119,6 +119,19 @@ def test_frozen_support_successor_preserves_rows_and_addresses() -> None:
             5,
             ["1710.01492", "1911.03894", "1912.01673", "2001.09899"],
         ),
+        (
+            5,
+            6,
+            11,
+            6,
+            [
+                "1710.01492",
+                "1909.12231",
+                "1911.03894",
+                "1912.01673",
+                "2001.09899",
+            ],
+        ),
     ],
 )
 def test_later_support_successors_preserve_history_and_addresses(

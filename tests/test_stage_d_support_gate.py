@@ -51,6 +51,8 @@ def _fixture(*, informative: bool = True, index: int = 1):
         group_id=f"paper-{index}",
         rollout_id=f"rollout-{index}",
         branch_eligible=True,
+        child_target_roster=("target-1",),
+        decisions=(SimpleNamespace(node_kind="child", target_id="target-1"),),
     )
     target = StageDBranchTarget(
         source.source_sha256,
@@ -104,6 +106,33 @@ def test_support_gate_uses_paper_denominator_and_reward_range() -> None:
     report = json.loads(report_bytes)
     assert report["decision"] == "pass"
     assert report["paper_successes"] == 1
+    assert report["nested_support"] == {
+        "N_scaffold": 1,
+        "N_eligible": 1,
+        "N_joint": 1,
+        "first_failed_gate": None,
+        "first_failed_gate_is_descriptive_not_causal": True,
+        "rates_95pct_wilson": {
+            "scaffold_over_all": {
+                "successes": 1,
+                "total": 1,
+                "lower": pytest.approx(0.20654931437723745),
+                "upper": 1.0,
+            },
+            "eligible_given_scaffold": {
+                "successes": 1,
+                "total": 1,
+                "lower": pytest.approx(0.20654931437723745),
+                "upper": 1.0,
+            },
+            "joint_given_eligible": {
+                "successes": 1,
+                "total": 1,
+                "lower": pytest.approx(0.20654931437723745),
+                "upper": 1.0,
+            },
+        },
+    }
     assert report["papers"][0]["outer_weight_sum"] == {
         "numerator": 1,
         "denominator": 1,
@@ -129,6 +158,32 @@ def test_support_gate_retains_flat_groups_as_failures() -> None:
     )
     assert report["decision"] == "fail"
     assert report["papers"][0]["has_informative_target"] is False
+    assert report["nested_support"]["first_failed_gate"] == "informativeness"
+
+
+def test_support_taxonomy_reports_first_gate_without_causal_overclaim() -> None:
+    source, roster, artifact = _fixture()
+    source.child_target_roster = ()
+    source.decisions = ()
+    report = json.loads(
+        evaluate_support_gate(
+            (source,),  # type: ignore[arg-type]
+            (artifact,),  # type: ignore[arg-type]
+            roster,
+            paper_ids={source.source_sha256: "paper-1"},
+            rules=_rules(),
+        )
+    )
+    taxonomy = report["nested_support"]
+    assert taxonomy["N_scaffold"] == taxonomy["N_eligible"] == taxonomy["N_joint"] == 0
+    assert taxonomy["first_failed_gate"] == "scaffold"
+    assert taxonomy["first_failed_gate_is_descriptive_not_causal"] is True
+    assert taxonomy["rates_95pct_wilson"]["eligible_given_scaffold"] == {
+        "successes": 0,
+        "total": 0,
+        "lower": None,
+        "upper": None,
+    }
 
 
 def test_support_gate_rejects_an_incomplete_artifact_roster() -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -18,6 +19,29 @@ from redco.analysis.stage_d_branch_artifacts import (
 from redco.analysis.stage_d_scientific_branch_group import BranchGroupArtifact
 from redco.analysis.stage_d_source_contracts import SourceRollout
 from redco.contracts import canonical_json
+
+
+def _wilson_interval(successes: int, total: int) -> dict[str, float | int | None]:
+    """Return a fixed 95% Wilson interval with its exact numerator/denominator."""
+    if not 0 <= successes <= total:
+        raise ValueError("support rate numerator is outside its denominator")
+    if total == 0:
+        return {"successes": successes, "total": total, "lower": None, "upper": None}
+    z = 1.959963984540054
+    rate = successes / total
+    denominator = 1 + z * z / total
+    center = (rate + z * z / (2 * total)) / denominator
+    radius = (
+        z
+        * math.sqrt(rate * (1 - rate) / total + z * z / (4 * total * total))
+        / denominator
+    )
+    return {
+        "successes": successes,
+        "total": total,
+        "lower": max(0.0, center - radius),
+        "upper": min(1.0, center + radius),
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,27 +182,40 @@ def evaluate_support_gate(
                 }
             )
         target_count_ok = rules.minimum_targets <= len(targets) <= rules.maximum_targets
+        produced_children = {
+            decision.target_id
+            for decision in source.decisions
+            if decision.node_kind == "child" and decision.target_id is not None
+        }
+        scaffold_complete = (
+            len(source.child_target_roster) == rules.minimum_targets
+            == rules.maximum_targets
+            and produced_children == set(source.child_target_roster)
+        )
         all_exact = bool(targets) and all(
             row["reconstruction_qa_passed"] for row in target_rows
         )
         informative = any(row["informative"] for row in target_rows)
-        paper_success = (
-            source.branch_eligible
+        eligible = (
+            scaffold_complete
+            and source.branch_eligible
             and target_count_ok
             and all_exact
-            and informative
             and outer_weight == 1
         )
+        paper_success = eligible and informative
         papers.append(
             {
                 "source_sha256": source.source_sha256,
                 "paper_id": paper_ids[source.source_sha256],
                 "group_id": source.group_id,
                 "rollout_id": source.rollout_id,
+                "scaffold_complete": scaffold_complete,
                 "branch_eligible": source.branch_eligible,
                 "target_count": len(targets),
                 "target_count_ok": target_count_ok,
                 "all_targets_exact": all_exact,
+                "eligible": eligible,
                 "has_informative_target": informative,
                 "outer_weight_sum": {
                     "numerator": outer_weight.numerator,
@@ -190,6 +227,17 @@ def evaluate_support_gate(
         )
 
     successes = sum(1 for row in papers if row["success"] is True)
+    scaffold_count = sum(1 for row in papers if row["scaffold_complete"] is True)
+    eligible_count = sum(1 for row in papers if row["eligible"] is True)
+    first_failed_gate = (
+        "scaffold"
+        if scaffold_count < rules.required_successes
+        else "topology_restorability"
+        if eligible_count < rules.required_successes
+        else "informativeness"
+        if successes < rules.required_successes
+        else None
+    )
     unsigned = {
         "schema_version": 1,
         "analysis": "stage-d-state-aware-support-gate-v1",
@@ -202,6 +250,22 @@ def evaluate_support_gate(
         "minimum_reward_range": rules.minimum_reward_range,
         "paper_successes": successes,
         "paper_failures": rules.required_papers - successes,
+        "nested_support": {
+            "N_scaffold": scaffold_count,
+            "N_eligible": eligible_count,
+            "N_joint": successes,
+            "first_failed_gate": first_failed_gate,
+            "first_failed_gate_is_descriptive_not_causal": True,
+            "rates_95pct_wilson": {
+                "scaffold_over_all": _wilson_interval(
+                    scaffold_count, rules.required_papers
+                ),
+                "eligible_given_scaffold": _wilson_interval(
+                    eligible_count, scaffold_count
+                ),
+                "joint_given_eligible": _wilson_interval(successes, eligible_count),
+            },
+        },
         "decision": "pass" if successes >= rules.required_successes else "fail",
         "papers": papers,
     }
