@@ -1,0 +1,268 @@
+diff --git a/verifiers/v1/session.py b/verifiers/v1/session.py
+index bc0b429..1a4c6ad 100644
+--- a/verifiers/v1/session.py
++++ b/verifiers/v1/session.py
+@@ -117,6 +117,12 @@ class RolloutSession:
+     """Handler tasks currently serving this session. aiohttp does not cancel a handler when
+     its client disconnects, so a request whose program died at teardown would keep driving
+     the exchange (upstream call, simulator turn) — unregistering cancels these instead."""
++    task_operations: dict["asyncio.Task", bytes] = field(default_factory=dict)
++    """Handler task -> operation key, used to distinguish an exact coalesced retry from a
++    different concurrent sibling when one observed operation fails closed."""
++    failed_closed: bool = False
++    """A deterministic observed-call failure retired this rollout. Future requests are refused,
++    while the failing handler remains alive long enough to record and surface its original error."""
+
+     def adopt(self, task: "asyncio.Task | None") -> None:
+         """Track a handler task serving this session, for cancellation at release.
+@@ -129,7 +135,16 @@ class RolloutSession:
+             task.cancel()
+             return
+         self.tasks.add(task)
+-        task.add_done_callback(self.tasks.discard)
++        task.add_done_callback(self._discard_task)
++
++    def _discard_task(self, task: "asyncio.Task") -> None:
++        self.tasks.discard(task)
++        self.task_operations.pop(task, None)
++
++    def bind_operation(self, task: "asyncio.Task | None", operation: bytes) -> None:
++        """Bind an adopted handler to its exact request operation."""
++        if task is not None and task in self.tasks:
++            self.task_operations[task] = operation
+
+     def release(self) -> None:
+         """Seal the session: no further trace mutation, and in-flight handlers cancel."""
+@@ -137,6 +152,19 @@ class RolloutSession:
+         for task in list(self.tasks):
+             task.cancel()
+
++    async def fail_closed(self, operation: bytes) -> None:
++        """Retire an observed rollout, preserving exact coalesced waiters but cancelling siblings."""
++        self.failed_closed = True
++        current = asyncio.current_task()
++        siblings = [
++            task
++            for task in self.tasks
++            if task is not current and self.task_operations.get(task) != operation
++        ]
++        for task in siblings:
++            task.cancel()
++        await asyncio.gather(*siblings, return_exceptions=True)
++
+     async def refused(self) -> str | None:
+         """The framework's limits (turns / token budget) and `@stop` checks, run before each
+         model call. Sets the stop condition and returns its name, else None. A refused first
+diff --git a/verifiers/v1/interception/server.py b/verifiers/v1/interception/server.py
+index e8356eb..19ede9a 100644
+--- a/verifiers/v1/interception/server.py
++++ b/verifiers/v1/interception/server.py
+@@ -319,12 +319,17 @@ class InterceptionServer(Interception):
+         except ValueError as error:
+             return web.json_response(dialect.error_body(str(error)), status=400)
+         session.adopt(asyncio.current_task())
++        if session.failed_closed:
++            return web.json_response(
++                dialect.error_body("observed rollout failed closed"), status=409
++            )
+         raw = await request.read()
+         try:
+             body = from_json(raw)
+         except ValueError:
+             body = json.loads(raw)
+         req_hash = request_operation_key(await _request_digest(raw), rlm)
++        session.bind_operation(asyncio.current_task(), req_hash)
+         # Keep `read()` for aiohttp's size guard, then release its cache and our local
+         # alias after parsing so the wire body does not survive model inference.
+         request._read_bytes = None
+@@ -350,12 +355,17 @@ class InterceptionServer(Interception):
+
+         async def coalesced(inflight: "asyncio.Future[dict | None]") -> web.Response:
+             # Await the first attempt instead of re-sampling. None means it produced no servable
+-            # response (it errored/refused), so let the SDK retry afresh.
++            # response (it errored/refused). An observed rollout cannot resample, so its
++            # deterministic failure is terminal to the harness rather than retryable.
+             logger.debug(
+                 "intercept coalesce: id=%s (retry of in-flight turn)", session.trace.id
+             )
+             completion = await inflight
+             if completion is None:
++                if session.observer is not None:
++                    return web.json_response(
++                        dialect.error_body("observed upstream attempt failed"), status=409
++                    )
+                 return web.json_response(
+                     dialect.error_body("upstream attempt failed"), status=503
+                 )
+@@ -557,6 +567,8 @@ class InterceptionServer(Interception):
+                         # Relay the provider's status so the harness SDK retries 5xx/429 and not 4xx.
+                         error = e
+                         session.error = e
++                        if session.observer is not None:
++                            await session.fail_closed(req_hash)
+                         logger.warning(
+                             "model call failed: id=%s %s: %s",
+                             session.trace.id,
+@@ -565,17 +577,29 @@ class InterceptionServer(Interception):
+                         )
+                         return web.json_response(
+                             dialect.error_body(str(e)),
+-                            status=getattr(e, "status_code", 502),
++                            status=409
++                            if session.observer is not None
++                            else getattr(e, "status_code", 502),
+                         )
+                     except Exception as e:  # surface to the program as an API error
+                         error = e
++                        if session.observer is not None:
++                            preserved = ProviderError(
++                                f"{type(e).__name__}: {e}", status_code=409
++                            )
++                            preserved.__cause__ = e
++                            session.error = preserved
++                            await session.fail_closed(req_hash)
+                         logger.warning(
+                             "model call failed: id=%s %s: %s",
+                             session.trace.id,
+                             type(e).__name__,
+                             e,
+                         )
+-                        return web.json_response(dialect.error_body(str(e)), status=502)
++                        return web.json_response(
++                            dialect.error_body(str(e)),
++                            status=409 if session.observer is not None else 502,
++                        )
+                     except BaseException as e:
+                         # A cancelled exchange (harness disconnect, shutdown) is still
+                         # recorded, coupled to its cancellation.
+diff --git a/tests/test_rlm_structure_v2.py b/tests/test_rlm_structure_v2.py
+index d21fafc..0abbb61 100644
+--- a/tests/test_rlm_structure_v2.py
++++ b/tests/test_rlm_structure_v2.py
+@@ -403,11 +403,125 @@ async def test_failed_observed_request_cannot_resample_on_sdk_retry() -> None:
+     first = await server.handle_request(request(), ChatDialect())
+     second = await server.handle_request(request(), ChatDialect())
+
+-    assert first.status == 502 and second.status == 502
++    assert first.status == 409 and second.status == 409
+     assert posts == 1
++    assert session.failed_closed is True
++    assert session.error is not None
++    assert str(session.error) == "ConnectionError: unknown outcome"
+     assert [event[0] for event in observer.events] == ["before", "abort"]
+
+
++async def test_failed_observed_request_cancels_sibling_without_cancelling_owner() -> None:
++    observer = _Observer()
++    owner_started = asyncio.Event()
++    sibling_started = asyncio.Event()
++    fail_owner = asyncio.Event()
++    sibling_cancelled = asyncio.Event()
++    posts = 0
++
++    async def get_response(*args, **kwargs):
++        nonlocal posts
++        posts += 1
++        lineage = kwargs["observer_context"]["rlm"]["lineage"]
++        prepared = SimpleNamespace(observer_context=kwargs["observer_context"])
++        directive = await kwargs["observer"].before_forward(prepared)
++        ticket = directive.ticket
++        if lineage == _sibling_headers(0)["X-RLM-Lineage"]:
++            owner_started.set()
++            await fail_owner.wait()
++            error = ValueError("closed observer invariant")
++            await kwargs["observer"].abort(ticket, "post_unknown", error)
++            raise error
++        sibling_started.set()
++        try:
++            await asyncio.Future()
++        except asyncio.CancelledError as error:
++            await kwargs["observer"].abort(ticket, "post_unknown", error)
++            sibling_cancelled.set()
++            raise
++
++    client = SimpleNamespace(get_response=AsyncMock(side_effect=get_response))
++    trace = Trace(task=TraceTask(type="ObservedTask", data=TaskData(prompt="hello")))
++    session = RolloutSession(ModelContext("test-model", client), trace, observer=observer)
++    server = InterceptionServer()
++    server.sessions["secret"] = session
++    raw = json.dumps(
++        {"model": "ignored", "messages": [{"role": "user", "content": "hello"}]},
++        separators=(",", ":"),
++    ).encode()
++
++    owner = asyncio.create_task(
++        server.handle_request(_request(raw, _sibling_headers(0)), ChatDialect())
++    )
++    await owner_started.wait()
++    sibling = asyncio.create_task(
++        server.handle_request(_request(raw, _sibling_headers(1)), ChatDialect())
++    )
++    await sibling_started.wait()
++    fail_owner.set()
++    response = await asyncio.wait_for(owner, timeout=0.5)
++    assert sibling.done() is True
++    assert sibling not in session.tasks
++    assert sibling not in session.task_operations
++    await asyncio.wait_for(sibling_cancelled.wait(), timeout=0.5)
++    await asyncio.gather(sibling, return_exceptions=True)
++
++    assert response.status == 409
++    assert posts == 2
++    assert owner.cancelled() is False
++    assert sibling.cancelled() is True
++    assert session.failed_closed is True
++    assert session.error is not None
++    assert str(session.error) == "ValueError: closed observer invariant"
++    assert [event[0] for event in observer.events] == [
++        "before",
++        "before",
++        "abort",
++        "abort",
++    ]
++
++
++async def test_failed_observed_request_returns_409_to_coalesced_retry() -> None:
++    observer = _Observer()
++    started = asyncio.Event()
++    fail = asyncio.Event()
++    posts = 0
++
++    async def get_response(*args, **kwargs):
++        nonlocal posts
++        posts += 1
++        started.set()
++        await fail.wait()
++        raise ValueError("closed observer invariant")
++
++    client = SimpleNamespace(get_response=AsyncMock(side_effect=get_response))
++    trace = Trace(task=TraceTask(type="ObservedTask", data=TaskData(prompt="hello")))
++    session = RolloutSession(ModelContext("test-model", client), trace, observer=observer)
++    server = InterceptionServer()
++    server.sessions["secret"] = session
++    raw = json.dumps(
++        {"model": "ignored", "messages": [{"role": "user", "content": "hello"}]},
++        separators=(",", ":"),
++    ).encode()
++
++    owner = asyncio.create_task(
++        server.handle_request(_request(raw, _sibling_headers(0)), ChatDialect())
++    )
++    await started.wait()
++    retry = asyncio.create_task(
++        server.handle_request(_request(raw, _sibling_headers(0)), ChatDialect())
++    )
++    await asyncio.sleep(0)
++    fail.set()
++    owner_response, retry_response = await asyncio.wait_for(
++        asyncio.gather(owner, retry), timeout=0.5
++    )
++
++    assert owner_response.status == retry_response.status == 409
++    assert posts == 1
++    assert retry.cancelled() is False
++
++
+ async def test_observed_session_rejects_streaming_before_client_access() -> None:
+     observer = _Observer()
+     client = SimpleNamespace(get_response=AsyncMock())

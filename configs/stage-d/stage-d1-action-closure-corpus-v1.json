@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "domain": "redco-stage-d-action-closure-corpus-v1",
+  "cases": [
+    {"version": 1, "evidence_level": "report_only_no_model_response", "report_path": "reports/stage-d1-support-v1-zero-call-terminal.json", "report_sha256": "db4ab3fabd5bf0c5b06af19a7a0de377d918be433735c66d54fa88c6870896b2", "ledger_root": null, "expected_ledger": null, "archive": null},
+    {"version": 2, "evidence_level": "report_only_pre_forward", "report_path": "reports/stage-d1-support-v2-pre-forward-terminal.json", "report_sha256": "aa44ce5d5ba1e65896428a7568094d9f2a37fa9e84d82e738934043497aa1b07", "ledger_root": null, "expected_ledger": null, "archive": null},
+    {"version": 3, "evidence_level": "report_only_raw_bytes_not_retained", "report_path": "reports/stage-d1-support-v3-response-interface-terminal.json", "report_sha256": "77a3ffe8ba5c06e5133a9552791044b3526394881fb47df0da3ac646fffcf2c9", "ledger_root": null, "expected_ledger": null, "archive": null},
+    {
+      "version": 4,
+      "evidence_level": "retained_raw_response_and_ledger",
+      "report_path": "reports/stage-d1-support-v4-action-boundary-terminal.json",
+      "report_sha256": "579d701456534d9fdae66e496a181e87684183cf7b4eb4340d1d67c4f3bd44d0",
+      "ledger_root": "runs/stage-d/stage-d1-support-v4/ledger",
+      "expected_ledger": {"record_count": 4, "head_sha256": "ad83bb6342f883c40dc2725a093920badd7e94875acb328de6ea8c0de498cec4", "referenced_evidence_count": 3, "receipt_counts": {"source_policy_call_aborted": 1, "source_policy_call_reserved": 1, "source_policy_response_observed": 1}, "cryptographic_behavior_action_envelopes_reloaded": 0, "semantic_renderer_replay_performed": false, "termination_counts": {}},
+      "archive": null
+    },
+    {"version": 5, "evidence_level": "amendment_audit_no_response_campaign", "report_path": "reports/stage-d1-support-cache-amendment-audit-v5.json", "report_sha256": "46d80c18306370a4bd51cfdf086fde1ef60cd0829f6b6a96ec0679e148d0e8ea", "ledger_root": null, "expected_ledger": null, "archive": null},
+    {"version": 6, "evidence_level": "amendment_audit_no_response_campaign", "report_path": "reports/stage-d1-support-preflight-amendment-audit-v6.json", "report_sha256": "e7619ef4a53f7e4cbb5ed11f88e2e410c4b112faf5ef8e6aaa3c3a3f30185ddd", "ledger_root": null, "expected_ledger": null, "archive": null},
+    {
+      "version": 7,
+      "evidence_level": "retained_exact_actions_and_ledger",
+      "report_path": "reports/stage-d1-support-v7-node-serialization-terminal.json",
+      "report_sha256": "0e0c87c338d32a313e83e07bc99dffcf7f168ebc4dbe713fff28b8112b600807",
+      "ledger_root": "runs/stage-d/stage-d1-support-v7/ledger",
+      "expected_ledger": {"record_count": 21, "head_sha256": "a202cfe24d64d286292d5e63b45ca403dfdb4409d31d588c5d3b706a946ffdcf", "referenced_evidence_count": 12, "receipt_counts": {"pre_action_group_commitment": 2, "source_policy_call_completed": 3, "source_policy_call_reserved": 3, "source_policy_response_observed": 3, "source_rollout_finalization_aborted": 1}, "cryptographic_behavior_action_envelopes_reloaded": 3, "semantic_renderer_replay_performed": false, "termination_counts": {"eos": 2, "tool_calls": 1}},
+      "archive": null
+    },
+    {
+      "version": 8,
+      "evidence_level": "retained_exact_actions_ledger_and_archive",
+      "report_path": "reports/stage-d1-support-v8-terminal.json",
+      "report_sha256": "b8d0199debe65758c3e9b831cdc462a77fc76188ebac04d9e974dda6f2924c73",
+      "ledger_root": "runs/stage-d/stage-d1-support-v8/ledger",
+      "expected_ledger": {"record_count": 24, "head_sha256": "de22620211436d7abdb4fb373fec2c35349a36c9c4bbfc62d2e0685e8fa3e331", "referenced_evidence_count": 15, "receipt_counts": {"pre_action_group_commitment": 2, "source_policy_call_completed": 4, "source_policy_call_reserved": 4, "source_policy_response_observed": 4, "source_rollout_finalization_aborted": 1}, "cryptographic_behavior_action_envelopes_reloaded": 4, "semantic_renderer_replay_performed": false, "termination_counts": {"eos": 2, "tool_calls": 2}},
+      "archive": {"path": "runs/stage-d/stage-d1-support-v8-terminal.tar.gz", "sha256": "615304a35ebac7416236ee99c7f443ac3ae6d0785071e17788b1c12fbe9479a3"}
+    },
+    {
+      "version": 9,
+      "evidence_level": "retained_exact_actions_ledger_and_archive",
+      "report_path": "reports/stage-d1-support-v9-terminal.json",
+      "report_sha256": "f7203c119d89bdcc11178fcc0233f8e3f0e9e14d06600b934e25bbfb3c7cbb7b",
+      "ledger_root": "runs/stage-d/stage-d1-support-v9/ledger",
+      "expected_ledger": {"record_count": 21, "head_sha256": "0e85b6e22daa06e2e8fdaa490691ce4685a39ac5769692d48f9285337b2c31f3", "referenced_evidence_count": 12, "receipt_counts": {"pre_action_group_commitment": 2, "source_policy_call_completed": 3, "source_policy_call_reserved": 3, "source_policy_response_observed": 3, "source_rollout_finalization_aborted": 1}, "cryptographic_behavior_action_envelopes_reloaded": 3, "semantic_renderer_replay_performed": false, "termination_counts": {"eos": 2, "tool_calls": 1}},
+      "archive": {"path": "runs/stage-d/stage-d1-support-v9-terminal.tar.gz", "sha256": "09df217c974aeec9c1eae9485c78877697edc5691a78058f3533e2d9d5ae514f"}
+    },
+    {
+      "version": 10,
+      "evidence_level": "retained_partial_exact_actions_length_raw_response_ledger_and_archive",
+      "report_path": "reports/stage-d1-support-v10-terminal.json",
+      "report_sha256": "e49478bc76ad82e8beccb1e392edcb4352f58169fec67a0f072cd323647177d9",
+      "ledger_root": "runs/stage-d/stage-d1-support-v10/ledger",
+      "expected_ledger": {"record_count": 18, "head_sha256": "f70f892c5725b3dca8643252fb029485640318ca1ee88f0e9b3ef9cc28d6c6eb", "referenced_evidence_count": 11, "receipt_counts": {"pre_action_group_commitment": 2, "source_policy_call_aborted": 1, "source_policy_call_completed": 2, "source_policy_call_reserved": 3, "source_policy_response_observed": 3}, "cryptographic_behavior_action_envelopes_reloaded": 2, "semantic_renderer_replay_performed": false, "termination_counts": {"eos": 1, "tool_calls": 1}},
+      "archive": {"path": "runs/stage-d/stage-d1-support-v10-terminal.tar.gz", "sha256": "5c0dde738f6b00fcaeb9ba74355e84e964896ca9d2e8284bd79b29fb4b35e505"}
+    }
+  ],
+  "notes": {
+    "historical_replay_limit": "Only v7-v10 contain completed BehaviorAction evidence. This audit proves canonical envelopes, hashes, receipt linkage, key/action digests, and termination closure; it does not replay historical renderer semantics.",
+    "scientific_outcomes_observed": false,
+    "scratch_ledger_policy": "Every replay or regression uses a fresh scratch ledger; historical ledgers are read-only evidence."
+  }
+}

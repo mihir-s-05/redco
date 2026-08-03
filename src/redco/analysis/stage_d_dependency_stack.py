@@ -36,6 +36,7 @@ _COMPONENT_PATCHES = {
         "verifiers-stage-d-pre-generation-preflight-v1.patch",
         "verifiers-stage-d-patched-rlm-archive-v1.patch",
         "verifiers-stage-d-frozen-rlm-install-v1.patch",
+        "verifiers-stage-d-observer-failfast-v1.patch",
     ),
     "rlm": (
         "rlm-event-replay-provenance.patch",
@@ -50,6 +51,17 @@ _PROGRAMS = (
     "trainer_entrypoint",
     "evaluator",
     "reporter",
+)
+
+# These are the only Verifiers component bindings already frozen before the
+# fail-fast patch existed. Binding the exception to their complete canonical
+# payload prevents a newly authored manifest from silently selecting the old
+# patch sequence.
+_LEGACY_VERIFIERS_COMPONENT_SHA256S = frozenset(
+    {
+        "3cabac587d8c0f539bb0046304dae15f36e99665e39d3032469ab5a43701c3a8",
+        "a92032d021336d9a99e6ed4f8c28b20fb4d6df4516cebf7579950b4d0a410d9c",
+    }
 )
 
 
@@ -232,7 +244,15 @@ class ComponentBinding:
         if self.name not in _COMPONENT_PATCHES:
             raise ValueError("dependency component is not frozen")
         _require_git_commit(self.base_commit, f"{self.name} base commit")
-        if tuple(patch.name for patch in self.patches) != _COMPONENT_PATCHES[self.name]:
+        patch_names = tuple(patch.name for patch in self.patches)
+        expected = _COMPONENT_PATCHES[self.name]
+        component_sha256 = _sha256(canonical_json(self.to_payload()))
+        legacy_without_failfast = (
+            self.name == "verifiers"
+            and patch_names == expected[:-1]
+            and component_sha256 in _LEGACY_VERIFIERS_COMPONENT_SHA256S
+        )
+        if patch_names != expected and not legacy_without_failfast:
             raise ValueError("dependency component patch order differs")
         _require_sha256(self.post_tree_sha256, f"{self.name} post-tree sha256")
 

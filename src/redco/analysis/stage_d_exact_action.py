@@ -770,6 +770,31 @@ class ExactActionKey:
 TerminationKind = Literal["eos", "max_tokens", "tool_calls"]
 
 
+def resolve_behavior_termination(
+    *,
+    finish_reason: object,
+    action_token_ids: Sequence[int],
+    eos_token_id: int | None,
+    max_tokens: int,
+) -> tuple[TerminationKind, int | None]:
+    """Resolve every terminal behavior admitted by the pinned Stage-D interface."""
+    action = _token_tuple(action_token_ids, "action_token_ids")
+    cap = _exact_int(max_tokens, "max_tokens")
+    if cap < 1:
+        raise ValueError("max_tokens must be positive")
+    if len(action) > cap:
+        raise ValueError("action exceeds the resolved max_tokens")
+    if finish_reason == "tool_calls":
+        return "tool_calls", None
+    if finish_reason == "length" and len(action) == cap:
+        return "max_tokens", None
+    if finish_reason == "stop":
+        eos = _exact_int(eos_token_id, "eos_token_id")
+        if action[-1] == eos:
+            return "eos", eos
+    raise ValueError("sampled action has an unsupported termination")
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class BehaviorAction:
     """One exact sampled action with token-aligned served-policy logprobs."""
@@ -877,26 +902,17 @@ class BehaviorAction:
         if prompt_usage != len(key.prompt_token_ids) or completion_usage != len(action):
             raise ValueError("usage must exactly match prompt and action token arrays")
         sampler = key.sampler
-        if len(action) > sampler.max_tokens:
-            raise ValueError("action exceeds the resolved max_tokens")
-        if termination_kind == "eos":
-            eos = _exact_int(eos_token_id, "eos_token_id")
-            if finish_reason != "stop" or action[-1] != eos:
-                raise ValueError("EOS termination contract is inconsistent")
-        elif termination_kind == "max_tokens":
-            if (
-                eos_token_id is not None
-                or finish_reason != "length"
-                or len(action) != sampler.max_tokens
-            ):
-                raise ValueError("max-token termination contract is inconsistent")
-            eos = None
-        elif termination_kind == "tool_calls":
-            if eos_token_id is not None or finish_reason != "tool_calls":
-                raise ValueError("tool-call termination contract is inconsistent")
-            eos = None
-        else:
+        if termination_kind not in {"eos", "max_tokens", "tool_calls"}:
             raise ValueError("stop-sequence and unknown termination are not authorized")
+        expected_termination, expected_eos = resolve_behavior_termination(
+            finish_reason=finish_reason,
+            action_token_ids=action,
+            eos_token_id=eos_token_id,
+            max_tokens=sampler.max_tokens,
+        )
+        if (termination_kind, eos_token_id) != (expected_termination, expected_eos):
+            raise ValueError("sampled action termination contract is inconsistent")
+        eos = expected_eos
         self = object.__new__(cls)
         action_bytes = canonical_json(action)
         logprob_bytes = canonical_json(logprobs)

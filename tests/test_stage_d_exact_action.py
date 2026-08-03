@@ -13,6 +13,7 @@ from redco.analysis.stage_d_exact_action import (
     ResolvedSamplerConfig,
     categorical_probabilities,
     require_exact_reuse,
+    resolve_behavior_termination,
 )
 from redco.contracts import canonical_json
 from redco.integrations.signed_subprocess import sign_payload
@@ -567,13 +568,75 @@ def test_only_eos_included_max_tokens_and_tool_calls_are_authorized() -> None:
     )
     with pytest.raises(ValueError, match="not authorized"):
         _action(termination_kind="stop_sequence", eos_token_id=None)
-    with pytest.raises(ValueError, match="max-token"):
+    with pytest.raises(ValueError, match="unsupported termination"):
         _action(
             key=_key(max_tokens=3),
             finish_reason="length",
             termination_kind="max_tokens",
             eos_token_id=None,
         )
+
+
+def test_pinned_action_termination_matrix_is_closed_over_valid_behaviors() -> None:
+    accepted = (
+        ("stop", (17, 2), 4, ("eos", 2)),
+        ("length", (17, 18), 2, ("max_tokens", None)),
+        ("tool_calls", (17,), 4, ("tool_calls", None)),
+    )
+    for finish_reason, tokens, cap, expected in accepted:
+        assert resolve_behavior_termination(
+            finish_reason=finish_reason,
+            action_token_ids=tokens,
+            eos_token_id=2,
+            max_tokens=cap,
+        ) == expected
+
+    rejected = (
+        ("stop", (17,), 2),
+        ("length", (17,), 2),
+        ("content_filter", (17, 2), 2),
+        ("refusal", (17, 2), 2),
+        (None, (17, 2), 2),
+        ("stop", (), 2),
+        ("tool_calls", (17, 18, 19), 2),
+    )
+    for finish_reason, tokens, cap in rejected:
+        with pytest.raises(ValueError):
+            resolve_behavior_termination(
+                finish_reason=finish_reason,
+                action_token_ids=tokens,
+                eos_token_id=2,
+                max_tokens=cap,
+            )
+
+    for cap in range(1, 9):
+        exact = tuple(range(10, 10 + cap))
+        assert resolve_behavior_termination(
+            finish_reason="length",
+            action_token_ids=exact,
+            eos_token_id=2,
+            max_tokens=cap,
+        ) == ("max_tokens", None)
+        assert resolve_behavior_termination(
+            finish_reason="stop",
+            action_token_ids=(*exact[:-1], 2),
+            eos_token_id=2,
+            max_tokens=cap,
+        ) == ("eos", 2)
+        if cap > 1:
+            with pytest.raises(ValueError):
+                resolve_behavior_termination(
+                    finish_reason="length",
+                    action_token_ids=exact[:-1],
+                    eos_token_id=2,
+                    max_tokens=cap,
+                )
+
+
+def test_textual_refusal_is_an_ordinary_exact_action() -> None:
+    action = _action(message={"role": "assistant", "content": "I cannot help with that."})
+    assert action.parse_status == "valid"
+    assert action.message["content"] == "I cannot help with that."
 
 
 def test_hashes_and_versioned_canonical_digest_bind_every_action_payload() -> None:

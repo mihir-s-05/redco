@@ -117,6 +117,7 @@ def test_renderer_and_verifier_patch_stacks_apply_in_deployment_order(
             "verifiers-stage-d-pre-generation-preflight-v1.patch",
             "verifiers-stage-d-patched-rlm-archive-v1.patch",
             "verifiers-stage-d-frozen-rlm-install-v1.patch",
+            "verifiers-stage-d-observer-failfast-v1.patch",
         ),
     )
     train = (verifier / "verifiers/v1/clients/train.py").read_text()
@@ -131,6 +132,10 @@ def test_renderer_and_verifier_patch_stacks_apply_in_deployment_order(
     assert "RLM frozen install asset differs from its SHA-256" in harness
     assert "--frozen --offline --no-dev" in harness
     assert "install-sentinel" in harness
+    session = (verifier / "verifiers/v1/session.py").read_text()
+    assert "async def fail_closed(self, operation: bytes) -> None:" in session
+    server = (verifier / "verifiers/v1/interception/server.py").read_text()
+    assert 'status=409 if session.observer is not None else 502' in server
     rollout = (verifier / "verifiers/v1/rollout.py").read_text()
     assert "await invoke(" in rollout
     assert "self.task.pre_generation" in rollout

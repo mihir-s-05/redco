@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "domain": "redco-stage-d1-action-closure-cpu-readiness-v11",
+  "status": "cpu_hardening_passed_live_not_authorized",
+  "action_closure": {
+    "completed": ["eos", "max_tokens", "tool_calls"],
+    "textual_refusal_is_ordinary_content": true,
+    "impossible_or_unbound_states_fail_closed": true
+  },
+  "fail_fast": {
+    "observed_failure_status": 409,
+    "second_provider_post": false,
+    "coalesced_waiters_preserved": true,
+    "different_operation_siblings_cancelled_and_awaited": true,
+    "original_error_preserved": true
+  },
+  "historical_corpus": {
+    "terminal_reports": 10,
+    "retained_ledgers": 5,
+    "terminal_archives": 3,
+    "cryptographic_behavior_action_envelopes_reloaded": 12,
+    "semantic_renderer_replay_performed": false
+  },
+  "validation": {
+    "focused_redco_tests": "pass_with_expected_optional_dependency_skips",
+    "patched_verifiers_structure_tests": 33,
+    "patch_order": "pass",
+    "patch_tree_reproduction": "byte_identical",
+    "corpus_report_reproduction": "byte_identical",
+    "ruff": "pass",
+    "mypy": "pass",
+    "git_diff_check": "pass",
+    "adversarial_design_review": "go",
+    "independent_code_quality_review": "go"
+  },
+  "scientific_boundary": {
+    "support_density_identifiable_from_history": false,
+    "support_rule": {"rollouts": 64, "required_joint_successes": 58, "minimum_reward_f1_range": 0.05},
+    "nested_counts": ["N_scaffold", "N_eligible", "N_joint"],
+    "maximum_live_deployments": 2,
+    "separate_hash_bound_preregistration_required": true
+  },
+  "prime_model_calls_made": 0
+}

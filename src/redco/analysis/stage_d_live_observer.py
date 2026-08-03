@@ -7,7 +7,11 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
-from redco.analysis.stage_d_exact_action import BehaviorAction, ExactActionKey
+from redco.analysis.stage_d_exact_action import (
+    BehaviorAction,
+    ExactActionKey,
+    resolve_behavior_termination,
+)
 from redco.analysis.stage_d_source_producer import (
     PendingSourcePolicyCall,
     StageDSourceRolloutProducer,
@@ -281,9 +285,11 @@ class StageDPreparedCallObserver:
         request_id = raw.get("id")
         if not isinstance(request_id, str) or not request_id:
             raise ValueError("typed prepared response lacks its request ID")
-        termination_kind, eos_token_id = self._termination(
-            finish_reason,
-            action_token_ids,
+        termination_kind, eos_token_id = resolve_behavior_termination(
+            finish_reason=finish_reason,
+            action_token_ids=action_token_ids,
+            eos_token_id=self._identity.eos_token_id,
+            max_tokens=ticket.action_key.sampler.max_tokens,
         )
         action = BehaviorAction.build(
             key=ticket.action_key,
@@ -377,20 +383,6 @@ class StageDPreparedCallObserver:
             ),
         )
 
-    def _termination(
-        self,
-        finish_reason: object,
-        action_token_ids: tuple[int, ...],
-    ) -> tuple[Literal["eos", "max_tokens", "tool_calls"], int | None]:
-        if finish_reason == "tool_calls":
-            return "tool_calls", None
-        if finish_reason == "length":
-            return "max_tokens", None
-        if finish_reason != "stop" or action_token_ids[-1] != self._identity.eos_token_id:
-            raise ValueError("prepared response has an unsupported termination")
-        return "eos", self._identity.eos_token_id
-
-
 def _child_spawn_signature(
     provenance: RecordedRLMProvenanceV2,
 ) -> tuple[object, ...]:
@@ -424,7 +416,7 @@ class StageDForwardDirectiveObserver:
         self._pre_forward_guard = pre_forward_guard
 
     async def before_forward(self, prepared: PreparedRequestLike) -> object:
-        from renderers.client import PreparedGenerateForward  # type: ignore[import-untyped]
+        from renderers.client import PreparedGenerateForward  # type: ignore[import-not-found]
 
         if self._pre_forward_guard is not None:
             self._pre_forward_guard()

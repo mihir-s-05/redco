@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -53,6 +54,7 @@ def _manifest() -> StageDDependencyStackManifest:
                 "verifiers-stage-d-pre-generation-preflight-v1.patch",
                 "verifiers-stage-d-patched-rlm-archive-v1.patch",
                 "verifiers-stage-d-frozen-rlm-install-v1.patch",
+                "verifiers-stage-d-observer-failfast-v1.patch",
             ),
             "c" * 64,
         ),
@@ -109,6 +111,29 @@ def test_dependency_stack_rejects_patch_reordering() -> None:
         assert "patch order" in str(error)
     else:
         raise AssertionError("reordered dependency patches were accepted")
+
+
+def test_dependency_stack_still_parses_exact_frozen_legacy_bindings() -> None:
+    root = Path(__file__).parents[1] / "configs/stage-d"
+    paths = sorted(root.glob("stage-d1-dependency-stack-v*.json"))
+    assert paths
+    for path in paths:
+        manifest = StageDDependencyStackManifest.from_bytes(path.read_bytes())
+        assert tuple(patch.name for patch in manifest.components[2].patches)[-1] == (
+            "verifiers-stage-d-frozen-rlm-install-v1.patch"
+        )
+
+
+def test_dependency_stack_rejects_new_binding_with_legacy_verifier_sequence() -> None:
+    manifest = _manifest()
+    verifier = manifest.components[2]
+    with pytest.raises(ValueError, match="patch order"):
+        ComponentBinding(
+            verifier.name,
+            verifier.base_commit,
+            verifier.patches[:-1],
+            verifier.post_tree_sha256,
+        )
 
 
 def test_canonical_dependency_archive_is_byte_identical_across_builds(
