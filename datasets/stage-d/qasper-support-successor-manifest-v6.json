@@ -1,0 +1,492 @@
+{
+  "address_audit": {
+    "path": "reports/stage-d1-support-successor-address-audit-v6.json",
+    "sha256": "8f0e081fe2b3ed8b15254ac5068569d9e0a493fc1e8b832d7956af43ed1f50dd"
+  },
+  "checks": {
+    "every_reference_exact": true,
+    "extension_references_unique": true,
+    "immutable_old_snapshot_retained": true,
+    "old_and_extension_papers_disjoint": true,
+    "old_and_extension_references_disjoint": true,
+    "split_sizes_exact": true,
+    "support_successor_has_112_unique_papers": true
+  },
+  "collection_plan": {
+    "path": "configs/stage-d/stage-d1-support-collection-plan-v11.json",
+    "sha256": "9870c18fd43ee3a08bb212d5f9b506104e39b3d2dc2ccd7b689240799d2696cb"
+  },
+  "converted_parquet_revision": "06806e4608976fc2fac0a090ac425d5b2b29caf4",
+  "dataset": "allenai/qasper",
+  "license": "cc-by-4.0",
+  "mode": "support_successor",
+  "old_snapshot": {
+    "disposition": "immutable development/retired quarantine",
+    "papers": 120,
+    "path": "datasets/stage-d/qasper-deterministic-v4.jsonl",
+    "sha256": "88fa2c114d2f251b8ce0400023980fe652e4733d14b0357f5517f517d5775d71"
+  },
+  "output": {
+    "bytes": 2939291,
+    "path": "datasets/stage-d/qasper-support-successor-v6.jsonl",
+    "sha256": "153c25a1697737d4df58883adedf55e056d6cd58f08f86e2489391b40b5183ac"
+  },
+  "partitions": {
+    "successor_science_eval": {
+      "answer_types": {
+        "abstractive": 14,
+        "extractive": 9,
+        "yes_no": 9
+      },
+      "paper_ids": [
+        "2002.08795",
+        "1802.06024",
+        "1809.00530",
+        "1710.07960",
+        "1912.03804",
+        "1912.08960",
+        "2002.11910",
+        "1909.09587",
+        "1802.07862",
+        "2004.01853",
+        "1710.03348",
+        "1612.03226",
+        "1809.02286",
+        "1809.01202",
+        "1909.02027",
+        "1911.02855",
+        "1906.01081",
+        "1611.01576",
+        "1904.09535",
+        "1911.03059",
+        "1706.08198",
+        "1909.08089",
+        "1910.09982",
+        "1609.00559",
+        "1604.00727",
+        "1612.02482",
+        "1608.01084",
+        "1904.10503",
+        "1912.01772",
+        "1603.01987",
+        "1908.06941",
+        "1702.03856"
+      ],
+      "papers": 32
+    },
+    "successor_science_train": {
+      "answer_types": {
+        "abstractive": 7,
+        "extractive": 6,
+        "yes_no": 3
+      },
+      "paper_ids": [
+        "1911.03243",
+        "1809.04686",
+        "1703.09684",
+        "1911.11744",
+        "1910.03467",
+        "1911.00523",
+        "1803.03664",
+        "1910.11949",
+        "1902.09087",
+        "1907.01413",
+        "1908.07816",
+        "1808.09409",
+        "1808.00265",
+        "1810.09774",
+        "1910.05608",
+        "1906.07668"
+      ],
+      "papers": 16
+    },
+    "successor_support": {
+      "answer_types": {
+        "abstractive": 13,
+        "extractive": 40,
+        "yes_no": 11
+      },
+      "paper_ids": [
+        "1811.01399",
+        "1909.00124",
+        "1909.00088",
+        "1911.01799",
+        "1812.06705",
+        "1905.08949",
+        "1909.00170",
+        "1701.03051",
+        "1603.01417",
+        "1911.03385",
+        "1902.06843",
+        "1905.06512",
+        "2001.06286",
+        "1910.02789",
+        "2001.07209",
+        "2001.10161",
+        "1909.00279",
+        "1909.06762",
+        "1812.07023",
+        "1610.04377",
+        "1906.06448",
+        "1912.00819",
+        "1907.00758",
+        "1710.06536",
+        "1904.05862",
+        "1708.09157",
+        "1911.00069",
+        "1910.04887",
+        "1810.00663",
+        "1809.05752",
+        "2001.01589",
+        "1910.10324",
+        "1910.05456",
+        "1910.05154",
+        "1806.00722",
+        "2003.03612",
+        "1904.08386",
+        "1909.00754",
+        "1906.00180",
+        "1806.02847",
+        "1906.04571",
+        "1909.04625",
+        "1809.07629",
+        "1807.05154",
+        "2002.11402",
+        "1804.09301",
+        "2002.00652",
+        "1909.00324",
+        "1905.06566",
+        "2003.04032",
+        "2004.03034",
+        "1910.12618",
+        "1911.12569",
+        "1910.01363",
+        "1901.04899",
+        "1606.05320",
+        "1809.10644",
+        "1606.02006",
+        "1605.04655",
+        "1911.09483",
+        "1805.00760",
+        "1909.05358",
+        "2003.06279",
+        "2004.03744"
+      ],
+      "papers": 64
+    }
+  },
+  "prior_extension": {
+    "papers": 112,
+    "path": "datasets/stage-d/qasper-support-successor-v5.jsonl",
+    "sha256": "bb576082ba15535d7b0a996ea5c14dd008ebde634a0d8c5c7258f81d5ac9577d"
+  },
+  "schema_version": 1,
+  "selection": {
+    "fresh_reference_positions_or_midpoint_coverage_inspected": false,
+    "maximum_paper_characters": 60000,
+    "minimum_span_characters": 20,
+    "one_question_per_paper": true,
+    "seed_forbidden_ids_and_spans_from_all_old_120": true,
+    "source_order": true
+  },
+  "source_revision": "fdc9d8214fbab5dd782958601db4d678e6934a54",
+  "successor": {
+    "checks": {
+      "every_reference_exact": true,
+      "inherited_science_48_rows_in_order": true,
+      "reserve_example_id_fresh": true,
+      "reserve_excluded_from_every_prior_partition": true,
+      "reserve_excluded_from_immutable_snapshot": true,
+      "reserve_excluded_from_retired_history": true,
+      "reserve_not_in_science_partitions": true,
+      "reserve_reference_fresh": true,
+      "reserve_rendered_paper_fresh": true,
+      "retained_63_original_rows_in_order": true,
+      "retired_exactly_one_observed_row": true,
+      "successor_has_112_unique_papers": true
+    },
+    "exclusion_hashes": {
+      "example_ids_sha256": "f6ae96a35570f2ace4e6e24a93a389ef4af2f869e91c4243606d590681f17250",
+      "paper_ids_sha256": "74bba0d4e484531d4ddddb9e8970124f832711980a3dd4529dacc05c5cbd3b03",
+      "reference_spans_sha256": "e4ad203dc28f7f60632ddcfbd198afc95e434cc382104f2536a419471514431e",
+      "rendered_paper_sha256s_sha256": "69ec579b692032794c49435c6d8bd803b347801ebd0fc95d7c502f3a430f819a"
+    },
+    "historically_retired_paper_ids": [
+      "1710.01492",
+      "1909.12231",
+      "1911.03894",
+      "1912.01673",
+      "2001.09899"
+    ],
+    "reserve": {
+      "example_id": "qasper-f33236ebd6f5a9ccb9b9dbf05ac17c3724f93f91",
+      "paper_id": "2004.03744",
+      "row_sha256": "ca6ba4bb6cb91e3c7fa70451d62dff07deae1369dd9b5a660307d1ade5bebfa1"
+    },
+    "retained": [
+      {
+        "example_id": "qasper-69a7a6675c59a4c5fb70006523b9fe0f01ca415c",
+        "row_sha256": "564ee955475039ddfdd284e48aa089ca91ef4070a123d6f4d4f89ec70974f32a"
+      },
+      {
+        "example_id": "qasper-c20b012ad31da46642c553ce462bc0aad56912db",
+        "row_sha256": "15b549c69fdca9462acbcca8b71fb230ab69423cfa404c0ed42d4f4c5bf38028"
+      },
+      {
+        "example_id": "qasper-98ba7a7aae388b1a77dd6cab890977251d906359",
+        "row_sha256": "3366e07deb5d47e6900c426db1abfbf1fe81a16aae08b6a3a72f5a661cac4cf7"
+      },
+      {
+        "example_id": "qasper-529dabe7b4a8a01b20ee099701834b60fb0c43b0",
+        "row_sha256": "5ac340418bda69d7ae27907bd25433f2cc0e6c5e5351023c0eb11e8f8b4970e6"
+      },
+      {
+        "example_id": "qasper-df8cc1f395486a12db98df805248eb37c087458b",
+        "row_sha256": "c5bbe2202ccb91760e1e03279bb71351066259c5a09188c5e4c1793e468b52c7"
+      },
+      {
+        "example_id": "qasper-ca4b66ffa4581f9491442dcec78ca556253c8146",
+        "row_sha256": "970fc8430fb2c694c93b5d885b08b9f905e4d864c2f317e53970c73b88f93a7e"
+      },
+      {
+        "example_id": "qasper-a999761aa976458bbc7b4f330764796446d030ff",
+        "row_sha256": "34fdd0bef95c81302c156392c9947cbe93307e7f789bea1c8757e3aea7eb9876"
+      },
+      {
+        "example_id": "qasper-6b55b558ed581759425ede5d3a6fcdf44b8082ac",
+        "row_sha256": "773f9747cbd45919d2d0f16b6fd73fbbde6804d3a9b49b0a5a906d809b18a70c"
+      },
+      {
+        "example_id": "qasper-129c03acb0963ede3915415953317556a55f34ee",
+        "row_sha256": "d2bf6da7b36453d9c67f9191651513f526ca0adad964ab28aee37e15dc9ade30"
+      },
+      {
+        "example_id": "qasper-9213159f874b3bdd9b4de956a88c703aac988411",
+        "row_sha256": "cb7d19bdc10378b6907671bc52cceadec8613f0e641f2859c92bc2722ccd32f6"
+      },
+      {
+        "example_id": "qasper-97dac7092cf8082a6238aaa35f4b185343b914af",
+        "row_sha256": "4d5d3b22e66c9072b5aad4b4abc9620deb9a081133df545b29605cfcacae6e4b"
+      },
+      {
+        "example_id": "qasper-9f6e877e3bde771595e8aee10c2656a0e7b9aeb2",
+        "row_sha256": "730f1b51edc6daffdd59dae8abc4472ffeeea45e00cea993b0ce0c93a1004f7a"
+      },
+      {
+        "example_id": "qasper-589be705a5cc73a23f30decba23ce58ec39d313b",
+        "row_sha256": "2114da0f2945ddaeb94a865d48900012b20baea1d8bd2604da3304f1e2c0701a"
+      },
+      {
+        "example_id": "qasper-d79d897f94e666d5a6fcda3b0c7e807c8fad109e",
+        "row_sha256": "4435594f069f543740a7efa8bb8d3690f103655cd70fe37a5351fcb9a67f3cc8"
+      },
+      {
+        "example_id": "qasper-31ee92e521be110b6a5a8d08cc9e6f90a3a97aae",
+        "row_sha256": "d1fc64a1fa6fa3fe1ce60a40124c3b01f61fa439ab570e50e2d3c7347e295633"
+      },
+      {
+        "example_id": "qasper-c180f44667505ec03214d44f4970c0db487a8bae",
+        "row_sha256": "663d36fe0dbab98a3111fb7d37290ecd4e0e2f59c0cb34259f34f6cd88f5c764"
+      },
+      {
+        "example_id": "qasper-6b9310b577c6232e3614a1612cbbbb17067b3886",
+        "row_sha256": "8a4d56e9bdf3186bc95ee0bf424f10d330b57aec47a3c908161804160dee3b26"
+      },
+      {
+        "example_id": "qasper-ee31c8a94e07b3207ca28caef3fbaf9a38d94964",
+        "row_sha256": "bfb39000b881b59bf75caa34f64094ae816c094900ba3081cdaa13ea9c794666"
+      },
+      {
+        "example_id": "qasper-6472f9d0a385be81e0970be91795b1b97aa5a9cf",
+        "row_sha256": "f088cd41e2680cc5ba60042e1b81a5c2b5622f4fd5ad40bf97ca2916b3c4744e"
+      },
+      {
+        "example_id": "qasper-17de58c17580350c9da9c2f3612784b432154d11",
+        "row_sha256": "74f05576244f3619c0bfc2649fba888805cf25146a488478eb9d585c00425a45"
+      },
+      {
+        "example_id": "qasper-c0a11ba0f6bbb4c69b5a0d4ae9d18e86a4a8f354",
+        "row_sha256": "a4fc5d3d99161c475c1e3f13e6fdffbd7d037eba725a2663bf4155a044f18c87"
+      },
+      {
+        "example_id": "qasper-5937ebbf04f62d41b48cbc6b5c38fc309e5c2328",
+        "row_sha256": "14bd876657337e825c999893e4317612660cafbf9ed2937b6f3d3749eb496a2b"
+      },
+      {
+        "example_id": "qasper-9ef182b61461d0d8b6feb1d6174796ccde290a15",
+        "row_sha256": "5edc204bcc97a842ad405102c605088ef7e0761f97970e197f29b1136cff2fee"
+      },
+      {
+        "example_id": "qasper-3bf429633ecbbfec3d7ffbcfa61fa90440cc918b",
+        "row_sha256": "2e68b3aa62f67e1150d7874bd093d7d61e8249b6e15c7fed3c91ce7c44b53c3a"
+      },
+      {
+        "example_id": "qasper-ad67ca844c63bf8ac9fdd0fa5f58c5a438f16211",
+        "row_sha256": "60193eb76f556d3d1209cf8030a77622fdfdace276e984b9b70fc72834b79e33"
+      },
+      {
+        "example_id": "qasper-a43c400ae37a8705ff2effb4828f4b0b177a74c4",
+        "row_sha256": "7e9c296cdccbee79f6e94e14f4b84667eabef2bf100876b8e5184c733c510d2c"
+      },
+      {
+        "example_id": "qasper-f6496b8d09911cdf3a9b72aec0b0be6232a6dba1",
+        "row_sha256": "144a73f08bfa4c74a0cd870cd23e67ec0d57528acf2a54f25188c545c984fa71"
+      },
+      {
+        "example_id": "qasper-a130aa735de3b65c71f27018f20d3c068bafb826",
+        "row_sha256": "74746aa113c426b0113661aa76b32625dc6778d72169029a43209c058ab87203"
+      },
+      {
+        "example_id": "qasper-aa800b424db77e634e82680f804894bfa37f2a34",
+        "row_sha256": "077f67e6cd1f08a0f6e2e223f0edc74a7cb19813d9eb65611816e72c1e18d4e1"
+      },
+      {
+        "example_id": "qasper-c82e945b43b2e61c8ea567727e239662309e9508",
+        "row_sha256": "fc091009fc5a285c8658a4029b76f7138fa7ddf11bd5a5419b55e1b49c1389a0"
+      },
+      {
+        "example_id": "qasper-57388bf2693d71eb966d42fa58ab66d7f595e55f",
+        "row_sha256": "154dd1358be166cca8f9ce73f2f5d615d3214c7dc4c92fa06dcb331414b9ac00"
+      },
+      {
+        "example_id": "qasper-fa5357c56ea80a21a7ca88a80f21711c5431042c",
+        "row_sha256": "ca5ae882400ceb18215c042f33403a534c5565ec1bfb4a532dc1ee19e3e79ae5"
+      },
+      {
+        "example_id": "qasper-fc29bb14f251f18862c100e0d3cd1396e8f2c3a1",
+        "row_sha256": "a6482723fec6345f28ff59861bfafb55866242c7e28ae3c3b5d47e45f7e97417"
+      },
+      {
+        "example_id": "qasper-b72264a73eea36c828e7de778a8b4599a5d02b39",
+        "row_sha256": "01e2547433b17e105758e3f833c594445fbf0ea20c433d2b0da625c615b36897"
+      },
+      {
+        "example_id": "qasper-26b5c090f72f6d51e5d9af2e470d06b2d7fc4a98",
+        "row_sha256": "663b7ba6c74d9831f5482c985c7634382c1e97683d72fcc114551380793e1f48"
+      },
+      {
+        "example_id": "qasper-62736ad71c76a20aee8e003c462869bab4ab4b1e",
+        "row_sha256": "70a120d0c724c3d253d88c347404dc5b916fd6384290cc81aedb41cb23e766b6"
+      },
+      {
+        "example_id": "qasper-508580af51483b5fb0df2630e8ea726ff08d537b",
+        "row_sha256": "b8a61c100ab29290307bb541a25409f7dd3c5452f5c4f7b8368aad716823d98b"
+      },
+      {
+        "example_id": "qasper-72ceeb58e783e3981055c70a3483ea706511fac3",
+        "row_sha256": "0f3e7870cf82fb0447cded57180b1b7579b02a757b33ba6ef81e4e03abad6583"
+      },
+      {
+        "example_id": "qasper-f258ada8577bb71873581820a94695f4a2c223b3",
+        "row_sha256": "2435e80ec4c67f19ffb9c383a76514699aabc1277a9c1f45113757d78bc00445"
+      },
+      {
+        "example_id": "qasper-05bb75a1e1202850efa9191d6901de0a34744af0",
+        "row_sha256": "22eeb3a0f8580102d898f7c0c1b1c6b891fa07381983c28f0eb9f52ff3485937"
+      },
+      {
+        "example_id": "qasper-f7817b949605fb04b1e4fec9dd9ca8804fb92ae9",
+        "row_sha256": "d1119cf9bd2c7cabac7f9a16f6d0e27b39f51368ea36e05248c3084c47a51008"
+      },
+      {
+        "example_id": "qasper-a1e07c7563ad038ee2a7de5093ea08efdd6077d4",
+        "row_sha256": "7df1c2f535e313a9a2e4ec3e1642bbf8aec712bf30e0f10b5993415d6a43ff82"
+      },
+      {
+        "example_id": "qasper-c5171daf82107fce0f285fa18f19e91fbd1215c5",
+        "row_sha256": "a0557cc5eb23e02bfc1293b93faffe119732587b711974ea18897da91997680f"
+      },
+      {
+        "example_id": "qasper-bb570d4a1b814f508a07e74baac735bf6ca0f040",
+        "row_sha256": "2addd28fbe16a8f33c1d7b0ac3e93e877f39b90a757af38980c69f05c28e67ed"
+      },
+      {
+        "example_id": "qasper-a1885f807753cff7a59f69b5cf6d0fdef8484057",
+        "row_sha256": "5b1a506b08402a8b395ab1717b3da81712f32b9942c65241fe69c41a46064485"
+      },
+      {
+        "example_id": "qasper-c2553166463b7b5ae4d9786f0446eb06a90af458",
+        "row_sha256": "af0d56e75f58665556e8b4659db28eae5eed0b291dae4d1d871f44cf05b2d4e9"
+      },
+      {
+        "example_id": "qasper-cc9f0ac8ead575a9b485a51ddc06b9ecb2e2a44d",
+        "row_sha256": "deeddec9493157cd2801d1eca0c9ac7b891e8478036cc946d4c54d16b5f18d98"
+      },
+      {
+        "example_id": "qasper-1763a029daca7cab10f18634aba02a6bd1b6faa7",
+        "row_sha256": "28dcecf6c4381d39df05b69a9f33f627123429931ee37da60ed73e49480c04f0"
+      },
+      {
+        "example_id": "qasper-fc8bc6a3c837a9d1c869b7ee90cf4e3c39bcd102",
+        "row_sha256": "7f7054b5a822f1a620c0ab21e5ff7c18e9ae69efa64c0bca7c8b5e8274080609"
+      },
+      {
+        "example_id": "qasper-269b05b74d5215b09c16e95a91ae50caedd9e2aa",
+        "row_sha256": "e1dd213a91ed02df8f43d0ed8cb752e9498033f8e155973d4b412223a33d4c8f"
+      },
+      {
+        "example_id": "qasper-ca26cfcc755f9d0641db0e4d88b4109b903dbb26",
+        "row_sha256": "e19a6bb33372c532ad4af61a2ecf9510ebc142f949de0c69d5e1107ac9f07249"
+      },
+      {
+        "example_id": "qasper-07c59824f5e7c5399d15491da3543905cfa5f751",
+        "row_sha256": "11528b7ab60f692e7c0580ec6d42f4fcdc3cbe74a2897dffc3ba7d457fe6bc50"
+      },
+      {
+        "example_id": "qasper-3e839783d8a4f2fe50ece4a9b476546f0842b193",
+        "row_sha256": "4443197101a9863fc6a42cddf301a84ffa135ef5f720a5b9f50d70780ee4e7c1"
+      },
+      {
+        "example_id": "qasper-0ee20a3a343e1e251b74a804e9aa1393d17b46d6",
+        "row_sha256": "ad11356dbdbb63e41a75866811296127fcd6b9e056b5ce3927f0f3c3e337f7a1"
+      },
+      {
+        "example_id": "qasper-c6e63e3b807474e29bfe32542321d015009e7148",
+        "row_sha256": "5fba6110fecb243c0e7da8b69ea77a5397815f331215c731e695b8a8600d6b0e"
+      },
+      {
+        "example_id": "qasper-5f7850254b723adf891930c6faced1058b99bd57",
+        "row_sha256": "ebf7f31bb8979d7e54dc2a1f9d41f444df55cb959df290d64c6905e91c013b42"
+      },
+      {
+        "example_id": "qasper-50690b72dc61748e0159739a9a0243814d37f360",
+        "row_sha256": "59ec19faf9f7f6243e8eff2ea4311a754b0ad8db69f52c48ce61147cb330d46c"
+      },
+      {
+        "example_id": "qasper-102a0439739428aac80ac11795e73ce751b93ea1",
+        "row_sha256": "576d9c780254508638b87d2a630cd477c3f60b39523b1cf919b6c81cdd6f945d"
+      },
+      {
+        "example_id": "qasper-225a567eeb2698a9d3f1024a8b270313a6d15f82",
+        "row_sha256": "569245dc6cb737bd85a6aa891791bdc6f8de72799db7a6d687c857c0a15ddfcc"
+      },
+      {
+        "example_id": "qasper-6e4505609a280acc45b0a821755afb1b3b518ffd",
+        "row_sha256": "9085f8ef4add48f0cf9a7aada8ec1e33e1143083bcc3439e72548b98ce9a11fd"
+      },
+      {
+        "example_id": "qasper-282aa4e160abfa7569de7d99b8d45cabee486ba4",
+        "row_sha256": "ef6b88359301eb2399efb3ac3f59d54622f89168f61e38f48cbc4ec1bc0592c4"
+      },
+      {
+        "example_id": "qasper-221e9189a9d2431902d8ea833f486a38a76cbd8e",
+        "row_sha256": "2792a7e8dee0b5a3efa808b2461a0d8f4029ccf668fc809d55921bb918fdff06"
+      },
+      {
+        "example_id": "qasper-ec8043290356fcb871c2f5d752a9fe93a94c2f71",
+        "row_sha256": "0aa12ed61dd9296d17b7956b45819cf1d8d65c692a4316cfabfe44babc225a87"
+      }
+    ],
+    "retired": {
+      "example_id": "qasper-0619fc797730a3e59ac146a5a4575c81517cc618",
+      "paper_id": "1706.08032",
+      "row_sha256": "bbe2d674b8af771e2260a61faded7f2385944b1ef40622f0b04b3370944c3a9d"
+    },
+    "selection_receipt": {
+      "selected_example_id": "qasper-f33236ebd6f5a9ccb9b9dbf05ac17c3724f93f91",
+      "selected_paper_id": "2004.03744",
+      "source_ordinal": 179,
+      "source_row_sha256": "b0facff2e4aaab643ea3cb5b1595a29bc6b082a40e0d46db364e1d0b9fa27b45"
+    }
+  }
+}

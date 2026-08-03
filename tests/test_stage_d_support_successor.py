@@ -188,6 +188,15 @@ def test_later_support_successors_preserve_history_and_addresses(
     assert all(audit["checks"].values())
 
 
+def test_source_collection_does_not_preempt_nested_support_reporting() -> None:
+    runner = (ROOT / "scripts" / "run_stage_d_source_collection.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'raise RuntimeError("source eligibility gate failed")' not in runner
+    assert "eligibility_passed=" in runner
+
+
 def test_successor_builder_rejects_partial_or_reordered_input() -> None:
     prior_rows = _decode_rows(
         (ROOT / "datasets/stage-d/qasper-successor-extension-v1.jsonl").read_bytes()
@@ -406,6 +415,13 @@ def test_successor_protocol_freezes_only_authorized_changes() -> None:
             "bb576082ba15535d7b0a996ea5c14dd008ebde634a0d8c5c7258f81d5ac9577d",
             5,
         ),
+        (
+            11,
+            6,
+            10,
+            "153c25a1697737d4df58883adedf55e056d6cd58f08f86e2489391b40b5183ac",
+            6,
+        ),
     ],
 )
 def test_later_successor_protocols_freeze_only_authorized_changes(
@@ -512,7 +528,9 @@ def test_later_successor_protocols_freeze_only_authorized_changes(
     }
     source = json.loads(paths["source"].read_bytes())
     assert source["action_contract"] == (
-        "canonical-engine-token-ids-with-exact-parser-validation-v1"
+        "closure-based-exact-engine-actions-v2"
+        if version == 11
+        else "canonical-engine-token-ids-with-exact-parser-validation-v1"
     )
     frozen_runner = subprocess.run(
         ["git", "show", f"{dependency.redco_commit}:{source['source_runner']}"],

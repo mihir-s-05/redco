@@ -119,8 +119,13 @@ def test_dependency_stack_still_parses_exact_frozen_legacy_bindings() -> None:
     assert paths
     for path in paths:
         manifest = StageDDependencyStackManifest.from_bytes(path.read_bytes())
+        expected_last_patch = (
+            "verifiers-stage-d-observer-failfast-v1.patch"
+            if path.name == "stage-d1-dependency-stack-v11.json"
+            else "verifiers-stage-d-frozen-rlm-install-v1.patch"
+        )
         assert tuple(patch.name for patch in manifest.components[2].patches)[-1] == (
-            "verifiers-stage-d-frozen-rlm-install-v1.patch"
+            expected_last_patch
         )
 
 
