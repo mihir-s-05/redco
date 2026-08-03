@@ -1022,8 +1022,17 @@ def _verify_trace_call(
     request = json.loads(action.key.request)
     if not isinstance(request, dict):
         raise ValueError("captured exact request is not an object")
-    graph_messages = [_normalize_openai_message(nodes[index].get("message")) for index in path[:-1]]
-    if request.get("messages") != graph_messages or request.get("tools", []) != trace.get("tools"):
+    raw_request_messages = request.get("messages")
+    if not isinstance(raw_request_messages, list):
+        raise ValueError("captured exact request messages are not a list")
+    request_messages = [
+        _normalize_openai_message(item) for item in raw_request_messages
+    ]
+    graph_messages = [
+        _normalize_openai_message(nodes[index].get("message"))
+        for index in path[:-1]
+    ]
+    if request_messages != graph_messages or request.get("tools", []) != trace.get("tools"):
         raise ValueError("captured request context differs from the Verifiers graph")
     if call.get("model") != action.key.checkpoint_id:
         raise ValueError("captured model identity differs from the Verifiers call")

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from redco.analysis.stage_d_branch_artifacts import StageDBranchTargetRoster
 from redco.analysis.stage_d_live_observer import (
     StageDForwardDirectiveObserver,
     StageDObserverIdentity,
@@ -19,6 +20,7 @@ from redco.analysis.stage_d_live_observer import (
 )
 from redco.analysis.stage_d_receipt_ledger import (
     GenesisBinding,
+    LedgerError,
     StageDReceiptLedger,
     inspect_ledger,
 )
@@ -73,6 +75,9 @@ def _ledger(root: Path) -> StageDReceiptLedger:
 
 def _observer(
     root: Path,
+    *,
+    rollout_id: str = "trace-1",
+    maximum_captured_session_call_count: int = 8,
 ) -> tuple[
     StageDPreparedCallObserver,
     StageDReceiptLedger,
@@ -83,7 +88,7 @@ def _observer(
     producer = StageDSourceRolloutProducer(
         ledger=ledger,
         group_id="group-1",
-        rollout_id="trace-1",
+        rollout_id=rollout_id,
         child_parent_event=parent,
         child_parent_tool_call_slot=0,
         root_policy_turn_count=2,
@@ -91,7 +96,7 @@ def _observer(
     )
     observer = StageDPreparedCallObserver(
         producer=producer,
-        trace_id="trace-1",
+        trace_id=rollout_id,
         identity=StageDObserverIdentity(
             checkpoint_id="model@commit",
             base_model_manifest=b"base",
@@ -106,6 +111,9 @@ def _observer(
             continuation_replicates=1,
             failure_reward=-1.0,
             root_policy_turn_count=2,
+            maximum_captured_session_call_count=(
+                maximum_captured_session_call_count
+            ),
         ),
         runtime_snapshot=canonical_json(
             {
@@ -559,6 +567,292 @@ def test_actual_interception_train_renderer_path_observes_bytes_once(
         "source_policy_call_completed",
     ]
     assert (tmp_path / "ledger" / "evidence" / _sha256(raw_response)).read_bytes() == raw_response
+
+
+def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
+    tmp_path: Path,
+) -> None:
+    multidict = pytest.importorskip("multidict")
+    vf = pytest.importorskip("verifiers.v1")
+    from renderers.base import (
+        ParsedResponse,
+        ParsedToolCall,
+        RenderedTokens,
+        ToolCallParseStatus,
+    )
+    from test_stage_d_source_producer import _two_turn_child_episode
+    from verifiers.v1.clients import ModelContext
+    from verifiers.v1.clients.train import TrainClient
+    from verifiers.v1.dialects.chat import ChatDialect
+    from verifiers.v1.interception.server import InterceptionServer
+    from verifiers.v1.session import RolloutSession
+
+    if "observer" not in inspect.signature(RolloutSession).parameters:
+        pytest.skip("prepared-observer patch is not applied to the verifier stack")
+
+    episode = json.loads(_two_turn_child_episode())
+    trace_payload = episode["traces"][0]
+    nodes = trace_payload["nodes"]
+    calls = trace_payload["calls"]
+
+    child_tool = nodes[8]
+    child_continuation = nodes[9]
+    root_tool = json.loads(json.dumps(child_tool))
+    root_return = nodes[7]
+    child_tool["parent"] = 5
+    child_continuation["parent"] = 6
+    root_tool["parent"] = 1
+    root_return["parent"] = 8
+    trace_payload["nodes"] = [
+        *nodes[:6],
+        child_tool,
+        child_continuation,
+        root_tool,
+        root_return,
+        *nodes[10:],
+    ]
+    calls[3]["node"] = 7
+    calls[4]["node"] = 9
+    calls[4]["usage"]["prompt_tokens"] = 5
+    for call in calls:
+        call["sampling"]["seed"] = 81
+    episode_bytes = canonical_json(episode)
+
+    class Renderer:
+        supports_tools = True
+
+        def __init__(self) -> None:
+            self.parse_index = 0
+
+        @staticmethod
+        def _rendered(token_ids: list[int]) -> RenderedTokens:
+            return RenderedTokens(
+                token_ids=token_ids,
+                message_indices=[0] * len(token_ids),
+                sampled_mask=[False] * len(token_ids),
+                is_content=[False] * len(token_ids),
+                message_roles=["user"],
+            )
+
+        def render(self, messages, *, tools=None, add_generation_prompt=False):
+            del tools
+            assert add_generation_prompt is True
+            return self._rendered(
+                [10, 11]
+                if len(messages) == 1
+                else [10, 11, 20, 2, 30]
+            )
+
+        def bridge_to_next_turn(self, *args, **kwargs):
+            del args, kwargs
+            return self._rendered([10, 11, 20, 2, 30])
+
+        def get_stop_token_ids(self):
+            return [2]
+
+        def parse_response(self, completion_ids, *, tools=None):
+            del tools
+            assert completion_ids == [20, 2]
+            call_index = self.parse_index
+            self.parse_index += 1
+            tool_calls = []
+            if call_index in {0, 2, 4}:
+                tool_calls = [
+                    ParsedToolCall(
+                        raw='{"name":"ipython","arguments":{}}',
+                        name="ipython",
+                        arguments={},
+                        status=ToolCallParseStatus.OK,
+                        id="call_0",
+                    )
+                ]
+            return ParsedResponse(
+                content="" if tool_calls else "duplicate",
+                tool_calls=tool_calls,
+            )
+
+    post_index = 0
+
+    async def post(*_args, **_kwargs):
+        nonlocal post_index
+        request_id = f"fixture-{post_index}"
+        post_index += 1
+        return SimpleNamespace(
+            content=canonical_json(
+                {
+                    "request_id": request_id,
+                    "choices": [
+                        {
+                            "token_ids": [20, 2],
+                            "logprobs": {
+                                "content": [
+                                    {"logprob": -0.2},
+                                    {"logprob": -0.1},
+                                ]
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                }
+            )
+        )
+
+    openai = SimpleNamespace(
+        base_url="http://engine/v1",
+        max_retries=0,
+        post=AsyncMock(side_effect=post),
+        close=AsyncMock(),
+    )
+    client = TrainClient(openai)
+    client._pool = Renderer()
+    observer, ledger, producer = _observer(
+        tmp_path / "ledger",
+        rollout_id="rollout-strict",
+        maximum_captured_session_call_count=16,
+    )
+    task_data = vf.TaskData(prompt="q")
+    trace = vf.Trace(
+        id="rollout-strict",
+        task=vf.TraceTask(type="ObservedTask", data=task_data),
+    )
+    sampling = vf.Sampling(
+        temperature=0.7,
+        top_p=1.0,
+        top_k=None,
+        min_p=0.0,
+        repetition_penalty=1.0,
+        frequency_penalty=0.0,
+        presence_penalty=0.0,
+        logit_bias={},
+        seed=81,
+        max_tokens=2,
+        stop=None,
+        n=1,
+        best_of=None,
+        use_beam_search=False,
+        logprobs=True,
+        top_logprobs=0,
+        ignore_eos=False,
+        min_tokens=0,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        extra_body={"cache_salt": "integration"},
+    )
+    session = RolloutSession(
+        ModelContext("model@commit", client, sampling),
+        trace,
+        observer=StageDForwardDirectiveObserver(observer),
+    )
+    server = InterceptionServer()
+    server.sessions["secret"] = session
+
+    def rlm_headers(rlm: dict[str, object]):
+        names = {
+            "provenance_version": "X-RLM-Provenance-Version",
+            "depth": "X-RLM-Depth",
+            "session_id": "X-RLM-Session-ID",
+            "turn": "X-RLM-Turn",
+            "call_kind": "X-RLM-Call-Kind",
+            "lineage": "X-RLM-Lineage",
+            "session_call_ordinal": "X-RLM-Session-Call-Ordinal",
+            "parent_session_id": "X-RLM-Parent-Session-ID",
+            "parent_turn": "X-RLM-Parent-Turn",
+            "parent_tool_call_id": "X-RLM-Parent-Tool-Call-ID",
+            "invocation_id": "X-RLM-Invocation-ID",
+            "parent_lineage": "X-RLM-Parent-Lineage",
+            "parent_call_ordinal": "X-RLM-Parent-Call-Ordinal",
+            "parent_tool_call_slot": "X-RLM-Parent-Tool-Call-Slot",
+            "spawn_ordinal": "X-RLM-Spawn-Ordinal",
+            "episode_spawn_ordinal": "X-RLM-Episode-Spawn-Ordinal",
+            "completed_predecessor_spawn_ordinals": (
+                "X-RLM-Completed-Predecessor-Spawn-Ordinals"
+            ),
+            "completed_episode_spawn_ordinals": (
+                "X-RLM-Completed-Episode-Spawn-Ordinals"
+            ),
+        }
+        headers = {"Authorization": "Bearer secret"}
+        for key, value in rlm.items():
+            if key not in names:
+                continue
+            headers[names[key]] = (
+                ",".join(str(item) for item in value)
+                if isinstance(value, list)
+                else str(value)
+            )
+        return multidict.CIMultiDict(headers)
+
+    async def invoke(call_index: int, messages: list[dict[str, object]]):
+        body = canonical_json({"model": "ignored", "messages": messages})
+        request = SimpleNamespace(
+            headers=rlm_headers(calls[call_index]["rlm"]),
+            path="/v1/chat/completions",
+            read=AsyncMock(return_value=body),
+            _read_bytes=body,
+        )
+        response = await server.handle_request(request, ChatDialect())
+        assert response.status == 200
+        return json.loads(response.body)["choices"][0]["message"]
+
+    async def scenario() -> None:
+        root_tool_message = await invoke(0, [{"role": "user", "content": "q"}])
+        await invoke(1, [{"role": "user", "content": "q"}])
+        child_tool_message = await invoke(2, [{"role": "user", "content": "q"}])
+        await invoke(
+            3,
+            [
+                {"role": "user", "content": "q"},
+                child_tool_message,
+                {"role": "tool", "tool_call_id": "call_0", "content": "computed"},
+            ],
+        )
+        await invoke(
+            4,
+            [
+                {"role": "user", "content": "q"},
+                root_tool_message,
+                {"role": "tool", "tool_call_id": "call_0", "content": "computed"},
+            ],
+        )
+        await invoke(5, [{"role": "user", "content": "q"}])
+        await client.close()
+
+    asyncio.run(scenario())
+
+    assert openai.post.await_count == 6
+    assert len(producer._completed) == 6
+    child_return_request = openai.post.await_args_list[3].kwargs["body"]
+    assert child_return_request["sampling_params"][
+        "routed_experts_prompt_start"
+    ] == 3
+    root_return_decision = next(
+        decision
+        for decision in producer._completed.values()
+        if decision.event_address.depth == 0 and decision.event_address.turn == 1
+    )
+    assert root_return_decision.action.key.prompt_token_ids == (10, 11, 20, 2, 30)
+    assert root_return_decision.action.action_token_ids == (20, 2)
+    assert root_return_decision.action.behavior_logprobs == (-0.2, -0.1)
+    source = producer.finalize_episode(episode_bytes)
+    assert source.branch_eligible is False
+    assert len(source.child_target_roster) == 3
+    roster = StageDBranchTargetRoster.from_sources(
+        (source,),
+        planned_source_count=1,
+        minimum_eligible_sources=1,
+    )
+    assert roster.targets == ()
+    assert len(roster.excluded_targets) == 2
+    ledger.record_branch_target_roster(roster.to_bytes())
+    for item in roster.excluded_targets:
+        with pytest.raises(LedgerError, match="absent from the frozen branch target roster"):
+            ledger.begin_candidate_attempt(
+                group_id=source.group_id,
+                target_id=item.target.target_id,
+                action_slot=1,
+            )
+    assert inspect_ledger(tmp_path / "ledger").status == "active-clean"
+    ledger.close()
 
 
 def test_raw_response_is_witnessed_once_before_parse_failure(tmp_path: Path) -> None:
