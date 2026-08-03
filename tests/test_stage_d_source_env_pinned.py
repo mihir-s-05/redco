@@ -102,7 +102,11 @@ def _config_payload(tmp_path: Path) -> dict[str, object]:
             "scientific_group_namespace": "pinned-source-env-test",
             "rollouts_per_task": 2,
         },
-        "agent": {"model": "fixture-model", "retries": {"max_retries": 0}},
+        "agent": {
+            "model": "fixture-model",
+            "max_turns": 8,
+            "retries": {"max_retries": 0},
+        },
         "retries": {"max_retries": 0},
         "max_concurrent": 1,
         "ledger_path": str(tmp_path / "ledger"),
@@ -386,7 +390,15 @@ def test_source_config_rejects_retry_or_parallel_collection(tmp_path: Path) -> N
     StageDSourceEnvConfig.model_validate(payload)
     for mutation in (
         {"retries": {"max_retries": 1}},
-        {"agent": {"model": "fixture-model", "retries": {"max_retries": 1}}},
+        {
+            "agent": {
+                "model": "fixture-model",
+                "max_turns": 8,
+                "retries": {"max_retries": 1},
+            }
+        },
+        {"agent": {"model": "fixture-model", "max_turns": None}},
+        {"maximum_captured_session_call_count": 7},
         {"max_concurrent": 2},
     ):
         candidate = {**payload, **mutation}

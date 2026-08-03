@@ -236,9 +236,15 @@ class StageDSourceEnvConfig(vf.SingleAgentEnvConfig):
             raise ValueError("Stage-D source collection requires max_concurrent=1")
         if self.maximum_observed_root_policy_turn_count < self.root_policy_turn_count:
             raise ValueError("Stage-D observed root-call ceiling is below the target topology")
-        if self.agent.max_turns < self.maximum_observed_root_policy_turn_count:
+        if (
+            self.agent.max_turns is not None
+            and self.agent.max_turns < self.maximum_observed_root_policy_turn_count
+        ):
             raise ValueError("Stage-D agent turn limit is below the root eligibility ceiling")
-        if self.maximum_captured_session_call_count < self.agent.max_turns:
+        if (
+            self.agent.max_turns is None
+            or self.maximum_captured_session_call_count < self.agent.max_turns
+        ):
             raise ValueError("Stage-D capture ceiling is below the deployed policy-turn limit")
         if self.retries.max_retries != 0 or self.agent.retries.max_retries != 0:
             raise ValueError("Stage-D source collection forbids episode and agent retries")
