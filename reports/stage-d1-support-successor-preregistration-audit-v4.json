@@ -1,0 +1,27 @@
+{
+  "checks": {
+    "dependency_stack_canonical": true,
+    "mandatory_prime_response_test_frozen": true,
+    "parent_contains_zero_typed_or_scientific_outputs": true,
+    "preserved_63_addresses_exact": true,
+    "reserve_disjoint_from_all_prior_partitions": true,
+    "scientific_protocol_fields_unchanged": true,
+    "source_and_replay_configs_bind_successor_dataset": true,
+    "successor_protocol_canonical": true
+  },
+  "domain": "redco-stage-d1-support-successor-preregistration-audit-v4",
+  "hashes": {
+    "address_audit": "ee5fc07b6bf76d470d9bcf26e1085d3055a283fb3df3212359353d5b2586d6df",
+    "amendment": "e10d57cf056b46be02875dffc8c5050503f52ee56c928da3458ca98aa8a10f68",
+    "collection_plan": "ed21c9c4aa93f3d797b9840c70eda1f7ce66cbb99b34a544a38a7cb441f35bb7",
+    "dependency_stack": "15f62e4d00777ae89e2776714c7ff49015dbca32290d1a9a87294cace3f9f92d",
+    "genesis": "0367907659e5784fd72f093b20e8403bd47addb9898848088896d06f618e8dee",
+    "preregistration": "b410bec106bc7d2cdf4c4073df32ee323db414cabf1a074809f1cbe8e9d709e8",
+    "protocol": "78f4d435c0700cdf489a8a29a69ffe615d42800633ed7505f6fcdfbcc9260da6",
+    "replay_config": "1f5918899ca72e7925d74704625c93f3ee917e20faca369b5540989ffe2fb95d",
+    "source": "ea86116f5dc1e8b07832043945949738f00b44aec5eb072bbfb14aff124a1ad6",
+    "source_config": "db24bfa71de7a9c40b0ced1d0735aa1bff8d5c2f4587f9575ae3bbf6fdbcf7c7"
+  },
+  "schema_version": 1,
+  "status": "pass"
+}
