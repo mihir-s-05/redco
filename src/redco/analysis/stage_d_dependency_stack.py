@@ -93,13 +93,32 @@ def canonical_tree_manifest_bytes(
     root: Path,
     *,
     allow_relative_symlinks: bool = False,
+    excluded_roots: tuple[str, ...] = (),
 ) -> bytes:
     if not root.is_dir() or root.is_symlink():
         raise ValueError("dependency tree root must be a regular directory")
+    normalized_exclusions: list[str] = []
+    for value in excluded_roots:
+        path = PurePosixPath(value)
+        if (
+            not value
+            or path.is_absolute()
+            or "." in path.parts
+            or ".." in path.parts
+            or "\\" in value
+            or path.as_posix() != value
+        ):
+            raise ValueError("dependency exclusion root is unsafe")
+        normalized_exclusions.append(value)
+    if len(normalized_exclusions) != len(set(normalized_exclusions)):
+        raise ValueError("dependency exclusion roots must be unique")
     entries: list[dict[str, object]] = []
     for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
         relative = path.relative_to(root).as_posix()
-        if ".git" in PurePosixPath(relative).parts:
+        if ".git" in PurePosixPath(relative).parts or any(
+            relative == excluded or relative.startswith(f"{excluded}/")
+            for excluded in normalized_exclusions
+        ):
             continue
         if path.is_symlink():
             if not allow_relative_symlinks:
