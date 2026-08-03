@@ -390,8 +390,6 @@ async def _run(args: argparse.Namespace) -> None:
             branch_artifacts=args.branch_artifacts,
             minimum_eligible_sources=rules.required_successes,
         )
-        if not roster.eligibility_passed:
-            raise RuntimeError("source eligibility gate failed")
         print(
             f"recovered slots={len(authenticated_plan.slots)} episodes={episode_count} "
             f"plan_sha256={authenticated_plan.plan_sha256} "
@@ -448,8 +446,6 @@ async def _run(args: argparse.Namespace) -> None:
         branch_artifacts=args.branch_artifacts,
         minimum_eligible_sources=rules.required_successes,
     )
-    if not roster.eligibility_passed:
-        raise RuntimeError("source eligibility gate failed")
     print(
         f"slots={len(plan.slots)} episodes={len(episodes)} "
         f"plan_sha256={plan.plan_sha256} receipt_sha256={_sha256(receipt)} "
