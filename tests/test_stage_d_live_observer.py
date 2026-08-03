@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -580,6 +581,9 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
         RenderedTokens,
         ToolCallParseStatus,
     )
+    env_root = Path(__file__).parents[1] / "environments" / "redco_evidence_selection_v2"
+    sys.path.insert(0, str(env_root))
+    from redco_evidence_selection_v2.source_env import _canonical_source_episode
     from test_stage_d_source_producer import _two_turn_child_episode
     from verifiers.v1.clients import ModelContext
     from verifiers.v1.clients.train import TrainClient
@@ -592,6 +596,17 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
 
     episode = json.loads(_two_turn_child_episode())
     trace_payload = episode["traces"][0]
+    compact_tool = {
+        "name": "ipython",
+        "description": "Execute code.",
+        "parameters": {
+            "type": "object",
+            "properties": {"code": {"type": "string"}},
+            "required": ["code"],
+        },
+    }
+    wrapped_tool = {"type": "function", "function": compact_tool}
+    trace_payload["tools"] = [compact_tool]
     nodes = trace_payload["nodes"]
     calls = trace_payload["calls"]
 
@@ -616,7 +631,22 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
     calls[4]["usage"]["prompt_tokens"] = 5
     for call in calls:
         call["sampling"]["seed"] = 81
-    episode_bytes = canonical_json(episode)
+    for node in trace_payload["nodes"]:
+        message = node["message"]
+        tool_calls = message.get("tool_calls")
+        if not tool_calls:
+            continue
+        message["tool_calls"] = [
+            {
+                "id": item["id"],
+                "name": item["function"]["name"],
+                "arguments": item["function"]["arguments"],
+            }
+            for item in tool_calls
+        ]
+    episode_bytes = _canonical_source_episode(vf.WireEpisode.model_validate(episode))
+    serialized_tools = json.loads(episode_bytes)["traces"][0]["tools"]
+    assert serialized_tools[0]["strict"] is None
 
     class Renderer:
         supports_tools = True
@@ -783,7 +813,9 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
         return multidict.CIMultiDict(headers)
 
     async def invoke(call_index: int, messages: list[dict[str, object]]):
-        body = canonical_json({"model": "ignored", "messages": messages})
+        body = canonical_json(
+            {"model": "ignored", "messages": messages, "tools": [wrapped_tool]}
+        )
         request = SimpleNamespace(
             headers=rlm_headers(calls[call_index]["rlm"]),
             path="/v1/chat/completions",

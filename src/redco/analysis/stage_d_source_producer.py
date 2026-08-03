@@ -1032,7 +1032,9 @@ def _verify_trace_call(
         _normalize_openai_message(nodes[index].get("message"))
         for index in path[:-1]
     ]
-    if request_messages != graph_messages or request.get("tools", []) != trace.get("tools"):
+    request_tools = _normalize_openai_tools(request.get("tools", []))
+    trace_tools = _normalize_openai_tools(trace.get("tools"))
+    if request_messages != graph_messages or request_tools != trace_tools:
         raise ValueError("captured request context differs from the Verifiers graph")
     if call.get("model") != action.key.checkpoint_id:
         raise ValueError("captured model identity differs from the Verifiers call")
@@ -1050,6 +1052,7 @@ def _verify_trace_call(
         "max_tokens": sampler.max_tokens,
         "parallel_tool_calls": False,
         "seed": sampler.seed,
+        "tool_choice": sampler.tool_choice,
     }
     if sampling != expected_sampling:
         raise ValueError("captured sampler differs from the Verifiers call")
@@ -1321,6 +1324,51 @@ def _normalize_openai_message(value: object) -> dict[str, Any]:
     if message.get("role") == "assistant" and message.get("content") is None:
         message["content"] = ""
     return message
+
+
+def _normalize_openai_tools(value: object) -> list[dict[str, Any]]:
+    """Canonicalize pinned compact and OpenAI-wrapped function definitions."""
+    if not isinstance(value, list):
+        raise ValueError("trace tools must be a list")
+    normalized: list[dict[str, Any]] = []
+    for raw in value:
+        if not isinstance(raw, dict):
+            raise ValueError("trace tool must be an object")
+        required = {"name", "description", "parameters"}
+        allowed = required | {"strict"}
+        if required <= set(raw) <= allowed:
+            function = raw
+        elif set(raw) == {"type", "function"} and raw.get("type") == "function":
+            wrapped_function = raw.get("function")
+            if not isinstance(wrapped_function, dict):
+                raise ValueError("trace function tool must contain an object")
+            function = wrapped_function
+        else:
+            raise ValueError("trace tool differs from the pinned function schema")
+        if not (required <= set(function) <= allowed):
+            raise ValueError("trace function definition fields differ from the pinned schema")
+        name = _nonempty_string(function.get("name"), "trace function name")
+        description = function.get("description")
+        parameters = function.get("parameters")
+        if not isinstance(description, str):
+            raise ValueError("trace function description must be a string")
+        if not isinstance(parameters, dict):
+            raise ValueError("trace function parameters must be an object")
+        strict = function.get("strict")
+        if strict is not None and type(strict) is not bool:
+            raise ValueError("trace function strict must be boolean or null")
+        normalized.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": deepcopy(parameters),
+                    "strict": strict,
+                },
+            }
+        )
+    return normalized
 
 
 def _object_list(value: Mapping[str, Any], name: str) -> list[dict[str, Any]]:

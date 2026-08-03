@@ -228,6 +228,7 @@ def test_pinned_successful_model_call_dump_matches_source_schema() -> None:
             max_tokens=2,
             parallel_tool_calls=False,
             seed=71,
+            tool_choice="auto",
         ),
         endpoint="/chat/completions",
         finish_reason="stop",
@@ -243,6 +244,7 @@ def test_pinned_successful_model_call_dump_matches_source_schema() -> None:
         "max_tokens": 2,
         "parallel_tool_calls": False,
         "seed": 71,
+        "tool_choice": "auto",
     }
     assert call["usage"] == {
         "prompt_tokens": 2,

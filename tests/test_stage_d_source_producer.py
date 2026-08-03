@@ -91,6 +91,7 @@ from redco.analysis.stage_d_source_artifacts import (
 )
 from redco.analysis.stage_d_source_producer import (
     StageDSourceRolloutProducer,
+    _normalize_openai_tools,
     _verify_two_slot_scaffold,
     derive_source_trace,
     structural_child_target_id,
@@ -433,6 +434,7 @@ def _call(
             "max_tokens": 2,
             "parallel_tool_calls": False,
             "seed": seed,
+            "tool_choice": "auto",
         },
         "time": {"start": 1.0, "end": 2.0},
         "usage": {
@@ -466,6 +468,38 @@ def _node(
     if parent is not None:
         value["parent"] = parent
     return value
+
+
+def test_tool_definitions_normalize_without_weakening_the_contract() -> None:
+    compact = {
+        "name": "ipython",
+        "description": "Execute code.",
+        "parameters": {
+            "type": "object",
+            "properties": {"code": {"type": "string"}},
+            "required": ["code"],
+        },
+    }
+    wrapped = {"type": "function", "function": compact}
+    expected = [
+        {"type": "function", "function": {**compact, "strict": None}}
+    ]
+    assert _normalize_openai_tools([compact]) == expected
+    assert _normalize_openai_tools([wrapped]) == expected
+    assert _normalize_openai_tools([{**compact, "strict": True}]) == [
+        {"type": "function", "function": {**compact, "strict": True}}
+    ]
+
+    for malformed in (
+        [{**compact, "strict": "yes"}],
+        [{"type": "custom", "function": compact}],
+        [{"type": "function", "function": {**compact, "name": "shell"}}],
+    ):
+        if malformed[-1].get("function", {}).get("name") == "shell":
+            assert _normalize_openai_tools(malformed) != expected
+        else:
+            with pytest.raises(ValueError, match=r"schema|boolean or null"):
+                _normalize_openai_tools(malformed)
 
 
 def _episode(
