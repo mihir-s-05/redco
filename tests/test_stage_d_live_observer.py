@@ -79,12 +79,13 @@ def _observer(
     *,
     rollout_id: str = "trace-1",
     maximum_captured_session_call_count: int = 8,
+    ledger: StageDReceiptLedger | None = None,
 ) -> tuple[
     StageDPreparedCallObserver,
     StageDReceiptLedger,
     StageDSourceRolloutProducer,
 ]:
-    ledger = _ledger(root)
+    ledger = _ledger(root) if ledger is None else ledger
     parent = PolicyEventAddress(0, "root", 0, 0)
     producer = StageDSourceRolloutProducer(
         ledger=ledger,
@@ -220,6 +221,7 @@ def _prepared(
     rlm: dict[str, object],
     *,
     routed_experts_prompt_start: int | None = None,
+    trace_id: str = "trace-1",
 ) -> SimpleNamespace:
     request = _request(seed, label)
     engine = {
@@ -244,8 +246,8 @@ def _prepared(
         application_request=canonical_json(request),
         engine_endpoint="http://engine/inference/v1/generate",
         engine_request=canonical_json(engine),
-        engine_headers=canonical_json({"X-Session-ID": "trace-1"}),
-        observer_context=canonical_json({"trace_id": "trace-1", "rlm": rlm}),
+        engine_headers=canonical_json({"X-Session-ID": trace_id}),
+        observer_context=canonical_json({"trace_id": trace_id, "rlm": rlm}),
         prompt_token_ids=(10, 11),
     )
 
@@ -401,7 +403,7 @@ def _response(*, finish_reason: str = "stop") -> SimpleNamespace:
     return SimpleNamespace(
         tokens=SimpleNamespace(
             prompt_ids=[10, 11],
-            completion_ids=[20, 2],
+            completion_ids=[20, 21] if finish_reason == "length" else [20, 2],
             completion_logprobs=[-0.2, -0.1],
         ),
         raw={"id": "fixture-request", "choices": [{"message": message}]},
@@ -609,6 +611,8 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
     trace_payload["tools"] = [compact_tool]
     nodes = trace_payload["nodes"]
     calls = trace_payload["calls"]
+    calls[1]["finish_reason"] = "length"
+    nodes[3]["token_ids"] = [20, 21]
 
     child_tool = nodes[8]
     child_continuation = nodes[9]
@@ -682,7 +686,7 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
 
         def parse_response(self, completion_ids, *, tools=None):
             del tools
-            assert completion_ids == [20, 2]
+            assert completion_ids in ([20, 2], [20, 21])
             call_index = self.parse_index
             self.parse_index += 1
             tool_calls = []
@@ -705,22 +709,24 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
 
     async def post(*_args, **_kwargs):
         nonlocal post_index
-        request_id = f"fixture-{post_index}"
+        call_index = post_index
+        request_id = f"fixture-{call_index}"
         post_index += 1
+        max_tokens = call_index == 1
         return SimpleNamespace(
             content=canonical_json(
                 {
                     "request_id": request_id,
                     "choices": [
                         {
-                            "token_ids": [20, 2],
+                            "token_ids": [20, 21] if max_tokens else [20, 2],
                             "logprobs": {
                                 "content": [
                                     {"logprob": -0.2},
                                     {"logprob": -0.1},
                                 ]
                             },
-                            "finish_reason": "stop",
+                            "finish_reason": "length" if max_tokens else "stop",
                         }
                     ],
                 }
@@ -823,13 +829,15 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
             _read_bytes=body,
         )
         response = await server.handle_request(request, ChatDialect())
-        assert response.status == 200
+        assert response.status == 200, response.body.decode()
         return json.loads(response.body)["choices"][0]["message"]
 
     async def scenario() -> None:
         root_tool_message = await invoke(0, [{"role": "user", "content": "q"}])
-        await invoke(1, [{"role": "user", "content": "q"}])
-        child_tool_message = await invoke(2, [{"role": "user", "content": "q"}])
+        _, child_tool_message = await asyncio.gather(
+            invoke(1, [{"role": "user", "content": "q"}]),
+            invoke(2, [{"role": "user", "content": "q"}]),
+        )
         await invoke(
             3,
             [
@@ -853,6 +861,14 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
 
     assert openai.post.await_count == 6
     assert len(producer._completed) == 6
+    max_token_decisions = [
+        decision
+        for decision in producer._completed.values()
+        if decision.action.finish_reason == "length"
+    ]
+    assert len(max_token_decisions) == 1
+    assert max_token_decisions[0].action.termination_kind == "max_tokens"
+    assert max_token_decisions[0].action.action_token_ids == (20, 21)
     child_return_request = openai.post.await_args_list[3].kwargs["body"]
     assert child_return_request["sampling_params"][
         "routed_experts_prompt_start"
@@ -1007,14 +1023,31 @@ def test_observer_abort_is_durable_and_terminal(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
-def test_observer_refuses_max_token_truncation(tmp_path: Path) -> None:
+def test_observer_accepts_max_token_action_and_next_rollout(tmp_path: Path) -> None:
     async def scenario() -> None:
-        observer, ledger, _producer = _observer(tmp_path / "ledger")
+        observer, ledger, producer = _observer(tmp_path / "ledger")
         ticket = await observer.before_forward(_prepared(17, "root", _root_rlm()))
-        with pytest.raises(ValueError, match="refuses truncated"):
-            await _deliver_response(observer, ticket, _response(finish_reason="length"))
-        await observer.abort(ticket, "typed_response", ValueError("truncated"))
-        assert inspect_ledger(tmp_path / "ledger").status == "poisoned"
+        await _deliver_response(observer, ticket, _response(finish_reason="length"))
+        (decision,) = producer._completed.values()
+        assert decision.action.finish_reason == "length"
+        assert decision.action.termination_kind == "max_tokens"
+        assert decision.action.eos_token_id is None
+        assert decision.action.action_token_ids == (20, 21)
+        assert not producer._pending
+        assert inspect_ledger(tmp_path / "ledger").status == "active-clean"
+
+        next_observer, returned_ledger, next_producer = _observer(
+            tmp_path / "unused",
+            rollout_id="trace-2",
+            ledger=ledger,
+        )
+        assert returned_ledger is ledger
+        next_ticket = await next_observer.before_forward(
+            _prepared(19, "root-next", _root_rlm(), trace_id="trace-2")
+        )
+        await _deliver_response(next_observer, next_ticket, _response())
+        assert len(next_producer._completed) == 1
+        assert inspect_ledger(tmp_path / "ledger").status == "active-clean"
         ledger.close()
 
     asyncio.run(scenario())

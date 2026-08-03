@@ -273,8 +273,6 @@ class StageDPreparedCallObserver:
             raise ValueError("typed prepared response token/logprob lengths differ")
         if not isinstance(finish_reason, str):
             raise ValueError("typed prepared response lacks a finish reason")
-        if finish_reason == "length":
-            raise ValueError("Stage-D source collection refuses truncated actions")
         prompt_tokens = _exact_int(getattr(usage, "input_tokens", None), "prompt usage")
         completion_tokens = _exact_int(
             getattr(usage, "completion_tokens", None), "completion usage"

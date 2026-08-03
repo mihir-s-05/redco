@@ -56,7 +56,7 @@
     "source_trace_model_seconds": 21.182056665420532,
     "source_trace_harness_seconds": 695.877055644989,
     "runner_terminal_error": "Stage-D source environment is terminal after a failure",
-    "diagnosis": "The first root action validly launched both frozen child calls. One child completed normally; the other naturally reached its frozen 768-token limit. The strict observer durably witnessed those response bytes and then rejected finish_reason=length as a ValueError, poisoning the exactly-once ledger before source finalization. The RLM client retried the now-terminal request and later root return against the poisoned ledger until the harness exited. A sampled length truncation should have become an explicit ineligible source outcome, but the live lifecycle instead turned it into a terminal invariant failure.",
+    "diagnosis": "The first root action validly launched both frozen child calls. One child completed normally; the other naturally reached its frozen 768-token limit. The strict observer durably witnessed those response bytes and then rejected finish_reason=length as a ValueError, poisoning the exactly-once ledger before source finalization. The RLM client retried the now-terminal request and later root return against the poisoned ledger until the harness exited. The existing exact-action contract already represents this sampled outcome as termination_kind=max_tokens; it should have been completed normally, after which the ordinary source finalizer—not the realized length outcome—would decide eligibility.",
     "scientific_result_observed": false,
     "support_result_observed": false,
     "address_retriable": false
@@ -95,8 +95,8 @@
   },
   "future_preflight_requirements": [
     "Force one concurrent child to finish by length and another by stop through the real renderer, observer, source environment, and ledger path.",
-    "Represent a truncated sampled action as an explicit terminal attempt outcome without leaving a dangling model_call_started record or poisoning unrelated addresses.",
-    "Finalize the affected episode once as denominator-negative with every commitment excluded, then prove that the next pristine address starts normally.",
+    "Complete a length-capped sampled response as the existing max_tokens behavior action without leaving a dangling model_call_started record or poisoning unrelated addresses.",
+    "Run ordinary source finalization exactly once, let the frozen topology and informativeness rules decide eligibility, then prove that the next pristine address starts normally.",
     "Map terminal observer and ledger errors to a non-retryable client response and cancel or join sibling/root work within a frozen short bound.",
     "Audit response-length headroom and retry latency before provisioning so an ordinary token-cap outcome cannot consume the campaign timeout."
   ],
