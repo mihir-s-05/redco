@@ -601,11 +601,14 @@ class SourceRollout:
         child_decisions = tuple(
             decision for decision in self.decisions if decision.node_kind == "child"
         )
-        child_targets = tuple(str(decision.target_id) for decision in child_decisions)
-        if len(set(self.child_target_roster)) != len(self.child_target_roster) or set(
-            child_targets
-        ) != set(self.child_target_roster):
-            raise ValueError("predeclared child roster must biject child decisions")
+        child_targets = {str(decision.target_id) for decision in child_decisions}
+        roster_targets = set(self.child_target_roster)
+        if (
+            len(roster_targets) != len(self.child_target_roster)
+            or not child_targets.issubset(roster_targets)
+            or (self.branch_eligible and child_targets != roster_targets)
+        ):
+            raise ValueError("predeclared child roster differs from child decisions")
         if any(
             decision.target_ordinal >= len(self.child_target_roster)
             or self.child_target_roster[decision.target_ordinal] != decision.target_id
@@ -614,7 +617,7 @@ class SourceRollout:
         ):
             raise ValueError("child target ordinals differ from the predeclared roster")
         if child_decisions:
-            expected_child_weight = Fraction(1, len(self.child_target_roster))
+            expected_child_weight = Fraction(1, len(child_targets))
             if any(decision.outer_weight != expected_child_weight for decision in child_decisions):
                 raise ValueError("child decisions must share one exact child-count weight")
         roster_ids = tuple(

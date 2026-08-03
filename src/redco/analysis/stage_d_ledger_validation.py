@@ -166,6 +166,8 @@ def validate_state_machine(
                 key = _group_key(receipt["group_id"], receipt["target_id"])
                 if key in commitments:
                     raise LedgerPoisoned("duplicate pre-action commitment")
+                # The support gate, not roster freezing, requires targets for every
+                # eligible source that contributes to a scientific success.
                 if (
                     receipt["commitment_sequence"] != record["offset"]
                     or receipt["action_reservation_sequence"] != record["offset"] + 1
@@ -553,6 +555,7 @@ def validate_state_machine(
                     "eligibility_passed",
                     "source_sha256s",
                     "targets",
+                    "excluded_targets",
                     "roster_sequence",
                 }
                 planned = receipt.get("planned_source_count")
@@ -563,6 +566,7 @@ def validate_state_machine(
                 passed = receipt.get("eligibility_passed")
                 sources = receipt.get("source_sha256s")
                 targets = receipt.get("targets")
+                excluded_targets = receipt.get("excluded_targets")
                 if (
                     set(receipt) != expected_fields
                     or branch_target_roster_sha256 is not None
@@ -588,13 +592,19 @@ def validate_state_machine(
                     or sources != sorted(set(sources))
                     or set(sources) != set(source_rollout_sha256s.values())
                     or not isinstance(targets, list)
+                    or not isinstance(excluded_targets, list)
                     or candidate_attempts
                     or execution_attempts
                 ):
                     raise LedgerPoisoned("branch target roster is invalid or late")
                 target_keys: set[tuple[str, str]] = set()
+                excluded_target_keys: set[tuple[str, str]] = set()
                 target_source_hashes: set[str] = set()
-                for target in targets:
+                excluded_source_hashes: set[str] = set()
+                for target, excluded in (
+                    *((item, False) for item in targets),
+                    *((item, True) for item in excluded_targets),
+                ):
                     expected_target_fields = {
                         "source_sha256",
                         "group_id",
@@ -604,8 +614,15 @@ def validate_state_machine(
                         "target_ordinal",
                         "event_address",
                     }
+                    if excluded:
+                        expected_target_fields.add("reason")
                     if not isinstance(target, dict) or set(target) != expected_target_fields:
                         raise LedgerPoisoned("branch target roster entry fields differ")
+                    if excluded and (
+                        not isinstance(target.get("reason"), str)
+                        or not target["reason"]
+                    ):
+                        raise LedgerPoisoned("excluded branch target lacks a reason")
                     group_id = target.get("group_id")
                     rollout_id = target.get("rollout_id")
                     decision_id = target.get("decision_id")
@@ -624,8 +641,9 @@ def validate_state_machine(
                     reservation_key = (rollout_id, decision_id)
                     source_reservation = source_reservations.get(reservation_key)
                     commitment = commitments.get(key)
+                    destination_keys = excluded_target_keys if excluded else target_keys
                     if (
-                        key in target_keys
+                        key in destination_keys
                         or not _is_sha256(target.get("source_sha256"))
                         or source_rollout_sha256s.get(source_key) != target["source_sha256"]
                         or source_reservation is None
@@ -643,9 +661,18 @@ def validate_state_machine(
                         or commitment[2].get("target_address") != target["event_address"]
                     ):
                         raise LedgerPoisoned("branch target roster lacks exact source provenance")
-                    target_keys.add(key)
-                    target_source_hashes.add(target["source_sha256"])
-                if target_keys != set(commitments) or len(target_source_hashes) != eligible:
+                    destination_keys.add(key)
+                    if excluded:
+                        excluded_source_hashes.add(target["source_sha256"])
+                    else:
+                        target_source_hashes.add(target["source_sha256"])
+                if (
+                    target_keys & excluded_target_keys
+                    or target_keys | excluded_target_keys != set(commitments)
+                    or len(target_source_hashes) > eligible
+                    or target_source_hashes & excluded_source_hashes
+                    or len(excluded_source_hashes) > ineligible
+                ):
                     raise LedgerPoisoned("branch target roster differs from committed denominator")
                 branch_target_roster_sha256 = receipt["roster_sha256"]
                 branch_target_keys = target_keys

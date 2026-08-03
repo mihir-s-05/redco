@@ -1012,11 +1012,12 @@ class StageDReceiptLedger:
             "eligibility_passed",
             "source_sha256s",
             "targets",
+            "excluded_targets",
         }
         if (
             set(roster) != expected_fields
-            or roster.get("schema_version") != 1
-            or roster.get("domain") != "redco-stage-d-branch-target-roster-v1"
+            or roster.get("schema_version") != 2
+            or roster.get("domain") != "redco-stage-d-branch-target-roster-v2"
         ):
             raise ValueError("unsupported Stage D branch target roster")
         if self._branch_target_roster_sha256 is not None:
@@ -1061,13 +1062,38 @@ class StageDReceiptLedger:
         ):
             raise ValueError("branch target roster differs from completed sources")
         targets = roster.get("targets")
-        if not isinstance(targets, list):
-            raise ValueError("branch target roster targets must be a list")
+        excluded_targets = roster.get("excluded_targets")
+        if not isinstance(targets, list) or not isinstance(excluded_targets, list):
+            raise ValueError("branch target roster target lists must be lists")
         normalized_targets = tuple(self._validate_roster_target(item) for item in targets)
+        normalized_excluded = tuple(
+            self._validate_roster_target(item, excluded=True)
+            for item in excluded_targets
+        )
         target_keys = {(item["group_id"], item["target_id"]) for item in normalized_targets}
-        if len(target_keys) != len(normalized_targets) or target_keys != set(self._commitments):
+        excluded_keys = {
+            (item["group_id"], item["target_id"]) for item in normalized_excluded
+        }
+        if (
+            len(target_keys) != len(normalized_targets)
+            or len(excluded_keys) != len(normalized_excluded)
+            or target_keys & excluded_keys
+            or target_keys | excluded_keys != set(self._commitments)
+        ):
             raise ValueError("branch target roster differs from committed targets")
-        if eligible != len({item["source_sha256"] for item in normalized_targets}):
+        active_source_sha256s = {
+            item["source_sha256"] for item in normalized_targets
+        }
+        excluded_source_sha256s = {
+            item["source_sha256"] for item in normalized_excluded
+        }
+        # Eligibility and target selection are distinct; the support gate enforces
+        # target presence for every source counted as a scientific success.
+        if (
+            len(active_source_sha256s) > eligible
+            or active_source_sha256s & excluded_source_sha256s
+            or len(excluded_source_sha256s) > ineligible
+        ):
             raise ValueError("eligible-source count differs from target roster")
         digest = self.put_evidence(roster_bytes)
         offset = len(self._records)
@@ -1086,6 +1112,7 @@ class StageDReceiptLedger:
                 "eligibility_passed": passed,
                 "source_sha256s": source_sha256s,
                 "targets": list(normalized_targets),
+                "excluded_targets": list(normalized_excluded),
                 "roster_sequence": offset,
             },
             evidence_refs=(digest,),
@@ -2583,7 +2610,12 @@ class StageDReceiptLedger:
         if self._branch_target_roster_sha256 is not None and key not in self._branch_target_keys:
             raise LedgerError("scientific target is absent from the frozen branch target roster")
 
-    def _validate_roster_target(self, value: object) -> dict[str, Any]:
+    def _validate_roster_target(
+        self,
+        value: object,
+        *,
+        excluded: bool = False,
+    ) -> dict[str, Any]:
         expected = {
             "source_sha256",
             "group_id",
@@ -2593,6 +2625,8 @@ class StageDReceiptLedger:
             "target_ordinal",
             "event_address",
         }
+        if excluded:
+            expected.add("reason")
         if not isinstance(value, dict) or set(value) != expected:
             raise ValueError("branch target roster entry fields differ")
         target = cast(dict[str, Any], value)
@@ -2600,6 +2634,8 @@ class StageDReceiptLedger:
             if not isinstance(target[field], str) or not target[field]:
                 raise ValueError("branch target roster identifiers must be nonempty")
         _require_sha256(target["source_sha256"], "source_sha256")
+        if excluded and (not isinstance(target["reason"], str) or not target["reason"]):
+            raise ValueError("excluded branch target requires a reason")
         if type(target["target_ordinal"]) is not int or target["target_ordinal"] < 0:
             raise ValueError("branch target roster ordinal is invalid")
         source = self._source_rollout_completed.get(
@@ -3089,8 +3125,8 @@ def _scan_ledger(
                     "Stage D branch target roster evidence",
                 )
                 expected_roster = {
-                    "schema_version": 1,
-                    "domain": "redco-stage-d-branch-target-roster-v1",
+                    "schema_version": 2,
+                    "domain": "redco-stage-d-branch-target-roster-v2",
                     "planned_source_count": receipt.get("planned_source_count"),
                     "completed_source_count": receipt.get("completed_source_count"),
                     "eligible_source_count": receipt.get("eligible_source_count"),
@@ -3099,6 +3135,7 @@ def _scan_ledger(
                     "eligibility_passed": receipt.get("eligibility_passed"),
                     "source_sha256s": receipt.get("source_sha256s"),
                     "targets": receipt.get("targets"),
+                    "excluded_targets": receipt.get("excluded_targets"),
                 }
                 if roster != expected_roster:
                     raise LedgerPoisoned("branch target roster receipt differs from its evidence")

@@ -73,6 +73,7 @@ class StageDObserverProtocol:
     failure_reward: float
     root_policy_turn_count: int
     maximum_observed_root_policy_turn_count: int = 4
+    maximum_captured_session_call_count: int = 8
     child_parent_event: PolicyEventAddress = field(
         default_factory=lambda: PolicyEventAddress(0, "root", 0, 0)
     )
@@ -92,6 +93,12 @@ class StageDObserverProtocol:
             or self.maximum_observed_root_policy_turn_count < self.root_policy_turn_count
         ):
             raise ValueError("observer protocol root-call ceiling is invalid")
+        if (
+            type(self.maximum_captured_session_call_count) is not int
+            or self.maximum_captured_session_call_count
+            < self.maximum_observed_root_policy_turn_count
+        ):
+            raise ValueError("observer protocol capture ceiling is invalid")
         if self.child_parent_event.call_kind != "policy":
             raise ValueError("child parent event must be a policy call")
         if self.child_parent_event.depth != 0:
@@ -134,6 +141,9 @@ class StageDPreparedCallObserver:
         )
         self._validate_action = validate_action
         self._root_turns: set[int] = set()
+        self._root_policy_events: dict[int, PolicyEventAddress] = {}
+        self._child_turns: dict[str, int] = {}
+        self._child_spawn_signatures: dict[str, tuple[object, ...]] = {}
 
     async def before_forward(self, prepared: PreparedRequestLike) -> object:
         request = _canonical_object(prepared.application_request, "application request")
@@ -153,10 +163,8 @@ class StageDPreparedCallObserver:
         if not isinstance(sampling_params, dict):
             raise ValueError("prepared engine request lacks sampling parameters")
         routing_start = sampling_params.get("routed_experts_prompt_start")
-        if routing_start is not None and not (
-            provenance.depth == 0 and provenance.session_call_ordinal > 0
-        ):
-            raise ValueError("routed-expert boundary is only valid on a returning root")
+        if routing_start is not None and provenance.session_call_ordinal == 0:
+            raise ValueError("routed-expert boundary is only valid on a returning session")
         if not prepared.engine_endpoint.endswith("/inference/v1/generate"):
             raise ValueError("prepared engine endpoint is not the pinned generate route")
         if set(headers) != {"X-Session-ID"}:
@@ -180,6 +188,8 @@ class StageDPreparedCallObserver:
         branch_selected = (
             node_kind == "child"
             and target_id is not None
+            and provenance.call_kind == "policy"
+            and provenance.session_call_ordinal == 0
             and self._producer.is_predeclared_child_target(target_id)
         )
         if branch_selected:
@@ -219,6 +229,18 @@ class StageDPreparedCallObserver:
             )
         if node_kind == "root":
             self._root_turns.add(provenance.session_call_ordinal)
+            if provenance.call_kind == "policy":
+                self._root_policy_events[provenance.session_call_ordinal] = (
+                    provenance.scientific_address
+                )
+        else:
+            self._child_turns[provenance.lineage] = (
+                provenance.session_call_ordinal + 1
+            )
+            self._child_spawn_signatures.setdefault(
+                provenance.lineage,
+                _child_spawn_signature(provenance),
+            )
         return StageDPreparedTicket(pending, action_key)
 
     async def after_response(self, ticket: object, response: object) -> None:
@@ -310,35 +332,49 @@ class StageDPreparedCallObserver:
             expected_ordinal = len(self._root_turns)
             if (
                 provenance.lineage != self._protocol.child_parent_event.lineage
-                or provenance.call_kind != "policy"
-                or provenance.turn != provenance.session_call_ordinal
+                or provenance.call_kind not in {"policy", "compaction"}
                 or provenance.session_call_ordinal != expected_ordinal
                 or expected_ordinal
-                >= self._protocol.maximum_observed_root_policy_turn_count
+                >= self._protocol.maximum_captured_session_call_count
             ):
-                raise ValueError("prepared root call is outside the frozen root session")
+                raise ValueError("prepared root call is outside the deployed session bounds")
             return "root", None
+        if provenance.depth != 1 or provenance.call_kind not in {"policy", "compaction"}:
+            raise ValueError("prepared call is outside the deployed depth-one interface")
+        assert provenance.parent_lineage is not None
+        assert provenance.parent_call_ordinal is not None
+        assert provenance.parent_turn is not None
+        assert provenance.parent_tool_call_slot is not None
+        assert provenance.spawn_ordinal is not None
+        parent = self._root_policy_events.get(provenance.parent_call_ordinal)
         if (
-            provenance.depth != 1
-            or provenance.call_kind != "policy"
-            or provenance.turn != 0
-            or provenance.session_call_ordinal != 0
-            or provenance.parent_lineage != self._protocol.child_parent_event.lineage
-            or provenance.parent_call_ordinal
-            != self._protocol.child_parent_event.session_call_ordinal
-            or provenance.parent_turn != self._protocol.child_parent_event.turn
+            provenance.parent_lineage != self._protocol.child_parent_event.lineage
+            or parent is None
+            or provenance.parent_turn != parent.turn
             or provenance.parent_tool_call_slot != self._protocol.parent_tool_call_slot
             or provenance.spawn_ordinal not in {0, 1, 2, 3}
-            or self._protocol.child_parent_event.session_call_ordinal not in self._root_turns
+            or provenance.session_call_ordinal
+            >= self._protocol.maximum_captured_session_call_count
         ):
-            raise ValueError("prepared call is outside the frozen two-child scaffold")
+            raise ValueError("prepared child call is outside the deployed session bounds")
+        expected_ordinal = self._child_turns.get(provenance.lineage, 0)
+        signature = _child_spawn_signature(provenance)
+        if (
+            provenance.session_call_ordinal != expected_ordinal
+            or (
+                expected_ordinal > 0
+                and self._child_spawn_signatures.get(provenance.lineage) != signature
+            )
+        ):
+            raise ValueError("prepared child call is not a contiguous stable session")
         assert provenance.spawn_ordinal is not None
+        assert parent is not None
         return (
             "child",
             structural_child_target_id(
-                self._protocol.child_parent_event,
+                parent,
                 rollout_id=self._trace_id,
-                parent_tool_call_slot=self._protocol.parent_tool_call_slot,
+                parent_tool_call_slot=provenance.parent_tool_call_slot,
                 spawn_ordinal=provenance.spawn_ordinal,
             ),
         )
@@ -355,6 +391,26 @@ class StageDPreparedCallObserver:
         if finish_reason != "stop" or action_token_ids[-1] != self._identity.eos_token_id:
             raise ValueError("prepared response has an unsupported termination")
         return "eos", self._identity.eos_token_id
+
+
+def _child_spawn_signature(
+    provenance: RecordedRLMProvenanceV2,
+) -> tuple[object, ...]:
+    """Fields that must remain fixed throughout one deployed child session."""
+    return (
+        provenance.depth,
+        provenance.session_id,
+        provenance.parent_session_id,
+        provenance.parent_turn,
+        provenance.parent_tool_call_id,
+        provenance.invocation_id,
+        provenance.parent_lineage,
+        provenance.parent_call_ordinal,
+        provenance.parent_tool_call_slot,
+        provenance.spawn_ordinal,
+        provenance.episode_spawn_ordinal,
+        provenance.completed_predecessor_spawn_ordinals,
+    )
 
 
 class StageDForwardDirectiveObserver:

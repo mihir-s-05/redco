@@ -217,6 +217,7 @@ class StageDSourceEnvConfig(vf.SingleAgentEnvConfig):
     frozen_workspace_manifest_sha256: str | None = None
     root_policy_turn_count: int = 2
     maximum_observed_root_policy_turn_count: int = 4
+    maximum_captured_session_call_count: int = 16
     child_parent_lineage: str = "root"
     child_parent_session_call_ordinal: int = 0
     child_parent_turn: int = 0
@@ -235,6 +236,10 @@ class StageDSourceEnvConfig(vf.SingleAgentEnvConfig):
             raise ValueError("Stage-D source collection requires max_concurrent=1")
         if self.maximum_observed_root_policy_turn_count < self.root_policy_turn_count:
             raise ValueError("Stage-D observed root-call ceiling is below the target topology")
+        if self.agent.max_turns < self.maximum_observed_root_policy_turn_count:
+            raise ValueError("Stage-D agent turn limit is below the root eligibility ceiling")
+        if self.maximum_captured_session_call_count < self.agent.max_turns:
+            raise ValueError("Stage-D capture ceiling is below the deployed policy-turn limit")
         if self.retries.max_retries != 0 or self.agent.retries.max_retries != 0:
             raise ValueError("Stage-D source collection forbids episode and agent retries")
         if self.agent.sampling is not None:
@@ -547,6 +552,12 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
             child_parent_event=parent,
             child_parent_tool_call_slot=self.config.parent_tool_call_slot,
             root_policy_turn_count=self.config.root_policy_turn_count,
+            maximum_eligible_root_policy_turn_count=(
+                self.config.maximum_observed_root_policy_turn_count
+            ),
+            maximum_captured_session_call_count=(
+                self.config.maximum_captured_session_call_count
+            ),
             base_model_manifest_sha256=self.config.base_model_manifest_sha256,
         )
         self._producers[trace.id] = producer
@@ -562,6 +573,9 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
                     root_policy_turn_count=self.config.root_policy_turn_count,
                     maximum_observed_root_policy_turn_count=(
                         self.config.maximum_observed_root_policy_turn_count
+                    ),
+                    maximum_captured_session_call_count=(
+                        self.config.maximum_captured_session_call_count
                     ),
                     child_parent_event=parent,
                     parent_tool_call_slot=self.config.parent_tool_call_slot,

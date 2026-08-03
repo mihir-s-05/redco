@@ -152,6 +152,8 @@ class StageDSourceRolloutProducer:
         root_policy_turn_count: int | None = None,
         child_target_roster: Sequence[str] | None = None,
         allow_test_fixture_roster: bool = False,
+        maximum_eligible_root_policy_turn_count: int = 4,
+        maximum_captured_session_call_count: int = 8,
         base_model_manifest_sha256: str,
     ) -> None:
         if not group_id or not rollout_id:
@@ -178,6 +180,17 @@ class StageDSourceRolloutProducer:
                 for ordinal in (0, 1)
             )
             strict_two_slot = True
+        if (
+            type(maximum_eligible_root_policy_turn_count) is not int
+            or maximum_eligible_root_policy_turn_count < 2
+        ):
+            raise ValueError("source producer root eligibility ceiling is invalid")
+        if (
+            type(maximum_captured_session_call_count) is not int
+            or maximum_captured_session_call_count
+            < maximum_eligible_root_policy_turn_count
+        ):
+            raise ValueError("source producer capture ceiling is invalid")
         if not roster or len(set(roster)) != len(roster) or any(not item for item in roster):
             raise ValueError("source producer child roster must be nonempty and unique")
         if len(base_model_manifest_sha256) != 64:
@@ -186,10 +199,19 @@ class StageDSourceRolloutProducer:
         self._group_id = group_id
         self._rollout_id = rollout_id
         self._child_target_roster = roster
+        self._child_target_ordinals = {
+            target_id: ordinal for ordinal, target_id in enumerate(roster)
+        }
         self._child_parent_event = child_parent_event
         self._child_parent_tool_call_slot = child_parent_tool_call_slot
         self._strict_two_slot = strict_two_slot
         self._root_policy_turn_count = root_policy_turn_count
+        self._maximum_eligible_root_policy_turn_count = (
+            maximum_eligible_root_policy_turn_count
+        )
+        self._maximum_captured_session_call_count = (
+            maximum_captured_session_call_count
+        )
         self._base_model_manifest_sha256 = base_model_manifest_sha256
         self._pending: dict[str, PendingSourcePolicyCall] = {}
         self._observed_responses: set[str] = set()
@@ -276,7 +298,9 @@ class StageDSourceRolloutProducer:
             target_ordinal = None
             outer_weight = Fraction(1)
         elif node_kind == "child":
-            if not self._strict_two_slot and target_id in self._child_target_roster:
+            if target_id is None:
+                raise ValueError("child source decision lacks a structural target")
+            if target_id in self._child_target_roster:
                 target_ordinal = self._child_target_roster.index(target_id)
             else:
                 target_ordinal = self._observed_child_ordinal(target_id)
@@ -289,18 +313,29 @@ class StageDSourceRolloutProducer:
             raise ValueError("source policy node kind must be root or child")
         return target_ordinal, outer_weight
 
-    def _observed_child_ordinal(self, target_id: str | None) -> int:
-        if target_id is None or self._child_parent_event is None:
-            raise ValueError("child source decision lacks a structural target")
-        for ordinal in range(4):
-            expected = structural_child_target_id(
-                self._child_parent_event,
-                rollout_id=self._rollout_id,
-                parent_tool_call_slot=self._child_parent_tool_call_slot,
-                spawn_ordinal=ordinal,
+    def _observed_child_ordinal(self, target_id: str) -> int:
+        if self._child_parent_event is None:
+            raise ValueError("child source decision lacks a structural parent")
+        for parent_ordinal in range(self._maximum_captured_session_call_count):
+            parent = PolicyEventAddress(
+                0,
+                self._child_parent_event.lineage,
+                parent_ordinal,
+                parent_ordinal,
+                "policy",
             )
-            if target_id == expected:
-                return ordinal
+            for spawn_ordinal in range(4):
+                expected = structural_child_target_id(
+                    parent,
+                    rollout_id=self._rollout_id,
+                    parent_tool_call_slot=self._child_parent_tool_call_slot,
+                    spawn_ordinal=spawn_ordinal,
+                )
+                if target_id == expected:
+                    return self._child_target_ordinals.setdefault(
+                        target_id,
+                        len(self._child_target_ordinals),
+                    )
         raise ValueError("child source decision is outside the bounded observed roster")
 
     def reserve_selected_child_policy_call(
@@ -549,6 +584,9 @@ class StageDSourceRolloutProducer:
             child_parent_event=self._child_parent_event,
             child_parent_tool_call_slot=self._child_parent_tool_call_slot,
             root_policy_turn_count=self._root_policy_turn_count,
+            maximum_eligible_root_policy_turn_count=(
+                self._maximum_eligible_root_policy_turn_count
+            ),
         )
         if derived.trace_id != self._rollout_id:
             raise ValueError("captured source rollout ID differs from the Verifiers trace")
@@ -563,13 +601,22 @@ class StageDSourceRolloutProducer:
                     child_parent_event=self._child_parent_event,
                     child_parent_tool_call_slot=self._child_parent_tool_call_slot,
                     root_policy_turn_count=self._root_policy_turn_count,
+                    maximum_eligible_root_policy_turn_count=(
+                        self._maximum_eligible_root_policy_turn_count
+                    ),
                 )
             except SourceTopologyIneligible as error:
                 branch_eligible = False
                 ineligibility_reason = str(error)
         decisions = _normalize_child_weights(
             captured_decisions,
-            len(derived.child_target_roster),
+            len(
+                {
+                    decision.target_id
+                    for decision in captured_decisions
+                    if decision.node_kind == "child"
+                }
+            ),
         )
         reward_evidence = canonical_json(
             {
@@ -652,6 +699,9 @@ class StageDSourceRolloutProducer:
             child_parent_event=self._child_parent_event,
             child_parent_tool_call_slot=self._child_parent_tool_call_slot,
             root_policy_turn_count=self._root_policy_turn_count,
+            maximum_eligible_root_policy_turn_count=(
+                self._maximum_eligible_root_policy_turn_count
+            ),
         )
         return source
 
@@ -684,6 +734,7 @@ def derive_source_trace(
     child_parent_event: PolicyEventAddress | None = None,
     child_parent_tool_call_slot: int = 0,
     root_policy_turn_count: int | None = None,
+    maximum_eligible_root_policy_turn_count: int = 4,
 ) -> DerivedTraceSource:
     """Independently reconstruct Prime's text-only trace-to-samples contract."""
     episode, trace = _parse_episode(raw_episode)
@@ -698,6 +749,13 @@ def derive_source_trace(
     provenance = extract_v2_rlm_provenance(trace)
     if len(provenance) != len(calls):
         raise ValueError("RLM provenance does not biject source calls")
+    if child_parent_event is not None:
+        _verify_deployed_parent_links(
+            provenance,
+            nodes,
+            root_lineage=child_parent_event.lineage,
+            parent_tool_call_slot=child_parent_tool_call_slot,
+        )
     addresses = tuple(record.scientific_address for record in provenance)
     if strict_two_slot:
         _verify_two_slot_scaffold(
@@ -706,6 +764,9 @@ def derive_source_trace(
             child_parent_event=child_parent_event,
             child_parent_tool_call_slot=child_parent_tool_call_slot,
             root_policy_turn_count=root_policy_turn_count,
+            maximum_eligible_root_policy_turn_count=(
+                maximum_eligible_root_policy_turn_count
+            ),
         )
     decision_by_node: dict[int, RolloutDecision] = {}
     decisions_by_address = {
@@ -796,16 +857,27 @@ def derive_source_trace(
         raise ValueError("successful source trace requires explicit reward components")
     values = tuple(_finite_float(value, f"reward {name}") for name, value in rewards.items())
     reward = float(sum(values))
+    child_target_by_ordinal: dict[int, str] = {}
+    if child_parent_event is not None:
+        for ordinal in (0, 1):
+            child_target_by_ordinal[ordinal] = structural_child_target_id(
+                child_parent_event,
+                rollout_id=str(trace["id"]),
+                parent_tool_call_slot=child_parent_tool_call_slot,
+                spawn_ordinal=ordinal,
+            )
+    for decision in ordered_decisions:
+        if decision.node_kind != "child":
+            continue
+        ordinal = _exact_int(decision.target_ordinal, "child target ordinal")
+        if decision.target_id is None:
+            raise ValueError("captured child decision lacks its structural target")
+        prior = child_target_by_ordinal.setdefault(ordinal, decision.target_id)
+        if prior != decision.target_id:
+            raise ValueError("captured child ordinal changes its structural target")
     child_targets = tuple(
-        str(decision.target_id)
-        for decision in sorted(
-            (
-                item
-                for item in ordered_decisions
-                if item.node_kind == "child" and item.target_ordinal is not None
-            ),
-            key=lambda item: _exact_int(item.target_ordinal, "child target ordinal"),
-        )
+        child_target_by_ordinal[ordinal]
+        for ordinal in sorted(child_target_by_ordinal)
     )
     return DerivedTraceSource(
         str(trace["id"]),
@@ -824,6 +896,7 @@ def verify_source_trace_semantics(
     child_parent_event: PolicyEventAddress | None = None,
     child_parent_tool_call_slot: int = 0,
     root_policy_turn_count: int | None = None,
+    maximum_eligible_root_policy_turn_count: int = 4,
 ) -> None:
     """Reject a source whose serialized fields were not derived from its raw trace."""
     derived = derive_source_trace(
@@ -833,6 +906,9 @@ def verify_source_trace_semantics(
         child_parent_event=child_parent_event,
         child_parent_tool_call_slot=child_parent_tool_call_slot,
         root_policy_turn_count=root_policy_turn_count,
+        maximum_eligible_root_policy_turn_count=(
+            maximum_eligible_root_policy_turn_count
+        ),
     )
     if (
         derived.trace_id != source.rollout_id
@@ -992,17 +1068,27 @@ def _verify_two_slot_scaffold(
     child_parent_event: PolicyEventAddress | None,
     child_parent_tool_call_slot: int,
     root_policy_turn_count: int | None,
+    maximum_eligible_root_policy_turn_count: int = 4,
 ) -> None:
     if child_parent_event is None:
         raise SourceTopologyIneligible(
             "strict source verification lacks its structural parent"
         )
-    if type(root_policy_turn_count) is not int or root_policy_turn_count < 2:
+    if (
+        type(root_policy_turn_count) is not int
+        or root_policy_turn_count < 2
+        or type(maximum_eligible_root_policy_turn_count) is not int
+        or maximum_eligible_root_policy_turn_count < root_policy_turn_count
+    ):
         raise SourceTopologyIneligible(
-            "strict source verification lacks its root-turn count"
+            "strict source verification lacks its root-turn bounds"
         )
     roots = tuple(record for record in records if record.depth == 0)
-    if len(roots) < root_policy_turn_count or len(records) != len(roots) + 2:
+    if (
+        len(roots) < root_policy_turn_count
+        or len(roots) > maximum_eligible_root_policy_turn_count
+        or len(records) != len(roots) + 2
+    ):
         raise SourceTopologyIneligible(
             "scientific scaffold has an unexpected policy-call count"
         )
@@ -1059,6 +1145,50 @@ def _verify_two_slot_scaffold(
         raise SourceTopologyIneligible(
             "child provenance does not link to the committed parent tool call"
         )
+
+
+def _verify_deployed_parent_links(
+    records: Sequence[RecordedRLMProvenanceV2],
+    nodes: Sequence[Mapping[str, Any]],
+    *,
+    root_lineage: str,
+    parent_tool_call_slot: int,
+) -> None:
+    """Validate causal child links before scientific eligibility is considered."""
+    roots = {
+        (record.lineage, record.session_call_ordinal): record
+        for record in records
+        if record.depth == 0
+    }
+    for child in (record for record in records if record.depth > 0):
+        if (
+            child.depth != 1
+            or child.parent_lineage != root_lineage
+            or child.parent_call_ordinal is None
+            or child.parent_turn is None
+            or child.parent_session_id is None
+            or child.parent_tool_call_slot != parent_tool_call_slot
+            or child.parent_tool_call_id is None
+        ):
+            raise ValueError("child provenance is outside the deployed parent contract")
+        parent = roots.get((child.parent_lineage, child.parent_call_ordinal))
+        if (
+            parent is None
+            or parent.call_kind != "policy"
+            or parent.turn != child.parent_turn
+            or parent.session_id != child.parent_session_id
+        ):
+            raise ValueError("child provenance does not bind its causal parent event")
+        parent_node = _normalize_openai_message(nodes[parent.node_index].get("message"))
+        tool_calls = parent_node.get("tool_calls")
+        if not isinstance(tool_calls, list) or parent_tool_call_slot >= len(tool_calls):
+            raise ValueError("child provenance parent lacks its deployed tool-call slot")
+        tool_call = tool_calls[parent_tool_call_slot]
+        if (
+            not isinstance(tool_call, dict)
+            or tool_call.get("id") != child.parent_tool_call_id
+        ):
+            raise ValueError("child provenance does not bind its parent tool-call ID")
 
 
 def _normalize_child_weights(

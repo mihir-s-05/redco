@@ -92,6 +92,7 @@ from redco.analysis.stage_d_source_artifacts import (
 from redco.analysis.stage_d_source_producer import (
     StageDSourceRolloutProducer,
     _verify_two_slot_scaffold,
+    derive_source_trace,
     structural_child_target_id,
     verify_source_trace_semantics,
 )
@@ -145,7 +146,7 @@ SUPPORT_RULES_BYTES = canonical_json(
 
 
 def test_two_slot_scaffold_allows_extra_contiguous_returning_root_turns() -> None:
-    root_addresses = tuple(PolicyEventAddress(0, "root", turn, turn) for turn in range(3))
+    root_addresses = tuple(PolicyEventAddress(0, "root", turn, turn) for turn in range(5))
     roots = tuple(
         SimpleNamespace(
             depth=0,
@@ -193,12 +194,21 @@ def test_two_slot_scaffold_allows_extra_contiguous_returning_root_turns() -> Non
         {"message": {}},
     )
     _verify_two_slot_scaffold(
-        (*roots, *children),
+        (*roots[:3], *children),
         nodes,
         child_parent_event=root_addresses[0],
         child_parent_tool_call_slot=0,
         root_policy_turn_count=2,
     )
+    with pytest.raises(ValueError, match="unexpected policy-call count"):
+        _verify_two_slot_scaffold(
+            (*roots, *children),
+            nodes,
+            child_parent_event=root_addresses[0],
+            child_parent_tool_call_slot=0,
+            root_policy_turn_count=2,
+            maximum_eligible_root_policy_turn_count=4,
+        )
 SOURCE_BYTES = b"source manifest"
 RUNTIME_BYTES = b"runtime manifest"
 SOURCE_EVAL_BYTES = b"source eval"
@@ -407,6 +417,7 @@ def _call(
     seed: int,
     rlm: dict[str, object],
     finish_reason: str = "stop",
+    prompt_tokens: int = 2,
 ) -> dict[str, object]:
     return {
         "endpoint": "/chat/completions",
@@ -425,7 +436,7 @@ def _call(
         },
         "time": {"start": 1.0, "end": 2.0},
         "usage": {
-            "prompt_tokens": 2,
+            "prompt_tokens": prompt_tokens,
             "completion_tokens": 2,
             "cached_input_tokens": None,
             "reasoning_tokens": None,
@@ -598,9 +609,26 @@ def _prepared_action(
     *,
     message: dict[str, object] | None = None,
     tool_call: bool = False,
+    messages: list[dict[str, object]] | None = None,
+    prompt_token_ids: tuple[int, ...] = (10, 11),
+    routed_experts_prompt_start: int | None = None,
 ) -> BehaviorAction:
     legacy = _key(seed)
     request = json.loads(legacy.request)
+    if messages is not None:
+        request["messages"] = messages
+    sampling_params = {
+        "temperature": request["temperature"],
+        "top_p": request["top_p"],
+        "seed": seed,
+        "max_tokens": 2,
+        "logprobs": 1,
+        "skip_special_tokens": False,
+        "stop_token_ids": [2],
+        "cache_salt": request["extra_body"]["cache_salt"],
+    }
+    if routed_experts_prompt_start is not None:
+        sampling_params["routed_experts_prompt_start"] = routed_experts_prompt_start
     key = ExactActionKey.build_prepared(
         checkpoint_id="model@commit",
         base_model_manifest=b"base",
@@ -611,20 +639,11 @@ def _prepared_action(
         action_selection_policy="direct_single_sample",
         transport_retry_policy="fail_before_action_no_resample",
         request=request,
-        prompt_token_ids=(10, 11),
+        prompt_token_ids=prompt_token_ids,
         prepared_engine_request={
             "model": "model@commit",
-            "token_ids": [10, 11],
-            "sampling_params": {
-                "temperature": request["temperature"],
-                "top_p": request["top_p"],
-                "seed": seed,
-                "max_tokens": 2,
-                "logprobs": 1,
-                "skip_special_tokens": False,
-                "stop_token_ids": [2],
-                "cache_salt": request["extra_body"]["cache_salt"],
-            },
+            "token_ids": list(prompt_token_ids),
+            "sampling_params": sampling_params,
         },
     )
     raw_message = message or {"role": "assistant", "content": "duplicate"}
@@ -634,7 +653,7 @@ def _prepared_action(
         behavior_logprobs=(-0.2, -0.1),
         raw_transport_message=raw_message,
         finish_reason="tool_calls" if tool_call else "stop",
-        prompt_tokens=2,
+        prompt_tokens=len(prompt_token_ids),
         completion_tokens=2,
         termination_kind="tool_calls" if tool_call else "eos",
         eos_token_id=None if tool_call else 2,
@@ -645,7 +664,12 @@ def _prepared_action(
 def _strict_episode() -> bytes:
     parent = PolicyEventAddress(0, "root", 0, 0)
 
-    def child_rlm(spawn_ordinal: int, episode_ordinal: int) -> dict[str, object]:
+    def child_rlm(
+        spawn_ordinal: int,
+        episode_ordinal: int,
+        *,
+        turn: int = 0,
+    ) -> dict[str, object]:
         lineage = derive_child_lineage(
             SpawnScope(1, "root", 0, 0, 0),
             spawn_ordinal=spawn_ordinal,
@@ -654,10 +678,10 @@ def _strict_episode() -> bytes:
             "provenance_version": 2,
             "depth": 1,
             "session_id": f"child-{spawn_ordinal}",
-            "turn": 0,
+            "turn": turn,
             "call_kind": "policy",
             "lineage": lineage,
-            "session_call_ordinal": 0,
+            "session_call_ordinal": turn,
             "parent_session_id": "root-session",
             "parent_turn": 0,
             "parent_tool_call_id": "call_0",
@@ -773,6 +797,123 @@ def _one_child_episode() -> bytes:
     for call, node_index in zip(kept_calls, (1, 3, 5), strict=True):
         call["node"] = node_index
     kept_calls[-1]["rlm"]["completed_episode_spawn_ordinals"] = [0]
+    trace["nodes"] = kept_nodes
+    trace["calls"] = kept_calls
+    return canonical_json(episode)
+
+
+def _two_turn_child_episode() -> bytes:
+    episode = json.loads(_strict_episode())
+    trace = episode["traces"][0]
+    child_call = trace["calls"][2]
+    child_node = trace["nodes"][child_call["node"]]
+    child_message = _tool_action(82).message
+    child_node["message"] = child_message
+    child_call["finish_reason"] = "tool_calls"
+    tool_node_index = len(trace["nodes"])
+    trace["nodes"].append(
+        _node(
+            {
+                "role": "tool",
+                "tool_call_id": "call_0",
+                "content": "computed",
+            },
+            [30],
+            [False],
+            [],
+            parent=child_call["node"],
+        )
+    )
+    continuation_node_index = len(trace["nodes"])
+    trace["nodes"].append(
+        _node(
+            {"role": "assistant", "content": "duplicate"},
+            [20, 2],
+            [True, True],
+            [-0.2, -0.1],
+            parent=tool_node_index,
+            sampled=True,
+        )
+    )
+    continuation_rlm = dict(child_call["rlm"])
+    continuation_rlm["turn"] = 1
+    continuation_rlm["session_call_ordinal"] = 1
+    trace["calls"].insert(
+        3,
+        _call(
+            continuation_node_index,
+            seed=85,
+            rlm=continuation_rlm,
+            prompt_tokens=5,
+        ),
+    )
+    returning_root_call = trace["calls"][-1]
+    returning_root_node = trace["nodes"][returning_root_call["node"]]
+    returning_root_node["message"] = _tool_action(84).message
+    returning_root_call["finish_reason"] = "tool_calls"
+    later_prompt_index = len(trace["nodes"])
+    trace["nodes"].append(
+        _node({"role": "user", "content": "q"}, [10, 11], [False, False], [])
+    )
+    later_node_index = len(trace["nodes"])
+    trace["nodes"].append(
+        _node(
+            {"role": "assistant", "content": "duplicate"},
+            [20, 2],
+            [True, True],
+            [-0.2, -0.1],
+            parent=later_prompt_index,
+            sampled=True,
+        )
+    )
+    later_lineage = derive_child_lineage(
+        SpawnScope(1, "root", 1, 0, 1),
+        spawn_ordinal=0,
+    )
+    trace["calls"].append(
+        _call(
+            later_node_index,
+            seed=86,
+            rlm={
+                "provenance_version": 2,
+                "depth": 1,
+                "session_id": "later-child-0",
+                "turn": 0,
+                "call_kind": "policy",
+                "lineage": later_lineage,
+                "session_call_ordinal": 0,
+                "parent_session_id": "root-session",
+                "parent_turn": 1,
+                "parent_tool_call_id": "call_0",
+                "invocation_id": "later-shard",
+                "parent_lineage": "root",
+                "parent_call_ordinal": 1,
+                "parent_tool_call_slot": 0,
+                "spawn_ordinal": 0,
+                "episode_spawn_ordinal": 2,
+                "completed_predecessor_spawn_ordinals": [],
+                "completed_episode_spawn_ordinals": [0, 1],
+            },
+        )
+    )
+    return canonical_json(episode)
+
+
+def _later_child_only_episode() -> bytes:
+    episode = json.loads(_two_turn_child_episode())
+    trace = episode["traces"][0]
+    nodes = trace["nodes"]
+    calls = trace["calls"]
+    kept_nodes = [nodes[index] for index in (0, 1, 6, 7, 10, 11)]
+    kept_nodes[3]["parent"] = 2
+    kept_nodes[5]["parent"] = 4
+    kept_calls = [calls[index] for index in (0, 4, 5)]
+    for call, node_index in zip(kept_calls, (1, 3, 5), strict=True):
+        call["node"] = node_index
+    kept_calls[1]["rlm"]["completed_episode_spawn_ordinals"] = []
+    later_rlm = kept_calls[2]["rlm"]
+    later_rlm["episode_spawn_ordinal"] = 0
+    later_rlm["completed_episode_spawn_ordinals"] = []
     trace["nodes"] = kept_nodes
     trace["calls"] = kept_calls
     return canonical_json(episode)
@@ -1305,7 +1446,6 @@ def test_strict_source_uses_two_structural_slots_despite_reverse_completion(
         branch_selected=False,
         forward_once=lambda _key: returning_root,
     )
-
     prepared_sources: list[bytes] = []
     store = StageDSourceArtifactStore(tmp_path / "source-artifacts")
 
@@ -1432,11 +1572,292 @@ def test_completed_one_child_topology_is_durable_ineligible_evidence(
     assert source.ineligibility_reason == (
         "scientific scaffold has an unexpected policy-call count"
     )
-    assert source.child_target_roster == (child_target,)
+    assert source.child_target_roster == tuple(
+        structural_child_target_id(
+            parent,
+            rollout_id="rollout-strict",
+            parent_tool_call_slot=0,
+            spawn_ordinal=ordinal,
+        )
+        for ordinal in (0, 1)
+    )
     child_decision = next(
         decision for decision in source.decisions if decision.node_kind == "child"
     )
     assert child_decision.outer_weight == 1
+    roster = StageDBranchTargetRoster.from_sources(
+        (source,),
+        planned_source_count=1,
+        minimum_eligible_sources=1,
+    )
+    assert roster.targets == ()
+    assert len(roster.excluded_targets) == 1
+    assert roster.excluded_targets[0].target.target_id == child_target
+    assert roster.excluded_targets[0].reason == source.ineligibility_reason
+    writer.record_branch_target_roster(roster.to_bytes())
+    with pytest.raises(LedgerError, match="absent from the frozen branch target roster"):
+        writer.begin_candidate_attempt(
+            group_id="group-1",
+            target_id=child_target,
+            action_slot=1,
+        )
+    assert inspect_ledger(tmp_path / "ledger").status == "active-clean"
+    writer.close()
+
+
+def test_two_turn_child_finalizes_and_freezes_excluded_commitments(
+    tmp_path: Path,
+) -> None:
+    writer = StageDReceiptLedger.create(
+        tmp_path / "ledger",
+        binding=_binding(),
+        master_seed=MASTER_SEED,
+    )
+    parent = PolicyEventAddress(0, "root", 0, 0)
+    producer = StageDSourceRolloutProducer(
+        ledger=writer,
+        group_id="group-1",
+        rollout_id="rollout-strict",
+        child_parent_event=parent,
+        child_parent_tool_call_slot=0,
+        root_policy_turn_count=2,
+        maximum_eligible_root_policy_turn_count=4,
+        base_model_manifest_sha256=_sha256(b"base"),
+    )
+    root = _tool_action(81)
+    producer.intercept_policy_call(
+        event_address=parent,
+        action_key=root.key,
+        node_kind="root",
+        target_id=None,
+        branch_selected=False,
+        forward_once=lambda _key: root,
+    )
+    child_targets: dict[int, str] = {}
+    child_addresses: dict[int, PolicyEventAddress] = {}
+    for spawn, seed in ((1, 83), (0, 82)):
+        address = PolicyEventAddress(
+            1,
+            derive_child_lineage(
+                SpawnScope(1, "root", 0, 0, 0),
+                spawn_ordinal=spawn,
+            ),
+            0,
+            0,
+        )
+        target = structural_child_target_id(
+            parent,
+            rollout_id="rollout-strict",
+            parent_tool_call_slot=0,
+            spawn_ordinal=spawn,
+        )
+        child_targets[spawn] = target
+        child_addresses[spawn] = address
+        action = _tool_action(seed) if spawn == 0 else _prepared_action(seed)
+        pending = producer.reserve_selected_child_policy_call(
+            event_address=address,
+            target_id=target,
+            action_key=action.key,
+            pre_action_snapshot=f"child-{spawn}-snapshot".encode(),
+            branch_count=4,
+            continuation_replicates=1,
+            failure_reward=-1.0,
+        )
+        producer.complete_policy_call(pending, action=action)
+    continuation_tool_message = dict(_tool_action(82).message)
+    continuation_tool_message["content"] = ""
+    continuation_messages = [
+        {"role": "user", "content": "q"},
+        continuation_tool_message,
+        {"role": "tool", "tool_call_id": "call_0", "content": "computed"},
+    ]
+    continuation = _prepared_action(
+        85,
+        messages=continuation_messages,
+        prompt_token_ids=(10, 11, 20, 2, 30),
+        routed_experts_prompt_start=3,
+    )
+    continuation_address = PolicyEventAddress(
+        1,
+        child_addresses[0].lineage,
+        1,
+        1,
+    )
+    producer.intercept_policy_call(
+        event_address=continuation_address,
+        action_key=continuation.key,
+        node_kind="child",
+        target_id=child_targets[0],
+        branch_selected=False,
+        forward_once=lambda _key: continuation,
+    )
+    returning_root = _tool_action(84)
+    producer.intercept_policy_call(
+        event_address=PolicyEventAddress(0, "root", 1, 1),
+        action_key=returning_root.key,
+        node_kind="root",
+        target_id=None,
+        branch_selected=False,
+        forward_once=lambda _key: returning_root,
+    )
+    later_parent = PolicyEventAddress(0, "root", 1, 1)
+    later_target = structural_child_target_id(
+        later_parent,
+        rollout_id="rollout-strict",
+        parent_tool_call_slot=0,
+        spawn_ordinal=0,
+    )
+    later_address = PolicyEventAddress(
+        1,
+        derive_child_lineage(
+            SpawnScope(1, "root", 1, 0, 1),
+            spawn_ordinal=0,
+        ),
+        0,
+        0,
+    )
+    later_action = _prepared_action(86)
+    producer.intercept_policy_call(
+        event_address=later_address,
+        action_key=later_action.key,
+        node_kind="child",
+        target_id=later_target,
+        branch_selected=False,
+        forward_once=lambda _key: later_action,
+    )
+
+    source = producer.finalize_episode(_two_turn_child_episode())
+
+    assert source.branch_eligible is False
+    assert source.ineligibility_reason == (
+        "scientific scaffold has an unexpected policy-call count"
+    )
+    assert len(source.child_target_roster) == 3
+    assert len(set(source.child_target_roster)) == 3
+    continuation_decision = next(
+        decision
+        for decision in source.decisions
+        if decision.event_address == continuation_address
+    )
+    assert continuation_decision.target_id == child_targets[0]
+    assert continuation_decision.target_ordinal == 0
+    assert continuation_decision.provenance.branch_selected is False
+    later_decision = next(
+        decision for decision in source.decisions if decision.event_address == later_address
+    )
+    assert later_decision.target_id == later_target
+    assert later_decision.target_ordinal == 2
+    assert later_decision.provenance.branch_selected is False
+    malformed = json.loads(_two_turn_child_episode())
+    for call_index in (2, 3):
+        malformed["traces"][0]["calls"][call_index]["rlm"][
+            "parent_session_id"
+        ] = "bogus-session"
+    with pytest.raises(ValueError, match="bind its causal parent event"):
+        derive_source_trace(
+            canonical_json(malformed),
+            decisions=source.decisions,
+            child_parent_event=parent,
+            child_parent_tool_call_slot=0,
+            root_policy_turn_count=2,
+            maximum_eligible_root_policy_turn_count=4,
+        )
+    roster = StageDBranchTargetRoster.from_sources(
+        (source,),
+        planned_source_count=1,
+        minimum_eligible_sources=1,
+    )
+    assert roster.targets == ()
+    assert {item.target.target_id for item in roster.excluded_targets} == set(
+        child_targets.values()
+    )
+    writer.record_branch_target_roster(roster.to_bytes())
+    assert inspect_ledger(tmp_path / "ledger").status == "active-clean"
+    for target_id in child_targets.values():
+        with pytest.raises(LedgerError, match="absent from the frozen branch target roster"):
+            writer.begin_candidate_attempt(
+                group_id="group-1",
+                target_id=target_id,
+                action_slot=1,
+            )
+    writer.close()
+
+
+def test_later_parent_child_without_frozen_children_finalizes_ineligible(
+    tmp_path: Path,
+) -> None:
+    writer = StageDReceiptLedger.create(
+        tmp_path / "ledger",
+        binding=_binding(),
+        master_seed=MASTER_SEED,
+    )
+    parent = PolicyEventAddress(0, "root", 0, 0)
+    producer = StageDSourceRolloutProducer(
+        ledger=writer,
+        group_id="group-1",
+        rollout_id="rollout-strict",
+        child_parent_event=parent,
+        child_parent_tool_call_slot=0,
+        root_policy_turn_count=2,
+        maximum_eligible_root_policy_turn_count=4,
+        base_model_manifest_sha256=_sha256(b"base"),
+    )
+    for turn, action in ((0, _tool_action(81)), (1, _tool_action(84))):
+        producer.intercept_policy_call(
+            event_address=PolicyEventAddress(0, "root", turn, turn),
+            action_key=action.key,
+            node_kind="root",
+            target_id=None,
+            branch_selected=False,
+            forward_once=lambda _key, value=action: value,
+        )
+    later_parent = PolicyEventAddress(0, "root", 1, 1)
+    later_target = structural_child_target_id(
+        later_parent,
+        rollout_id="rollout-strict",
+        parent_tool_call_slot=0,
+        spawn_ordinal=0,
+    )
+    later_address = PolicyEventAddress(
+        1,
+        derive_child_lineage(
+            SpawnScope(1, "root", 1, 0, 1),
+            spawn_ordinal=0,
+        ),
+        0,
+        0,
+    )
+    later_action = _prepared_action(86)
+    producer.intercept_policy_call(
+        event_address=later_address,
+        action_key=later_action.key,
+        node_kind="child",
+        target_id=later_target,
+        branch_selected=False,
+        forward_once=lambda _key: later_action,
+    )
+
+    source = producer.finalize_episode(_later_child_only_episode())
+
+    assert source.branch_eligible is False
+    assert source.ineligibility_reason == (
+        "scientific scaffold has an unexpected policy-call count"
+    )
+    assert len(source.child_target_roster) == 3
+    later_decision = next(
+        decision for decision in source.decisions if decision.node_kind == "child"
+    )
+    assert later_decision.target_id == later_target
+    assert later_decision.target_ordinal == 2
+    assert later_decision.outer_weight == 1
+    roster = StageDBranchTargetRoster.from_sources(
+        (source,),
+        planned_source_count=1,
+        minimum_eligible_sources=1,
+    )
+    assert roster.targets == ()
+    assert roster.excluded_targets == ()
+    writer.record_branch_target_roster(roster.to_bytes())
     assert inspect_ledger(tmp_path / "ledger").status == "active-clean"
     writer.close()
 

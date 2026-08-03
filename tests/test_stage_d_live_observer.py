@@ -147,41 +147,59 @@ def _request(seed: int, label: str) -> dict[str, object]:
     }
 
 
-def _root_rlm(turn: int = 0) -> dict[str, object]:
+def _root_rlm(
+    turn: int = 0,
+    *,
+    call_ordinal: int | None = None,
+    call_kind: str = "policy",
+) -> dict[str, object]:
+    call_ordinal = turn if call_ordinal is None else call_ordinal
     return {
         "provenance_version": 2,
         "depth": 0,
         "session_id": "root-session",
         "turn": turn,
-        "call_kind": "policy",
+        "call_kind": call_kind,
         "lineage": "root",
-        "session_call_ordinal": turn,
+        "session_call_ordinal": call_ordinal,
         "completed_episode_spawn_ordinals": [] if turn == 0 else [0, 1],
     }
 
 
-def _child_rlm(spawn: int, invocation: str) -> dict[str, object]:
+def _child_rlm(
+    spawn: int,
+    invocation: str,
+    *,
+    turn: int = 0,
+    parent_turn: int = 0,
+    parent_call_ordinal: int | None = None,
+    episode_spawn: int | None = None,
+) -> dict[str, object]:
+    parent_call_ordinal = (
+        parent_turn if parent_call_ordinal is None else parent_call_ordinal
+    )
     lineage = derive_child_lineage(
-        SpawnScope(1, "root", 0, 0, 0),
+        SpawnScope(1, "root", parent_call_ordinal, 0, parent_turn),
         spawn_ordinal=spawn,
     )
+    episode_spawn = spawn if episode_spawn is None else episode_spawn
     return {
         "provenance_version": 2,
         "depth": 1,
-        "session_id": f"child-session-{spawn}",
-        "turn": 0,
+        "session_id": f"child-session-{parent_turn}-{spawn}",
+        "turn": turn,
         "call_kind": "policy",
         "lineage": lineage,
-        "session_call_ordinal": 0,
+        "session_call_ordinal": turn,
         "parent_session_id": "root-session",
-        "parent_turn": 0,
-        "parent_tool_call_id": f"transport-call-{spawn}",
+        "parent_turn": parent_turn,
+        "parent_tool_call_id": f"transport-call-{parent_turn}-{spawn}",
         "invocation_id": invocation,
         "parent_lineage": "root",
-        "parent_call_ordinal": 0,
+        "parent_call_ordinal": parent_call_ordinal,
         "parent_tool_call_slot": 0,
         "spawn_ordinal": spawn,
-        "episode_spawn_ordinal": spawn,
+        "episode_spawn_ordinal": episode_spawn,
         "completed_predecessor_spawn_ordinals": [],
         "completed_episode_spawn_ordinals": [],
     }
@@ -223,9 +241,9 @@ def _prepared(
     )
 
 
-def test_observer_accepts_bridge_boundary_only_on_returning_root(tmp_path: Path) -> None:
+def test_observer_accepts_bridge_boundary_on_returning_sessions(tmp_path: Path) -> None:
     async def scenario() -> None:
-        observer, _ledger, _producer = _observer(tmp_path / "ledger")
+        observer, ledger, producer = _observer(tmp_path / "ledger")
         first = await observer.before_forward(_prepared(17, "root", _root_rlm()))
         await _deliver_response(observer, first, _response(finish_reason="tool_calls"))
         for spawn in (0, 1):
@@ -237,21 +255,65 @@ def test_observer_accepts_bridge_boundary_only_on_returning_root(tmp_path: Path)
                 )
             )
             await _deliver_response(observer, child, _response())
-        returned = await observer.before_forward(
+        child_return = await observer.before_forward(
             _prepared(
                 20,
+                "child-return",
+                _child_rlm(0, "midpoint-shard-0", turn=1),
+                routed_experts_prompt_start=1,
+            )
+        )
+        await _deliver_response(observer, child_return, _response())
+        returned = await observer.before_forward(
+            _prepared(
+                21,
                 "return",
                 _root_rlm(1),
                 routed_experts_prompt_start=1,
             )
         )
-        await _deliver_response(observer, returned, _response())
+        await _deliver_response(observer, returned, _response(finish_reason="tool_calls"))
+        later_child = await observer.before_forward(
+            _prepared(
+                22,
+                "later-child",
+                _child_rlm(
+                    0,
+                    "late-shard",
+                    parent_turn=1,
+                    episode_spawn=2,
+                ),
+            )
+        )
+        await _deliver_response(observer, later_child, _response())
+        child_decisions = tuple(
+            decision
+            for decision in producer._completed.values()
+            if decision.node_kind == "child"
+        )
+        assert sum(decision.provenance.branch_selected for decision in child_decisions) == 2
+        continuation = next(
+            decision
+            for decision in child_decisions
+            if decision.event_address.session_call_ordinal == 1
+        )
+        assert continuation.target_ordinal == 0
+        assert continuation.provenance.branch_selected is False
+        later = next(
+            decision
+            for decision in child_decisions
+            if decision.event_address.lineage
+            == _child_rlm(0, "late-shard", parent_turn=1, episode_spawn=2)["lineage"]
+        )
+        assert later.target_ordinal == 2
+        assert later.provenance.branch_selected is False
+        ledger.close()
 
     asyncio.run(scenario())
 
     async def invalid_first_turn() -> None:
-        observer, _ledger, _producer = _observer(tmp_path / "bad-ledger")
-        with pytest.raises(ValueError, match="only valid on a returning root"):
+        observer, ledger, _producer = _observer(tmp_path / "bad-ledger")
+        with pytest.raises(ValueError, match="only valid on a returning session"):
             await observer.before_forward(
                 _prepared(
                     17,
@@ -260,8 +322,57 @@ def test_observer_accepts_bridge_boundary_only_on_returning_root(tmp_path: Path)
                     routed_experts_prompt_start=1,
                 )
             )
+        ledger.close()
 
     asyncio.run(invalid_first_turn())
+
+
+def test_observer_tracks_policy_parent_across_compaction(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        observer, ledger, producer = _observer(tmp_path / "ledger")
+        first = await observer.before_forward(_prepared(31, "root", _root_rlm()))
+        await _deliver_response(observer, first, _response(finish_reason="tool_calls"))
+        compaction = await observer.before_forward(
+            _prepared(
+                32,
+                "compact",
+                _root_rlm(0, call_ordinal=1, call_kind="compaction"),
+            )
+        )
+        await _deliver_response(observer, compaction, _response())
+        returned = await observer.before_forward(
+            _prepared(
+                33,
+                "returned",
+                _root_rlm(1, call_ordinal=2),
+                routed_experts_prompt_start=1,
+            )
+        )
+        await _deliver_response(observer, returned, _response(finish_reason="tool_calls"))
+        child = await observer.before_forward(
+            _prepared(
+                34,
+                "child",
+                _child_rlm(
+                    0,
+                    "post-compaction",
+                    parent_turn=1,
+                    parent_call_ordinal=2,
+                    episode_spawn=0,
+                ),
+            )
+        )
+        await _deliver_response(observer, child, _response())
+        decision = next(
+            value
+            for value in producer._completed.values()
+            if value.node_kind == "child"
+        )
+        assert decision.target_ordinal == 2
+        assert decision.provenance.branch_selected is False
+        ledger.close()
+
+    asyncio.run(scenario())
 
 
 def _response(*, finish_reason: str = "stop") -> SimpleNamespace:
@@ -526,11 +637,10 @@ def test_observer_duplicate_and_out_of_scaffold_calls_fail_before_forward(
         prepared = _prepared(17, "root", _root_rlm())
         ticket = await observer.before_forward(prepared)
         await _deliver_response(observer, ticket, _response(finish_reason="tool_calls"))
-        with pytest.raises(ValueError, match="outside the frozen root"):
+        with pytest.raises(ValueError, match="outside the deployed session bounds"):
             await observer.before_forward(prepared)
-        bad = _child_rlm(0, "diagnostic")
-        bad["session_call_ordinal"] = 1
-        with pytest.raises(ValueError, match="outside the frozen"):
+        bad = _child_rlm(0, "diagnostic", turn=1)
+        with pytest.raises(ValueError, match="contiguous stable session"):
             await observer.before_forward(_prepared(18, "bad", bad))
         ledger.close()
 

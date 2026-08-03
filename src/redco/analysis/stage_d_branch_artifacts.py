@@ -43,6 +43,19 @@ class StageDBranchTarget:
 
 
 @dataclass(frozen=True, slots=True)
+class StageDExcludedBranchTarget:
+    target: StageDBranchTarget
+    reason: str
+
+    def __post_init__(self) -> None:
+        if not self.reason:
+            raise ValueError("excluded branch target requires a reason")
+
+    def to_payload(self) -> dict[str, Any]:
+        return {**self.target.to_payload(), "reason": self.reason}
+
+
+@dataclass(frozen=True, slots=True)
 class StageDBranchTargetRoster:
     planned_source_count: int
     completed_source_count: int
@@ -52,6 +65,7 @@ class StageDBranchTargetRoster:
     eligibility_passed: bool
     source_sha256s: tuple[str, ...]
     targets: tuple[StageDBranchTarget, ...]
+    excluded_targets: tuple[StageDExcludedBranchTarget, ...] = ()
 
     @classmethod
     def from_sources(
@@ -70,34 +84,43 @@ class StageDBranchTargetRoster:
             raise ValueError("branch target roster contains duplicate sources")
         eligible: list[SourceRollout] = []
         targets: list[StageDBranchTarget] = []
+        excluded_targets: list[StageDExcludedBranchTarget] = []
         for source in sources:
             selected = tuple(
                 decision
                 for decision in source.decisions
                 if decision.node_kind == "child" and decision.provenance.branch_selected
             )
-            if selected and not source.branch_eligible:
-                raise ValueError("ineligible source cannot contribute a branch target")
+            if source.branch_eligible:
+                eligible.append(source)
             if not selected:
                 continue
-            eligible.append(source)
             for decision in selected:
                 assert decision.target_id is not None
                 assert decision.target_ordinal is not None
-                targets.append(
-                    StageDBranchTarget(
-                        source.source_sha256,
-                        source.group_id,
-                        source.rollout_id,
-                        decision.decision_id,
-                        decision.target_id,
-                        decision.target_ordinal,
-                        {
-                            **decision.event_address.as_payload(),
-                            "turn": decision.event_address.turn,
-                        },
-                    )
+                target = StageDBranchTarget(
+                    source.source_sha256,
+                    source.group_id,
+                    source.rollout_id,
+                    decision.decision_id,
+                    decision.target_id,
+                    decision.target_ordinal,
+                    {
+                        **decision.event_address.as_payload(),
+                        "turn": decision.event_address.turn,
+                    },
                 )
+                if source.branch_eligible:
+                    targets.append(target)
+                else:
+                    ineligibility_reason = source.ineligibility_reason
+                    assert ineligibility_reason is not None
+                    excluded_targets.append(
+                        StageDExcludedBranchTarget(
+                            target,
+                            ineligibility_reason,
+                        )
+                    )
         targets.sort(
             key=lambda target: (
                 target.group_id,
@@ -108,6 +131,22 @@ class StageDBranchTargetRoster:
         )
         if len({(target.group_id, target.target_id) for target in targets}) != len(targets):
             raise ValueError("branch target roster contains duplicate scientific targets")
+        excluded_targets.sort(
+            key=lambda item: (
+                item.target.group_id,
+                item.target.rollout_id,
+                item.target.target_ordinal,
+                item.target.decision_id,
+            )
+        )
+        all_target_keys = {
+            (target.group_id, target.target_id) for target in targets
+        } | {
+            (item.target.group_id, item.target.target_id)
+            for item in excluded_targets
+        }
+        if len(all_target_keys) != len(targets) + len(excluded_targets):
+            raise ValueError("branch target roster repeats an active or excluded target")
         return cls(
             planned_source_count,
             len(sources),
@@ -117,13 +156,14 @@ class StageDBranchTargetRoster:
             len(eligible) >= minimum_eligible_sources,
             source_sha256s,
             tuple(targets),
+            tuple(excluded_targets),
         )
 
     def to_bytes(self) -> bytes:
         return canonical_json(
             {
-                "schema_version": 1,
-                "domain": "redco-stage-d-branch-target-roster-v1",
+                "schema_version": 2,
+                "domain": "redco-stage-d-branch-target-roster-v2",
                 "planned_source_count": self.planned_source_count,
                 "completed_source_count": self.completed_source_count,
                 "eligible_source_count": self.eligible_source_count,
@@ -132,6 +172,9 @@ class StageDBranchTargetRoster:
                 "eligibility_passed": self.eligibility_passed,
                 "source_sha256s": list(self.source_sha256s),
                 "targets": [target.to_payload() for target in self.targets],
+                "excluded_targets": [
+                    target.to_payload() for target in self.excluded_targets
+                ],
             }
         )
 
