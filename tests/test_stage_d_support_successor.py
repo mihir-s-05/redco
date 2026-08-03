@@ -371,6 +371,13 @@ def test_successor_protocol_freezes_only_authorized_changes() -> None:
             "ffd7c6e658ed8cad8278c29a01b97bbeb742e1c552eb63aca2079a6d4ef3c070",
             3,
         ),
+        (
+            9,
+            4,
+            8,
+            "b7cdd5a0998dcfde739fe5a542b2e8b4dc6e8ef6c18ed7100df81860be3a1735",
+            4,
+        ),
     ],
 )
 def test_later_successor_protocols_freeze_only_authorized_changes(
@@ -401,9 +408,10 @@ def test_later_successor_protocols_freeze_only_authorized_changes(
         "source_config": ROOT
         / f"configs/stage-d/stage-d1-support-source-eval-v{version}.toml",
     }
-    if version == 8:
+    if version in (8, 9):
         paths["inference_amendment"] = (
-            ROOT / "configs/stage-d/stage-d1-support-inference-amendment-v8-1.json"
+            ROOT
+            / f"configs/stage-d/stage-d1-support-inference-amendment-v{version}-1.json"
         )
     audit = json.loads(
         (
@@ -501,3 +509,36 @@ def test_later_successor_protocols_freeze_only_authorized_changes(
         assert amendment["changes"]["episode_contract"] == (
             "persisted-text-node-null-elision-v1"
         )
+    if version == 9:
+        assert preregistration["parent_terminal"]["negative_support_trace_observed"]
+        assert preregistration["user_authorization"]["date"] == "2026-08-02"
+        assert preregistration["execution"]["maximum_captured_session_call_count"] == 16
+        assert preregistration["execution"]["maximum_harness_policy_turn_count"] == 8
+        assert set(preregistration["failure_dispositions"]) == {
+            "bounded_redeployment",
+            "ordinary_negative_support",
+            "terminal_invariant",
+            "future_successors",
+        }
+        assert set(preregistration["forward_plan"]) == {
+            "capacity_unavailable",
+            "pre_response_infrastructure_failure",
+            "support_fail",
+            "support_pass",
+            "terminal_invariant",
+        }
+        assert (
+            "tests/test_stage_d_live_observer.py::"
+            "test_actual_two_turn_child_finalizes_as_excluded_without_replay"
+            in preregistration["preflight"]["mandatory_prime_tests"]
+        )
+        amendment = json.loads(paths["amendment"].read_bytes())
+        assert amendment["changes"]["capture_contract"] == (
+            "well-formed-root-and-depth1-sessions-through-sixteen-calls-v1"
+        )
+        assert amendment["changes"]["roster_contract"] == (
+            "active-and-excluded-target-partition-v2"
+        )
+        for name in ("source_config", "replay_config"):
+            config = tomllib.loads(paths[name].read_text(encoding="utf-8"))
+            assert config["env"]["maximum_captured_session_call_count"] == 16
