@@ -41,7 +41,11 @@ def _run(*argv: str, cwd: Path) -> str:
 
 def _tree_sha256(root: Path, excluded_roots: tuple[str, ...] = ()) -> str:
     return _sha256(
-        canonical_tree_manifest_bytes(root, excluded_roots=excluded_roots)
+        canonical_tree_manifest_bytes(
+            root,
+            allow_relative_symlinks=True,
+            excluded_roots=excluded_roots,
+        )
     )
 
 

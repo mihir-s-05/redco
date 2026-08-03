@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -35,6 +36,20 @@ def test_tree_exclusion_does_not_match_similar_prefix(tmp_path: Path) -> None:
     first = _tree_sha256(root, ("deps/child",))
     included.write_text("second", encoding="utf-8")
     assert _tree_sha256(root, ("deps/child",)) != first
+
+
+def test_tree_hash_includes_safe_relative_symlink(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    first_target = root / "first"
+    second_target = root / "second"
+    first_target.mkdir(parents=True)
+    second_target.mkdir()
+    link = root / "link"
+    os.symlink("first", link, target_is_directory=True)
+    first = _tree_sha256(root)
+    link.unlink()
+    os.symlink("second", link, target_is_directory=True)
+    assert _tree_sha256(root) != first
 
 
 @pytest.mark.parametrize(
