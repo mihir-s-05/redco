@@ -228,3 +228,26 @@ index edb7729..a969a1a 100644
  def test_prepared_observer_durably_aborts_cancelled_post():
      class BlockingClient(_FakeClient):
          def __init__(self):
+diff --git a/tests/test_client.py b/tests/test_client.py
+index 98ff1c7..b074da1 100644
+--- a/tests/test_client.py
++++ b/tests/test_client.py
+@@ -159,13 +159,15 @@ def _observed_generate(client, observer):
+     )
+ 
+ 
+-def test_prepared_observer_runs_before_exactly_one_post():
++def test_prepared_observer_records_exactly_one_raw_response():
+     client = _FakeClient()
+     observer = _PreparedObserver()
+     result = asyncio.run(_observed_generate(client, observer))
+ 
+     assert len(client.calls) == 1
+-    assert [event[0] for event in observer.events] == ["before"]
++    assert [event[0] for event in observer.events] == ["before", "raw"]
+     prepared = observer.events[0][1]
++    assert observer.events[1][1] == "ticket"
++    assert json.loads(observer.events[1][2])["request_id"] == "gen-test"
+     assert json.loads(prepared.application_request) == {
+         "messages": [],
+         "model": "test-model",
