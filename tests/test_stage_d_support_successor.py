@@ -34,6 +34,22 @@ def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _verify_dependency_bindings(dependency: StageDDependencyStackManifest) -> None:
+    for binding in dependency.imported_modules:
+        relative = binding.absolute_path.removeprefix("/workspace/redco/")
+        assert relative != binding.absolute_path
+        if relative.startswith(("src/", "environments/", "scripts/")):
+            value = subprocess.run(
+                ["git", "show", f"{dependency.redco_commit}:{relative}"],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+            ).stdout
+        else:
+            value = (ROOT / relative).read_bytes()
+        assert _sha256(value) == binding.sha256
+
+
 def test_frozen_support_successor_preserves_rows_and_addresses() -> None:
     prior_bytes = (
         ROOT / "datasets/stage-d/qasper-successor-extension-v1.jsonl"
@@ -84,15 +100,44 @@ def test_frozen_support_successor_preserves_rows_and_addresses() -> None:
     assert new_plan.plan_sha256 == manifest["collection_plan"]["sha256"]
 
 
-def test_second_support_successor_preserves_history_and_addresses() -> None:
-    prior_bytes = (ROOT / "datasets/stage-d/qasper-support-successor-v1.jsonl").read_bytes()
-    successor_path = ROOT / "datasets/stage-d/qasper-support-successor-v2.jsonl"
+@pytest.mark.parametrize(
+    (
+        "prior_version",
+        "successor_version",
+        "plan_version",
+        "audit_version",
+        "retired_history",
+    ),
+    [
+        (1, 2, 7, 2, ["1911.03894"]),
+        (2, 3, 8, 3, ["1911.03894", "2001.09899"]),
+    ],
+)
+def test_later_support_successors_preserve_history_and_addresses(
+    prior_version: int,
+    successor_version: int,
+    plan_version: int,
+    audit_version: int,
+    retired_history: list[str],
+) -> None:
+    prior_bytes = (
+        ROOT / f"datasets/stage-d/qasper-support-successor-v{prior_version}.jsonl"
+    ).read_bytes()
+    successor_path = (
+        ROOT / f"datasets/stage-d/qasper-support-successor-v{successor_version}.jsonl"
+    )
     successor_bytes = successor_path.read_bytes()
     manifest = json.loads(
-        (ROOT / "datasets/stage-d/qasper-support-successor-manifest-v2.json").read_bytes()
+        (
+            ROOT
+            / f"datasets/stage-d/qasper-support-successor-manifest-v{successor_version}.json"
+        ).read_bytes()
     )
     audit = json.loads(
-        (ROOT / "reports/stage-d1-support-successor-address-audit-v2.json").read_bytes()
+        (
+            ROOT
+            / f"reports/stage-d1-support-successor-address-audit-v{audit_version}.json"
+        ).read_bytes()
     )
     prior_rows = _decode_rows(prior_bytes)
     successor_rows = _decode_rows(successor_bytes)
@@ -104,13 +149,19 @@ def test_second_support_successor_preserves_history_and_addresses() -> None:
     assert prior_ids - successor_ids == {audit["retired"]["example_id"]}
     assert successor_ids - prior_ids == {audit["reserve"]["example_id"]}
     assert "qasper-71f2b368228a748fd348f1abf540236568a61b07" not in successor_ids
-    assert manifest["successor"]["historically_retired_paper_ids"] == ["1911.03894"]
+    assert manifest["successor"]["historically_retired_paper_ids"] == retired_history
     assert _sha256(successor_bytes) == manifest["output"]["sha256"]
     assert _sha256(
-        (ROOT / "configs/stage-d/stage-d1-support-collection-plan-v7.json").read_bytes()
+        (
+            ROOT
+            / f"configs/stage-d/stage-d1-support-collection-plan-v{plan_version}.json"
+        ).read_bytes()
     ) == manifest["collection_plan"]["sha256"]
     assert _sha256(
-        (ROOT / "reports/stage-d1-support-successor-address-audit-v2.json").read_bytes()
+        (
+            ROOT
+            / f"reports/stage-d1-support-successor-address-audit-v{audit_version}.json"
+        ).read_bytes()
     ) == manifest["address_audit"]["sha256"]
     assert len(audit["preserved"]) == 63
     assert all(audit["checks"].values())
@@ -234,19 +285,7 @@ def test_successor_protocol_freezes_only_authorized_changes() -> None:
     protocol = StageDProtocolManifest.from_bytes(paths["protocol"].read_bytes())
     assert dependency.manifest_sha256 == audit["hashes"]["dependency_stack"]
     assert protocol.manifest_sha256 == audit["hashes"]["protocol"]
-    for binding in dependency.imported_modules:
-        relative = binding.absolute_path.removeprefix("/workspace/redco/")
-        assert relative != binding.absolute_path
-        if relative.startswith(("src/", "environments/", "scripts/")):
-            value = subprocess.run(
-                ["git", "show", f"{dependency.redco_commit}:{relative}"],
-                cwd=ROOT,
-                check=True,
-                capture_output=True,
-            ).stdout
-        else:
-            value = (ROOT / relative).read_bytes()
-        assert _sha256(value) == binding.sha256
+    _verify_dependency_bindings(dependency)
 
     prior_protocol = json.loads(
         (ROOT / "configs/stage-d/stage-d1-support-protocol-v3.json").read_bytes()
@@ -309,21 +348,68 @@ def test_successor_protocol_freezes_only_authorized_changes() -> None:
         assert "stage-d1-support-v4" in config["output_dir"]
 
 
-def test_second_successor_protocol_freezes_action_boundary_only() -> None:
+@pytest.mark.parametrize(
+    (
+        "version",
+        "audit_version",
+        "parent_protocol_version",
+        "dataset_sha256",
+        "retirement_count",
+    ),
+    [
+        (
+            7,
+            2,
+            6,
+            "f5b762a5380c976995517a556400f12c44afb4e77d73b1291991762519508408",
+            2,
+        ),
+        (
+            8,
+            3,
+            7,
+            "ffd7c6e658ed8cad8278c29a01b97bbeb742e1c552eb63aca2079a6d4ef3c070",
+            3,
+        ),
+    ],
+)
+def test_later_successor_protocols_freeze_only_authorized_changes(
+    version: int,
+    audit_version: int,
+    parent_protocol_version: int,
+    dataset_sha256: str,
+    retirement_count: int,
+) -> None:
     paths = {
-        "address_audit": ROOT / "reports/stage-d1-support-successor-address-audit-v2.json",
-        "amendment": ROOT / "configs/stage-d/stage-d1-support-repair-amendment-v7.json",
-        "collection_plan": ROOT / "configs/stage-d/stage-d1-support-collection-plan-v7.json",
-        "dependency_stack": ROOT / "configs/stage-d/stage-d1-dependency-stack-v7.json",
-        "genesis": ROOT / "configs/stage-d/stage-d1-support-genesis-v7.json",
-        "preregistration": ROOT / "configs/stage-d/stage-d1-support-preregistration-v7.json",
-        "protocol": ROOT / "configs/stage-d/stage-d1-support-protocol-v7.json",
-        "replay_config": ROOT / "configs/stage-d/stage-d1-support-replay-eval-v7.toml",
-        "source": ROOT / "configs/stage-d/stage-d1-support-source-v7.json",
-        "source_config": ROOT / "configs/stage-d/stage-d1-support-source-eval-v7.toml",
+        "address_audit": ROOT
+        / f"reports/stage-d1-support-successor-address-audit-v{audit_version}.json",
+        "amendment": ROOT
+        / f"configs/stage-d/stage-d1-support-repair-amendment-v{version}.json",
+        "collection_plan": ROOT
+        / f"configs/stage-d/stage-d1-support-collection-plan-v{version}.json",
+        "dependency_stack": ROOT
+        / f"configs/stage-d/stage-d1-dependency-stack-v{version}.json",
+        "genesis": ROOT
+        / f"configs/stage-d/stage-d1-support-genesis-v{version}.json",
+        "preregistration": ROOT
+        / f"configs/stage-d/stage-d1-support-preregistration-v{version}.json",
+        "protocol": ROOT
+        / f"configs/stage-d/stage-d1-support-protocol-v{version}.json",
+        "replay_config": ROOT
+        / f"configs/stage-d/stage-d1-support-replay-eval-v{version}.toml",
+        "source": ROOT / f"configs/stage-d/stage-d1-support-source-v{version}.json",
+        "source_config": ROOT
+        / f"configs/stage-d/stage-d1-support-source-eval-v{version}.toml",
     }
+    if version == 8:
+        paths["inference_amendment"] = (
+            ROOT / "configs/stage-d/stage-d1-support-inference-amendment-v8-1.json"
+        )
     audit = json.loads(
-        (ROOT / "reports/stage-d1-support-successor-preregistration-audit-v7.json").read_bytes()
+        (
+            ROOT
+            / f"reports/stage-d1-support-successor-preregistration-audit-v{version}.json"
+        ).read_bytes()
     )
     assert {name: _sha256(path.read_bytes()) for name, path in paths.items()} == audit[
         "hashes"
@@ -335,9 +421,13 @@ def test_second_successor_protocol_freezes_action_boundary_only() -> None:
     assert dependency.manifest_sha256 == audit["hashes"]["dependency_stack"]
     assert protocol.manifest_sha256 == audit["hashes"]["protocol"]
     assert dependency.redco_commit == audit["redco_commit"]
+    _verify_dependency_bindings(dependency)
 
     old_protocol = json.loads(
-        (ROOT / "configs/stage-d/stage-d1-support-protocol-v6.json").read_bytes()
+        (
+            ROOT
+            / f"configs/stage-d/stage-d1-support-protocol-v{parent_protocol_version}.json"
+        ).read_bytes()
     )
     new_protocol = json.loads(paths["protocol"].read_bytes())
     assert {
@@ -353,8 +443,17 @@ def test_second_successor_protocol_freezes_action_boundary_only() -> None:
     }
     preregistration = json.loads(paths["preregistration"].read_bytes())
     assert preregistration["replacement"]["preserved_addresses"] == 63
-    assert len(preregistration["replacement"]["cumulative_retired_example_ids"]) == 2
-    assert preregistration["parent_terminal"]["scientific_outputs"] == 0
+    assert (
+        len(preregistration["replacement"]["cumulative_retired_example_ids"])
+        == retirement_count
+    )
+    assert (
+        preregistration["parent_terminal"].get(
+            "scientific_outputs",
+            preregistration["parent_terminal"].get("scientific_arm_outcomes"),
+        )
+        == 0
+    )
     assert preregistration["preflight"]["require_zero_skips"] is True
     assert "tests/test_stage_d_qwen_action_regression.py" in preregistration["preflight"][
         "mandatory_prime_tests"
@@ -392,7 +491,13 @@ def test_second_successor_protocol_freezes_action_boundary_only() -> None:
     )
     for name in ("source_config", "replay_config"):
         config = tomllib.loads(paths[name].read_text(encoding="utf-8"))
-        assert config["env"]["taskset"]["dataset_sha256"] == (
-            "f5b762a5380c976995517a556400f12c44afb4e77d73b1291991762519508408"
+        assert config["env"]["taskset"]["dataset_sha256"] == dataset_sha256
+        assert f"stage-d1-support-v{version}" in config["output_dir"]
+
+    if version == 8:
+        assert preregistration["parent_terminal"]["negative_support_trace_observed"]
+        assert "final bounded successor" in preregistration["repair_rule"]
+        amendment = json.loads(paths["amendment"].read_bytes())
+        assert amendment["changes"]["episode_contract"] == (
+            "persisted-text-node-null-elision-v1"
         )
-        assert "stage-d1-support-v7" in config["output_dir"]

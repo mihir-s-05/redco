@@ -1,0 +1,106 @@
+model = "/workspace/models/stage-d1-merged"
+num_tasks = 1
+num_rollouts = 1
+shuffle = false
+max_concurrent = 1
+rich = false
+server = false
+push = false
+output_dir = "/workspace/redco/runs/stage-d/stage-d1-support-v8/replay-template"
+
+[client]
+type = "train"
+base_url = "http://127.0.0.1:8000/v1"
+api_key_var = "VLLM_API_KEY"
+pool_size = 1
+renderer_model_name = "Qwen/Qwen3-4B-Instruct-2507"
+
+[client.renderer]
+name = "auto"
+
+[sampling]
+temperature = 0.7
+top_p = 1.0
+max_tokens = 768
+seed = 1
+tool_choice = "auto"
+parallel_tool_calls = false
+
+[sampling.extra_body]
+cache_salt = "placeholder-only-before-episode-addressing"
+
+[env]
+id = "redco-evidence-selection-v2"
+max_concurrent = 1
+ledger_path = "/workspace/redco/runs/stage-d/stage-d1-support-v8/ledger"
+artifact_path = "/workspace/redco/runs/stage-d/stage-d1-support-v8/source-artifacts"
+master_seed = "redco-stage-d1-support-v1-20260802-78b65e4cc16ac31f"
+preregistration_sha256 = "304149eb86e06ce1f8c3601c6d9527dbb5fd36a19c455dc1a4dccb39e05b3dd2"
+source_sha256 = "47793c26ef5000093d0200e9fb6b626c8ba7af8a0ea2b7776d6152900d76dbea"
+runtime_sha256 = "714c3b9459baafb83177d2b9e3e30595ac693181239f97e3478c7b7e936b160e"
+config_sha256 = "7faeef09f975f784b665403a189264cff0245b8d490de590b94ed5f04a459d59"
+support_rules_sha256 = "088e3990c270881435214c725c0ca984462f9a824a1e0708d1bcbebd4264d235"
+checkpoint_id = "/workspace/models/stage-d1-merged"
+base_model_manifest_path = "/workspace/redco/configs/stage-d/stage-d1-base-model-manifest.json"
+base_model_manifest_sha256 = "45ed89b1c482b5189c6ca86db128c1d22782f24ac6c578fb19fbaa4a15d90dbc"
+adapter_manifest_path = "/workspace/redco/reports/stage-d0-scaffold-step8-adapter-manifest-v1.json"
+adapter_manifest_sha256 = "1b3cc7f5e374919f90f41b537f398ec59c12b1c31e25482b5bcf6f3b7bc1ddbe"
+tokenizer_manifest_path = "/workspace/redco/configs/stage-d/stage-d1-tokenizer-manifest.json"
+tokenizer_manifest_sha256 = "65676a0c390086672375cf9acbe2698a461e2f403e1c5e7556647d114c204a38"
+renderer_manifest_path = "/workspace/redco/configs/stage-d/stage-d1-renderer-manifest.json"
+renderer_manifest_sha256 = "a9e6b8823af5e8e89c65e1382af0d07cfad1bd32ce6fe17bb72b994b8a84366c"
+sampler_conformance_manifest_path = "/workspace/redco/configs/stage-d/stage-d1-sampler-conformance-manifest.json"
+sampler_conformance_manifest_sha256 = "e5ba2716be1d977cbf4047958b948f170d6d88c75c768a7c8fe1b8c1c8a9d196"
+resolved_agent_sampling_law_sha256 = "87e7c5e06b845be742bd1bc03b752e155b8f16e47ae53a5435d7c7e02d6d6447"
+resolved_train_client_sha256 = "94788de2b522b2187ad96e2cbd775cda9d81e487168f2844ac347cde5c6497f7"
+branch_count = 4
+continuation_replicates = 1
+failure_reward = 0.0
+root_policy_turn_count = 2
+maximum_observed_root_policy_turn_count = 4
+
+[env.retries]
+max_retries = 0
+
+[env.taskset]
+id = "redco-evidence-selection-v2"
+dataset_path = "/workspace/redco/datasets/stage-d/qasper-support-successor-v3.jsonl"
+dataset_sha256 = "ffd7c6e658ed8cad8278c29a01b97bbeb742e1c552eb63aca2079a6d4ef3c070"
+split = "successor_support"
+prompt_profile = "fewshot_scaffold_v2"
+policy_checkpoint_id = "/workspace/models/stage-d1-merged"
+scaffold_prompt_path = "/workspace/redco/configs/stage-d/stage-d0-scaffold-fewshot-v4.txt"
+scaffold_prompt_sha256 = "b27653e90f52a20f26ac79e3d0569275e9ba0ed2b07abbe06f060dd2486aee73"
+scientific_group_namespace = "redco-stage-d1-support-v1"
+rollouts_per_task = 1
+
+[env.agent]
+model = "/workspace/models/stage-d1-merged"
+max_turns = 8
+max_total_tokens = 8192
+
+[env.agent.retries]
+max_retries = 0
+
+[env.agent.timeout]
+setup = 180.0
+rollout = 900.0
+finalize = 120.0
+scoring = 120.0
+
+[env.agent.harness]
+id = "rlm"
+version = "56218f33796ecbe465445bc43948886354fde196"
+max_depth = 1
+checkout_archive_path = "/workspace/redco/.runtime/stage-d1/rlm-patched-v1.tar"
+checkout_archive_sha256 = "0db97a244b88b5186a27fe1af14fa33a89b69e39a68a064cf7d10bb6f3084669"
+checkout_uv_path = "/workspace/redco/.runtime/stage-d1/uv"
+checkout_uv_sha256 = "da15297d6879b2cfbe5ea3cb03725c1613d51ba72892cc996468d871f0a532fb"
+checkout_cache_archive_path = "/workspace/redco/.runtime/stage-d1/rlm-cache-v2.tar.gz"
+checkout_cache_archive_sha256 = "fb1ff3fe82a5109db0662092b344e0069ada5365f137d01b3d7010b84d7e37be"
+checkout_uv_lock_sha256 = "d98a2958c7d73cb4d300e40d3b80cfc49a7f6d11f0e76a8a181b932f58e68f4e"
+checkout_launcher_path = "/workspace/redco/.runtime/stage-d1/rlm-wrapper"
+checkout_launcher_sha256 = "7f6d55f352d521a4d34c675e2bc5cb9581fde2fb635c826a9486470aa0de6cd4"
+
+[env.agent.harness.runtime]
+type = "subprocess"
