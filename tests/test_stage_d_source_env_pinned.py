@@ -31,6 +31,7 @@ from redco_evidence_selection_v2.source_env import (  # noqa: E402
     StageDSourceEnvConfig,
     StageDSourceTaskset,
     StageDSourceTasksetConfig,
+    _canonical_source_episode,
     _episode_sampling,
     _episode_seed_and_salt,
     _resolved_agent_sampling_law_sha256,
@@ -42,6 +43,7 @@ from verifiers.v1.task import task_data_cls  # noqa: E402
 from redco.analysis.stage_d_receipt_ledger import inspect_ledger  # noqa: E402
 from redco.analysis.stage_d_source_producer import (  # noqa: E402
     _CALL_FIELDS,
+    _NODE_FIELDS,
     StageDSourceRolloutProducer,
 )
 from redco.analysis.stage_d_spawn_provenance import PolicyEventAddress  # noqa: E402
@@ -245,6 +247,104 @@ def test_pinned_successful_model_call_dump_matches_source_schema() -> None:
         "reasoning_tokens": None,
         "cost": None,
     }
+
+
+def test_typed_episode_serializes_only_node_nulls_like_persisted_trace() -> None:
+    episode = vf.WireEpisode.model_validate(json.loads(_episode()))
+    full_payload = episode.model_dump(mode="json")
+    full_node = full_payload["traces"][0]["nodes"][0]
+    assert full_node["multi_modal_data"] is None
+    assert full_node["routed_experts"] is None
+    assert full_node["kept_tokens"] is None
+
+    payload = json.loads(_canonical_source_episode(episode))
+    trace = payload["traces"][0]
+    assert all(
+        set(node) == _NODE_FIELDS or set(node) == _NODE_FIELDS - {"parent"}
+        for node in trace["nodes"]
+    )
+    assert set(trace["calls"][0]) == _CALL_FIELDS
+    assert trace["calls"][0]["error"] is None
+    assert trace["calls"][0]["sampling"]["reasoning_effort"] is None
+    assert trace["calls"][0]["usage"] == {
+        "prompt_tokens": 2,
+        "completion_tokens": 2,
+        "cached_input_tokens": None,
+        "reasoning_tokens": None,
+        "cost": None,
+    }
+
+
+def test_typed_episode_runs_through_real_source_finalization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = StageDSourceEnv(StageDSourceEnvConfig.model_validate(_config_payload(tmp_path)))
+
+    async def completed_super(self, task, ctx, **kwargs):
+        del task, ctx, kwargs
+        episode = vf.WireEpisode.model_validate(json.loads(_episode()))
+        trace = episode.traces[0]
+        assert self._ledger is not None
+        producer = StageDSourceRolloutProducer(
+            ledger=self._ledger,
+            group_id="group-1",
+            rollout_id=trace.id,
+            child_target_roster=(_target_id(),),
+            allow_test_fixture_roster=True,
+            base_model_manifest_sha256=_sha256(b"base"),
+        )
+        root_action = _action(71)
+        producer.intercept_policy_call(
+            event_address=PolicyEventAddress(0, "root", 0, 0),
+            action_key=root_action.key,
+            node_kind="root",
+            target_id=None,
+            branch_selected=False,
+            forward_once=lambda _key: root_action,
+        )
+        child_action = _action(72)
+        producer.intercept_policy_call(
+            event_address=_child_address(),
+            action_key=child_action.key,
+            node_kind="child",
+            target_id=_target_id(),
+            branch_selected=False,
+            forward_once=lambda _key: child_action,
+        )
+        self._producers[trace.id] = producer
+        return episode
+
+    monkeypatch.setattr(vf.Env, "run_episode", completed_super)
+
+    async def scenario() -> None:
+        await env.start()
+        try:
+            task = env.taskset.load()[0]
+            ctx = vf.ModelContext(
+                model="fixture-model",
+                client=SimpleNamespace(),
+                sampling=vf.Sampling(),
+            )
+            episode = await env.run_episode(task, ctx)
+            assert episode.ok
+            (source,) = env.verified_completed_sources()
+            raw_episode = (
+                Path(env.config.ledger_path) / "evidence" / source.trace_sha256
+            ).read_bytes()
+            payload = json.loads(raw_episode)
+            trace = payload["traces"][0]
+            assert all(
+                set(node) == _NODE_FIELDS or set(node) == _NODE_FIELDS - {"parent"}
+                for node in trace["nodes"]
+            )
+            assert trace["calls"][0]["error"] is None
+            assert trace["calls"][0]["sampling"]["reasoning_effort"] is None
+            assert trace["calls"][0]["usage"]["cost"] is None
+        finally:
+            await env.stop()
+
+    asyncio.run(scenario())
 
 
 def test_scientific_group_id_is_stable_and_namespace_bound(tmp_path: Path) -> None:

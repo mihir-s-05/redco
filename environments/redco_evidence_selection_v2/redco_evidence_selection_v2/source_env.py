@@ -53,6 +53,28 @@ def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _canonical_source_episode(episode: vf.Episode) -> bytes:
+    """Serialize nodes exactly as Verifiers persists them without altering calls."""
+    payload = episode.model_dump(mode="json")
+    payload_traces = payload.get("traces")
+    if not isinstance(payload_traces, list):
+        raise TypeError("source episode traces must serialize as a list")
+    if len(payload_traces) != len(episode.traces):
+        raise ValueError("source episode trace count changed during serialization")
+    for payload_trace, trace in zip(payload_traces, episode.traces, strict=True):
+        if not isinstance(payload_trace, dict):
+            raise TypeError("source episode trace must serialize as an object")
+        payload_nodes = payload_trace.get("nodes")
+        if not isinstance(payload_nodes, list):
+            raise TypeError("source trace nodes must serialize as a list")
+        if len(payload_nodes) != len(trace.nodes):
+            raise ValueError("source trace node count changed during serialization")
+        payload_trace["nodes"] = [
+            node.model_dump(mode="json", exclude_none=True) for node in trace.nodes
+        ]
+    return canonical_json(payload)
+
+
 class StageDSourceData(EvidenceSelectionData):
     scientific_group_id: str
     rollout_slot: int
@@ -407,7 +429,7 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
                 producer = self._producers.get(trace.id)
                 if producer is None or trace.id in self._terminal_traces:
                     raise RuntimeError("source collection trace registry is inconsistent")
-                raw_episode = canonical_json(episode.model_dump(mode="json"))
+                raw_episode = _canonical_source_episode(episode)
                 if self._artifacts is None:
                     raise RuntimeError("source artifact store is not started")
 

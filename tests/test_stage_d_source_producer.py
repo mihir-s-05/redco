@@ -1214,7 +1214,10 @@ def test_live_source_is_derived_from_intercepted_calls_and_trace(tmp_path: Path)
     assert restored == source
 
 
-@pytest.mark.parametrize("mutation", ["reward", "prompt", "mask", "call-node"])
+@pytest.mark.parametrize(
+    "mutation",
+    ["reward", "prompt", "mask", "call-node", "node-transport"],
+)
 def test_trace_semantics_reject_scientific_field_substitution(
     tmp_path: Path,
     mutation: str,
@@ -1229,8 +1232,10 @@ def test_trace_semantics_reject_scientific_field_substitution(
     elif mutation == "mask":
         trace["nodes"][1]["mask"] = [False, True]
         trace["nodes"][1]["logprobs"] = [-0.1]
-    else:
+    elif mutation == "call-node":
         trace["calls"][0]["node"] = trace["calls"][1]["node"]
+    else:
+        trace["nodes"][0]["routed_experts"] = {"unexpected": "transport-data"}
     with pytest.raises(ValueError):
         verify_source_trace_semantics(source, raw_episode=canonical_json(episode))
     writer.close()
