@@ -646,6 +646,7 @@ def _prepared_action(
     messages: list[dict[str, object]] | None = None,
     prompt_token_ids: tuple[int, ...] = (10, 11),
     routed_experts_prompt_start: int | None = None,
+    max_tokens: bool = False,
 ) -> BehaviorAction:
     legacy = _key(seed)
     request = json.loads(legacy.request)
@@ -681,16 +682,19 @@ def _prepared_action(
         },
     )
     raw_message = message or {"role": "assistant", "content": "duplicate"}
+    action_token_ids = (20, 21) if max_tokens else (20, 2)
     return BehaviorAction.build(
         key=key,
-        action_token_ids=(20, 2),
+        action_token_ids=action_token_ids,
         behavior_logprobs=(-0.2, -0.1),
         raw_transport_message=raw_message,
-        finish_reason="tool_calls" if tool_call else "stop",
+        finish_reason="length" if max_tokens else "tool_calls" if tool_call else "stop",
         prompt_tokens=len(prompt_token_ids),
         completion_tokens=2,
-        termination_kind="tool_calls" if tool_call else "eos",
-        eos_token_id=None if tool_call else 2,
+        termination_kind=(
+            "max_tokens" if max_tokens else "tool_calls" if tool_call else "eos"
+        ),
+        eos_token_id=None if max_tokens or tool_call else 2,
         validate_action=_validate_prepared_action,
     )
 
@@ -1537,6 +1541,102 @@ def test_strict_source_uses_two_structural_slots_despite_reverse_completion(
     with pytest.raises(SourceArtifactError, match="no durable completion"):
         orphan_store.recover_completed(orphan_ledger_root)
     orphan_writer.close()
+    writer.close()
+
+
+def test_ineligible_max_token_source_strictly_reloads_after_restart(
+    tmp_path: Path,
+) -> None:
+    ledger_root = tmp_path / "max-token-ledger"
+    writer = StageDReceiptLedger.create(
+        ledger_root,
+        binding=_binding(),
+        master_seed=MASTER_SEED,
+    )
+    parent = PolicyEventAddress(0, "root", 0, 0)
+    rollout_id = "rollout-strict"
+    producer = StageDSourceRolloutProducer(
+        ledger=writer,
+        group_id="group-1",
+        rollout_id=rollout_id,
+        child_parent_event=parent,
+        child_parent_tool_call_slot=0,
+        root_policy_turn_count=3,
+        base_model_manifest_sha256=_sha256(b"base"),
+    )
+    root = _tool_action(81)
+    producer.intercept_policy_call(
+        event_address=parent,
+        action_key=root.key,
+        node_kind="root",
+        target_id=None,
+        branch_selected=False,
+        forward_once=lambda _key: root,
+    )
+    child_message = {"role": "assistant", "content": "truncated"}
+    for ordinal, seed in ((0, 82), (1, 83)):
+        child = _prepared_action(
+            seed,
+            message=child_message if ordinal == 0 else None,
+            max_tokens=ordinal == 0,
+        )
+        child_address = PolicyEventAddress(
+            1,
+            derive_child_lineage(
+                SpawnScope(1, "root", 0, 0, 0),
+                spawn_ordinal=ordinal,
+            ),
+            0,
+            0,
+        )
+        target_id = structural_child_target_id(
+            parent,
+            rollout_id=rollout_id,
+            parent_tool_call_slot=0,
+            spawn_ordinal=ordinal,
+        )
+        producer.intercept_policy_call(
+            event_address=child_address,
+            action_key=child.key,
+            node_kind="child",
+            target_id=target_id,
+            branch_selected=False,
+            forward_once=lambda _key, value=child: value,
+        )
+    returning_root = _prepared_action(84)
+    producer.intercept_policy_call(
+        event_address=PolicyEventAddress(0, "root", 1, 1),
+        action_key=returning_root.key,
+        node_kind="root",
+        target_id=None,
+        branch_selected=False,
+        forward_once=lambda _key: returning_root,
+    )
+    episode = json.loads(_strict_episode())
+    child_call = episode["traces"][0]["calls"][2]
+    child_call["finish_reason"] = "length"
+    child_node = episode["traces"][0]["nodes"][child_call["node"]]
+    child_node["message"] = child_message
+    child_node["token_ids"] = [20, 21]
+    source = producer.finalize_episode(canonical_json(episode))
+    assert source.branch_eligible is False
+    assert source.ineligibility_reason == (
+        "scientific scaffold has an unexpected policy-call count"
+    )
+    max_token_decisions = tuple(
+        decision
+        for decision in source.decisions
+        if decision.action.termination_kind == "max_tokens"
+    )
+    assert len(max_token_decisions) == 1
+    restored = SourceRollout.verify_bytes(
+        source.to_bytes(),
+        verifier=writer,
+        evidence_loader=lambda digest: (ledger_root / "evidence" / digest).read_bytes(),
+        render_prompt=_unexpected_prompt_render,
+        validate_action=_validate_prepared_action,
+    )
+    assert restored == source
     writer.close()
 
 

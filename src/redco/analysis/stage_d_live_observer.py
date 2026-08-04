@@ -289,6 +289,12 @@ class StageDPreparedCallObserver:
             raise ValueError(
                 "tool_calls finish reason requires a nonempty tool-call message"
             )
+        if (
+            isinstance(tool_calls, list)
+            and tool_calls
+            and finish_reason not in {"tool_calls", "length"}
+        ):
+            raise ValueError("nonempty tool-call message requires tool_calls finish reason")
         request_id = raw.get("id")
         if not isinstance(request_id, str) or not request_id:
             raise ValueError("typed prepared response lacks its request ID")
@@ -315,6 +321,8 @@ class StageDPreparedCallObserver:
             ),
             request_id=request_id,
         )
+        if action.parse_status != "valid" and termination_kind != "max_tokens":
+            raise ValueError("typed prepared response message is outside the pinned schema")
         self._producer.complete_policy_call(ticket.pending, action=action)
 
     async def after_raw_response(self, ticket: object, response_content: bytes) -> None:

@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -80,6 +81,7 @@ def _observer(
     rollout_id: str = "trace-1",
     maximum_captured_session_call_count: int = 8,
     ledger: StageDReceiptLedger | None = None,
+    validate_action: Any | None = None,
 ) -> tuple[
     StageDPreparedCallObserver,
     StageDReceiptLedger,
@@ -123,7 +125,11 @@ def _observer(
                 "domain": "redco-stage-d-test-runtime-snapshot-v1",
             }
         ),
-        validate_action=lambda _request, _message, _action_token_ids: None,
+        validate_action=(
+            validate_action
+            if callable(validate_action)
+            else lambda _request, _message, _action_token_ids: None
+        ),
     )
     return observer, ledger, producer
 
@@ -989,6 +995,34 @@ def test_observer_duplicate_and_out_of_scaffold_calls_fail_before_forward(
     asyncio.run(scenario())
 
 
+def test_child_session_is_contiguous_only_through_frozen_capture_ceiling(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        observer, ledger, _producer = _observer(
+            tmp_path / "ledger",
+            maximum_captured_session_call_count=8,
+        )
+        root = await observer.before_forward(_prepared(17, "root", _root_rlm()))
+        await _deliver_response(observer, root, _response(finish_reason="tool_calls"))
+        for turn in range(8):
+            child = await observer.before_forward(
+                _prepared(
+                    18 + turn,
+                    f"child-{turn}",
+                    _child_rlm(0, "diagnostic", turn=turn),
+                )
+            )
+            await _deliver_response(observer, child, _response())
+        with pytest.raises(ValueError, match="outside the deployed session bounds"):
+            await observer.before_forward(
+                _prepared(26, "child-overflow", _child_rlm(0, "diagnostic", turn=8))
+            )
+        ledger.close()
+
+    asyncio.run(scenario())
+
+
 def test_child_commit_then_reservation_failure_is_terminal_before_post(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1074,6 +1108,90 @@ def test_observer_rejects_tool_finish_without_a_tool_call(tmp_path: Path) -> Non
             "typed_response",
             ValueError("tool finish without a tool call"),
         )
+        ledger.close()
+
+    asyncio.run(scenario())
+
+
+def test_observer_rejects_tool_call_with_non_tool_finish(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        observer, ledger, producer = _observer(tmp_path / "ledger")
+        ticket = await observer.before_forward(_prepared(17, "root", _root_rlm()))
+        response = _response(finish_reason="tool_calls")
+        response.finish_reason = "stop"
+        await observer.after_raw_response(ticket, canonical_json({"fixture": "tool-stop"}))
+        with pytest.raises(ValueError, match="requires tool_calls finish reason"):
+            await observer.after_response(ticket, response)
+        assert not producer._completed
+        await observer.abort(ticket, "typed_response", ValueError("tool/finish mismatch"))
+        ledger.close()
+
+    asyncio.run(scenario())
+
+
+def test_observer_rejects_unknown_typed_message_fields(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        observer, ledger, producer = _observer(tmp_path / "ledger")
+        ticket = await observer.before_forward(_prepared(17, "root", _root_rlm()))
+        response = _response()
+        response.raw["choices"][0]["message"]["provider_extension"] = "unknown"
+        await observer.after_raw_response(ticket, canonical_json({"fixture": "unknown-field"}))
+        with pytest.raises(ValueError, match="outside the pinned schema"):
+            await observer.after_response(ticket, response)
+        assert not producer._completed
+        await observer.abort(ticket, "typed_response", ValueError("unknown field"))
+        ledger.close()
+
+    asyncio.run(scenario())
+
+
+def test_max_token_malformed_action_completes_before_next_child_turn(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        def reject_non_roundtrip(
+            _request: object,
+            _message: object,
+            action_token_ids: tuple[int, ...],
+        ) -> None:
+            if action_token_ids[-1] != 2:
+                raise ValueError("truncated action does not round-trip")
+
+        observer, ledger, producer = _observer(
+            tmp_path / "ledger",
+            validate_action=reject_non_roundtrip,
+        )
+        root = await observer.before_forward(_prepared(17, "root", _root_rlm()))
+        await _deliver_response(observer, root, _response(finish_reason="tool_calls"))
+        child = await observer.before_forward(
+            _prepared(18, "child", _child_rlm(0, "diagnostic"))
+        )
+        truncated = _response(finish_reason="length")
+        truncated.raw["choices"][0]["message"] = {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_0",
+                    "type": "function",
+                    "function": {"name": "ipython", "arguments": "{"},
+                }
+            ],
+        }
+        await _deliver_response(observer, child, truncated)
+        truncated_decision = next(
+            decision
+            for decision in producer._completed.values()
+            if decision.action.finish_reason == "length"
+        )
+        assert truncated_decision.action.termination_kind == "max_tokens"
+        assert truncated_decision.action.parse_status == "malformed"
+        next_turn = await observer.before_forward(
+            _prepared(19, "child-return", _child_rlm(0, "diagnostic", turn=1))
+        )
+        await _deliver_response(observer, next_turn, _response())
+        assert len(producer._completed) == 3
+        assert not producer._pending
         ledger.close()
 
     asyncio.run(scenario())

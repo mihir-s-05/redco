@@ -865,17 +865,6 @@ class BehaviorAction:
             raise ValueError("prepared actions require token-semantic validation")
         if not prepared and (encode_action is None or validate_action is not None):
             raise ValueError("legacy actions require typed-message re-encoding")
-        if prepared:
-            assert validate_action is not None
-            validate_action(request, message, action)
-        else:
-            assert encode_action is not None
-            rendered = _token_tuple(
-                encode_action(request, message),
-                "rendered_action_token_ids",
-            )
-            if rendered != action:
-                raise ExactActionMismatch("typed message does not round-trip to action tokens")
         if not isinstance(finish_reason, str) or not finish_reason:
             raise ValueError("finish_reason must be nonempty")
         if request_id is None:
@@ -912,6 +901,20 @@ class BehaviorAction:
         )
         if (termination_kind, eos_token_id) != (expected_termination, expected_eos):
             raise ValueError("sampled action termination contract is inconsistent")
+        if expected_termination != "max_tokens":
+            if prepared:
+                assert validate_action is not None
+                validate_action(request, message, action)
+            else:
+                assert encode_action is not None
+                rendered = _token_tuple(
+                    encode_action(request, message),
+                    "rendered_action_token_ids",
+                )
+                if rendered != action:
+                    raise ExactActionMismatch(
+                        "typed message does not round-trip to action tokens"
+                    )
         eos = expected_eos
         self = object.__new__(cls)
         action_bytes = canonical_json(action)

@@ -639,6 +639,82 @@ def test_textual_refusal_is_an_ordinary_exact_action() -> None:
     assert action.message["content"] == "I cannot help with that."
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"role": "assistant", "content": "ordinary text"},
+        {"role": "assistant", "content": ""},
+        {"role": "assistant", "content": None},
+        {"role": "assistant", "content": "ordinary text", "tool_calls": None},
+        {"role": "assistant", "content": "ordinary text", "tool_calls": []},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_0",
+                    "type": "function",
+                    "function": {"name": "ipython", "arguments": '{"code":"1+1"}'},
+                }
+            ],
+        },
+    ],
+)
+def test_pinned_typed_message_optional_field_matrix_is_closed(
+    message: dict[str, object],
+) -> None:
+    finish_reason = "tool_calls" if message.get("tool_calls") else "stop"
+    termination_kind = "tool_calls" if finish_reason == "tool_calls" else "eos"
+    action = _action(
+        message=message,
+        finish_reason=finish_reason,
+        termination_kind=termination_kind,
+        eos_token_id=None if termination_kind == "tool_calls" else 2,
+    )
+    assert action.parse_status == "valid"
+    assert action.message == message
+
+
+def test_malformed_max_token_action_strictly_reloads_without_semantic_roundtrip() -> None:
+    def reject_truncated(
+        _request: object,
+        _message: object,
+        _action_token_ids: object,
+    ) -> None:
+        raise ValueError("truncated action does not round-trip")
+
+    message = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_0",
+                "type": "function",
+                "function": {"name": "ipython", "arguments": "{"},
+            }
+        ],
+    }
+    action = BehaviorAction.build(
+        key=_prepared_key(),
+        action_token_ids=(20, 21),
+        behavior_logprobs=(-0.2, -0.1),
+        raw_transport_message=message,
+        finish_reason="length",
+        prompt_tokens=2,
+        completion_tokens=2,
+        termination_kind="max_tokens",
+        eos_token_id=None,
+        validate_action=reject_truncated,
+    )
+    assert action.parse_status == "malformed"
+    restored = BehaviorAction.from_bytes(
+        action.to_bytes(),
+        validate_action=reject_truncated,
+        render_prompt=lambda _request: (10, 11),
+    )
+    assert restored.to_bytes() == action.to_bytes()
+
+
 def test_hashes_and_versioned_canonical_digest_bind_every_action_payload() -> None:
     action = _action()
     payload = action.to_payload()
