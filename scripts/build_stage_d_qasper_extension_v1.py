@@ -11,11 +11,20 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from redco.analysis.stage_d_v13_source_phase_a_selector import (
+    exact_reference as _canonical_exact_reference,
+)
+from redco.analysis.stage_d_v13_source_phase_a_selector import (
+    render_paper as _canonical_render_paper,
+)
+from redco.analysis.stage_d_v13_source_phase_a_selector import (
+    select_first_eligible as _canonical_select_first_eligible,
+)
+
 QASPER_SOURCE_REVISION = "fdc9d8214fbab5dd782958601db4d678e6934a54"
 QASPER_PARQUET_REVISION = "06806e4608976fc2fac0a090ac425d5b2b29caf4"
 PARQUET_BASE = (
-    "https://huggingface.co/datasets/allenai/qasper/resolve/"
-    f"{QASPER_PARQUET_REVISION}/qasper"
+    f"https://huggingface.co/datasets/allenai/qasper/resolve/{QASPER_PARQUET_REVISION}/qasper"
 )
 EXTENSION_SPLITS = {
     "successor_support": 64,
@@ -26,9 +35,7 @@ EXTENSION_SPLITS = {
 
 def _encode_rows(rows: Iterable[dict[str, Any]]) -> bytes:
     return b"".join(
-        (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode(
-            "utf-8"
-        )
+        (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
         for row in rows
     )
 
@@ -72,19 +79,7 @@ def _sha256(data: bytes) -> str:
 
 
 def render_paper(row: dict[str, Any]) -> str:
-    parts = [
-        f"### PAPER: {row['title']}",
-        "<abstract>",
-        row["abstract"],
-        "</abstract>",
-    ]
-    sections = row["full_text"]
-    for name, paragraphs in zip(
-        sections["section_name"], sections["paragraphs"], strict=True
-    ):
-        parts.append(f"\n## {name}")
-        parts.extend(paragraphs)
-    return "\n".join(parts)
+    return _canonical_render_paper(row)
 
 
 def _answer_type(annotation: dict[str, Any]) -> str:
@@ -103,25 +98,10 @@ def _exact_reference(
     *,
     minimum_span_characters: int,
 ) -> tuple[tuple[str, ...], str] | None:
-    candidates: list[tuple[tuple[str, ...], str]] = []
-    for annotation in answers["answer"]:
-        if annotation["unanswerable"]:
-            continue
-        evidence = tuple(
-            dict.fromkeys(
-                span.strip()
-                for span in annotation["evidence"]
-                if len(span.strip()) >= minimum_span_characters
-                and span.strip() in paper
-            )
-        )
-        if evidence:
-            candidates.append((evidence, _answer_type(annotation)))
-    if not candidates:
-        return None
-    return min(
-        candidates,
-        key=lambda item: (sum(map(len, item[0])), len(item[0]), item[1]),
+    return _canonical_exact_reference(
+        paper,
+        answers,
+        minimum_span_characters=minimum_span_characters,
     )
 
 
@@ -138,35 +118,15 @@ def select_extension_examples(
 ) -> list[dict[str, Any]]:
     examples: list[dict[str, Any]] = []
     for source_ordinal, row in enumerate(rows):
-        if row["id"] in forbidden_paper_ids:
-            continue
-        paper = render_paper(row)
-        if len(paper) > maximum_paper_characters:
-            continue
-        qas = row["qas"]
-        chosen = None
-        for index, question in enumerate(qas["question"]):
-            reference = _exact_reference(
-                paper,
-                qas["answers"][index],
-                minimum_span_characters=minimum_span_characters,
-            )
-            if reference is None:
-                continue
-            evidence, kind = reference
-            if set(evidence) & forbidden_reference_spans:
-                continue
-            chosen = {
-                "example_id": f"qasper-{qas['question_id'][index]}",
-                "paper_id": row["id"],
-                "title": row["title"],
-                "question": question,
-                "answer_type": kind,
-                "split": output_split,
-                "paper": paper,
-                "reference_evidence": list(evidence),
-            }
-            break
+        chosen_result = _canonical_select_first_eligible(
+            row,
+            split=output_split,
+            maximum_paper_characters=maximum_paper_characters,
+            minimum_span_characters=minimum_span_characters,
+            forbidden_paper_ids=forbidden_paper_ids,
+            forbidden_reference_spans=forbidden_reference_spans,
+        )
+        chosen = None if chosen_result is None else chosen_result[0]
         if chosen is not None:
             examples.append(chosen)
             if selection_receipts is not None:
@@ -182,9 +142,7 @@ def select_extension_examples(
             forbidden_reference_spans.update(chosen["reference_evidence"])
         if len(examples) == limit:
             return examples
-    raise RuntimeError(
-        f"only found {len(examples)} fresh {output_split} papers, needed {limit}"
-    )
+    raise RuntimeError(f"only found {len(examples)} fresh {output_split} papers, needed {limit}")
 
 
 def materialize_extension(
@@ -197,9 +155,7 @@ def materialize_extension(
 ) -> list[dict[str, Any]]:
     forbidden_paper_ids = {str(row["paper_id"]) for row in old_rows}
     forbidden_reference_spans = {
-        str(span)
-        for row in old_rows
-        for span in row["reference_evidence"]
+        str(span) for row in old_rows for span in row["reference_evidence"]
     }
     support = select_extension_examples(
         train_rows,
@@ -259,9 +215,7 @@ def materialize_support_successor(
         *retired_history,
     }
     excluded_reference_spans = {
-        str(span)
-        for row in forbidden_rows
-        for span in row["reference_evidence"]
+        str(span) for row in forbidden_rows for span in row["reference_evidence"]
     }
     selection_receipts: list[dict[str, Any]] = []
     reserve = select_extension_examples(
@@ -274,23 +228,17 @@ def materialize_support_successor(
         forbidden_reference_spans=set(excluded_reference_spans),
         selection_receipts=selection_receipts,
     )[0]
-    inherited_science = [
-        row for row in prior_rows if row["split"] != "successor_support"
-    ]
+    inherited_science = [row for row in prior_rows if row["split"] != "successor_support"]
     rows = [*retained, reserve, *inherited_science]
     exclusion_hashes = {
         "paper_ids_sha256": _sha256(
-            _encode_rows(
-                [{"value": value} for value in sorted(excluded_paper_ids)]
-            )
+            _encode_rows([{"value": value} for value in sorted(excluded_paper_ids)])
         ),
         "example_ids_sha256": _sha256(
             _encode_rows(
                 [
                     {"value": value}
-                    for value in sorted(
-                        str(row["example_id"]) for row in forbidden_rows
-                    )
+                    for value in sorted(str(row["example_id"]) for row in forbidden_rows)
                 ]
             )
         ),
@@ -299,19 +247,13 @@ def materialize_support_successor(
                 [
                     {"value": value}
                     for value in sorted(
-                        _sha256(str(row["paper"]).encode("utf-8"))
-                        for row in forbidden_rows
+                        _sha256(str(row["paper"]).encode("utf-8")) for row in forbidden_rows
                     )
                 ]
             )
         ),
         "reference_spans_sha256": _sha256(
-            _encode_rows(
-                [
-                    {"value": value}
-                    for value in sorted(excluded_reference_spans)
-                ]
-            )
+            _encode_rows([{"value": value} for value in sorted(excluded_reference_spans)])
         ),
     }
     checks = {
@@ -326,28 +268,17 @@ def materialize_support_successor(
         not in {str(row["paper_id"]) for row in prior_rows},
         "reserve_example_id_fresh": reserve["example_id"]
         not in {str(row["example_id"]) for row in forbidden_rows},
-        "reserve_rendered_paper_fresh": _sha256(
-            str(reserve["paper"]).encode("utf-8")
-        )
-        not in {
-            _sha256(str(row["paper"]).encode("utf-8")) for row in forbidden_rows
-        },
+        "reserve_rendered_paper_fresh": _sha256(str(reserve["paper"]).encode("utf-8"))
+        not in {_sha256(str(row["paper"]).encode("utf-8")) for row in forbidden_rows},
         "reserve_excluded_from_immutable_snapshot": reserve["paper_id"]
         not in {str(row["paper_id"]) for row in old_rows},
-        "reserve_excluded_from_retired_history": reserve["paper_id"]
-        not in retired_history,
+        "reserve_excluded_from_retired_history": reserve["paper_id"] not in retired_history,
         "reserve_reference_fresh": not set(reserve["reference_evidence"])
-        & {
-            str(span)
-            for row in forbidden_rows
-            for span in row["reference_evidence"]
-        },
+        & {str(span) for row in forbidden_rows for span in row["reference_evidence"]},
         "reserve_not_in_science_partitions": reserve["example_id"]
         not in {row["example_id"] for row in inherited_science},
         "every_reference_exact": all(
-            span in row["paper"]
-            for row in rows
-            for span in row["reference_evidence"]
+            span in row["paper"] for row in rows for span in row["reference_evidence"]
         ),
     }
     if not all(checks.values()):
@@ -450,8 +381,7 @@ def main() -> None:
             raise ValueError("prior extension rows are not canonical JSONL")
         prior_lines = [line + b"\n" for line in prior_bytes.splitlines()]
         prior_line_by_example_id = {
-            row["example_id"]: line
-            for row, line in zip(prior_rows, prior_lines, strict=True)
+            row["example_id"]: line for row, line in zip(prior_rows, prior_lines, strict=True)
         }
         if len(prior_line_by_example_id) != len(prior_rows):
             raise ValueError("prior extension example IDs are not unique")
@@ -495,6 +425,10 @@ def main() -> None:
     address_audit_bytes = None
     successor_plan_bytes = None
     if successor_details is not None:
+        assert prior_line_by_example_id is not None
+        assert address_audit is not None
+        assert address_audit_bytes is not None
+        assert successor_plan_bytes is not None
         from redco.analysis.stage_d_collection import (
             StageDCollectionPlan,
             derive_scientific_group_id,
@@ -544,19 +478,14 @@ def main() -> None:
         reserve_id = successor_details["reserve"]["example_id"]
         retired_id = successor_details["retired"]["example_id"]
         audit_checks = {
-            "prior_plan_has_64_unique_slots": len(prior_plan.slots)
-            == len(prior_slots)
-            == 64,
+            "prior_plan_has_64_unique_slots": len(prior_plan.slots) == len(prior_slots) == 64,
             "successor_plan_has_64_unique_slots": len(successor_plan.slots)
             == len(successor_slots)
             == 64,
             "retired_address_absent": retired_id not in successor_slots,
             "reserve_address_fresh": reserve_id not in prior_slots,
             "preserved_63_addresses_exact": len(preserved) == 63
-            and all(
-                row["matches_prior_address"] and row["matches_prior_row"]
-                for row in preserved
-            ),
+            and all(row["matches_prior_address"] and row["matches_prior_row"] for row in preserved),
         }
         if not all(audit_checks.values()):
             raise ValueError(f"successor address audit failed: {audit_checks}")
@@ -581,20 +510,13 @@ def main() -> None:
         address_audit_bytes = canonical_json(address_audit)
         successor_plan_bytes = successor_plan.to_bytes()
     old_ids = {str(row["paper_id"]) for row in old_rows}
-    old_refs = {
-        str(span)
-        for row in old_rows
-        for span in row["reference_evidence"]
-    }
+    old_refs = {str(span) for row in old_rows for span in row["reference_evidence"]}
     new_ids = {str(row["paper_id"]) for row in rows}
-    new_refs = {
-        str(span) for row in rows for span in row["reference_evidence"]
-    }
+    new_refs = {str(span) for row in rows for span in row["reference_evidence"]}
     split_counts = Counter(str(row["split"]) for row in rows)
     expected_splits = EXTENSION_SPLITS
     checks = {
-        "immutable_old_snapshot_retained": _sha256(old_bytes)
-        == args.old_snapshot_sha256,
+        "immutable_old_snapshot_retained": _sha256(old_bytes) == args.old_snapshot_sha256,
         (
             "support_successor_has_112_unique_papers"
             if successor_details
@@ -606,9 +528,7 @@ def main() -> None:
         "extension_references_unique": len(new_refs)
         == sum(len(row["reference_evidence"]) for row in rows),
         "every_reference_exact": all(
-            span in row["paper"]
-            for row in rows
-            for span in row["reference_evidence"]
+            span in row["paper"] for row in rows for span in row["reference_evidence"]
         ),
     }
     if not all(checks.values()):
@@ -636,16 +556,10 @@ def main() -> None:
         "partitions": {
             split: {
                 "papers": expected,
-                "paper_ids": [
-                    row["paper_id"] for row in rows if row["split"] == split
-                ],
+                "paper_ids": [row["paper_id"] for row in rows if row["split"] == split],
                 "answer_types": dict(
                     sorted(
-                        Counter(
-                            row["answer_type"]
-                            for row in rows
-                            if row["split"] == split
-                        ).items()
+                        Counter(row["answer_type"] for row in rows if row["split"] == split).items()
                     )
                 ),
             }
@@ -674,9 +588,7 @@ def main() -> None:
             "path": args.address_audit.as_posix(),
             "sha256": _sha256(canonical_json(address_audit)),
         }
-    manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(
-        "utf-8"
-    )
+    manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
     outputs = [(args.output, payload)]
     if successor_details is not None:
         outputs.extend(

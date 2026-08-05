@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from redco.analysis.stage_d_v13_draft import canonical_json_bytes, sha256_bytes
 
@@ -65,10 +65,16 @@ def _validate_parent_path(root: Path, parent: Path) -> None:
         raise ValueError(f"draft output parent escapes repository: {parent}") from error
 
 
-def validate_output_paths(root: Path, immutable_paths: Mapping[str, str]) -> None:
+def validate_output_paths(
+    root: Path,
+    immutable_paths: Mapping[str, str],
+    *,
+    output_paths: Iterable[str] | None = None,
+) -> None:
     """Reject symlink, hard-link, and cross-output aliases before publication."""
 
-    destinations = [root / relative for relative in sorted(OUTPUT_RELATIVE_PATHS)]
+    approved_outputs = frozenset(output_paths or OUTPUT_RELATIVE_PATHS)
+    destinations = [root / relative for relative in sorted(approved_outputs)]
     for destination in destinations:
         _validate_parent_path(root, destination.parent)
         if (destination.exists() or destination.is_symlink()) and _is_link_or_reparse(destination):
@@ -79,10 +85,11 @@ def validate_output_paths(root: Path, immutable_paths: Mapping[str, str]) -> Non
     for index, destination in enumerate(destinations):
         for other in destinations[index + 1 :]:
             if destination.exists() and other.exists() and os.path.samefile(destination, other):
-                raise ValueError(
-                    f"draft outputs are hard-link aliases: {destination} and {other}"
-                )
-    immutable = [root / relative for relative in immutable_paths]
+                raise ValueError(f"draft outputs are hard-link aliases: {destination} and {other}")
+    immutable = [
+        Path(relative) if Path(relative).is_absolute() else root / relative
+        for relative in immutable_paths
+    ]
     for destination in destinations:
         resolved_destination = destination.resolve(strict=False)
         for source in immutable:
@@ -95,14 +102,21 @@ def validate_output_paths(root: Path, immutable_paths: Mapping[str, str]) -> Non
 
 
 def canonical_json_payload(value: dict[str, Any]) -> bytes:
-    data = canonical_json_bytes(value)
+    data = cast(bytes, canonical_json_bytes(value))
     if data.endswith(b"\n"):
         raise AssertionError("canonical JSON unexpectedly ended in a newline")
     return data
 
 
-def atomic_write(root: Path, relative: str, data: bytes) -> str:
-    if relative not in OUTPUT_RELATIVE_PATHS:
+def atomic_write(
+    root: Path,
+    relative: str,
+    data: bytes,
+    *,
+    output_paths: Iterable[str] | None = None,
+) -> str:
+    approved_outputs = frozenset(output_paths or OUTPUT_RELATIVE_PATHS)
+    if relative not in approved_outputs:
         raise ValueError(f"refusing to write an unapproved draft path: {relative}")
     destination = root / relative
     _validate_parent_path(root, destination.parent)
@@ -124,7 +138,7 @@ def atomic_write(root: Path, relative: str, data: bytes) -> str:
             temporary.unlink()
     if destination.read_bytes() != data:
         raise AssertionError(f"short draft write: {relative}")
-    return sha256_bytes(data)
+    return cast(str, sha256_bytes(data))
 
 
 def publication_envelope(value: object, relative: str) -> None:
