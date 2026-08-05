@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from redco.analysis.stage_d_exact_action import BehaviorAction, ExactActionKey
 from redco.analysis.stage_d_receipt_ledger import (
@@ -497,7 +497,7 @@ class StageDSourceRolloutProducer:
             response_sha256=response_sha256,
         )
         self._observed_responses.add(decision_id)
-        return response_sha256
+        return cast(str, response_sha256)
 
     def abort_policy_call(
         self,
@@ -533,7 +533,7 @@ class StageDSourceRolloutProducer:
         del self._pending[decision_id]
         self._observed_responses.discard(decision_id)
         self._aborted = True
-        return receipt
+        return cast(bytes, receipt)
 
     def intercept_policy_call(
         self,
@@ -719,10 +719,13 @@ class StageDSourceRolloutProducer:
             }
         )
         error_sha256 = self._ledger.put_evidence(error_evidence)
-        return self._ledger.abort_source_rollout_finalization(
+        return cast(
+            bytes | None,
+            self._ledger.abort_source_rollout_finalization(
             group_id=self._group_id,
             rollout_id=self._rollout_id,
             error_sha256=error_sha256,
+            ),
         )
 
 
@@ -1017,7 +1020,8 @@ def _verify_trace_call(
     ):
         raise ValueError("captured prompt/action streams differ from the Verifiers trace")
     message = _normalize_openai_message(node.get("message"))
-    if message != _normalize_openai_message(action.message):
+    transport_message = _normalize_openai_message(action.message)
+    if not _sampled_response_messages_equal(transport_message, message):
         raise ValueError("captured transport message differs from the Verifiers trace")
     request = json.loads(action.key.request)
     if not isinstance(request, dict):
@@ -1324,6 +1328,21 @@ def _normalize_openai_message(value: object) -> dict[str, Any]:
     if message.get("role") == "assistant" and message.get("content") is None:
         message["content"] = ""
     return message
+
+
+def _sampled_response_messages_equal(
+    transport: Mapping[str, Any], trace: Mapping[str, Any]
+) -> bool:
+    """Compare sampled messages with the one authenticated wire/persisted exception."""
+    if transport == trace:
+        return True
+    return (
+        set(transport) == {"role", "content"}
+        and set(trace) == {"role"}
+        and transport.get("role") == "assistant"
+        and trace.get("role") == "assistant"
+        and transport.get("content") is None
+    )
 
 
 def _normalize_openai_tools(value: object) -> list[dict[str, Any]]:

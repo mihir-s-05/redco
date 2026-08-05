@@ -16,10 +16,22 @@ from typing import Any, cast
 from test_stage_d_source_producer import _episode, _prepared_action
 
 from redco.analysis.stage_d_source_contracts import RolloutDecision
-from redco.analysis.stage_d_source_producer import _verify_trace_call, derive_source_trace
+from redco.analysis.stage_d_source_producer import (
+    _verify_trace_call,
+    derive_source_trace,
+    structural_child_target_id,
+)
 from redco.analysis.stage_d_spawn_provenance import PolicyEventAddress
 from redco.contracts import canonical_json
 from redco.integrations.verifiers_trace_v2 import extract_v2_rlm_provenance
+
+MESSAGE_COMPARISON_ERROR = "captured transport message differs from the Verifiers trace"
+MESSAGE_COMPARISON_OWNER = "redco.analysis.stage_d_source_producer:_verify_trace_call"
+DERIVE_SOURCE_TRACE_OWNER = "redco.analysis.stage_d_source_producer:derive_source_trace"
+RECORD_EXACTNESS_ONLY_SCOPE = (
+    "frozen record exactness vectors only; no record-field mutation is "
+    "production-bound by this post-repair fixture"
+)
 
 PRODUCTION_BOUNDARY_CONTRACT = {
     "version": "v1",
@@ -33,6 +45,7 @@ PRODUCTION_BOUNDARY_CONTRACT = {
         "frozen exactness vectors only; production record binding is required before "
         "a repaired comparator is eligible"
     ),
+    "record_binding_scope": RECORD_EXACTNESS_ONLY_SCOPE,
     "raw_bytes_passthrough": True,
 }
 
@@ -50,7 +63,7 @@ FUTURE_PRODUCTION_BINDING = {
         "tests/stage_d_source_comparison_oracle.py:record_exactness_binding_observation"
     ),
     "record_cases_bound": False,
-    "record_cases_policy": "frozen exactness vectors until a real production hook is supplied",
+    "record_cases_policy": RECORD_EXACTNESS_ONLY_SCOPE,
 }
 
 
@@ -90,6 +103,8 @@ def production_boundary_observation(
         target_id=None,
         target_ordinal=None,
     )
+    error_origin: str | None = None
+    failure_owner: str | None = None
     try:
         _verify_trace_call(
             source_trace,
@@ -101,14 +116,22 @@ def production_boundary_observation(
             decision=cast(Any, decision),
             rollout_id=source_trace["id"],
         )
-        derive_source_trace(
-            raw_episode,
-            decisions=(cast(RolloutDecision, decision),),
-        )
-    except ValueError:
+    except ValueError as error:
         accepted = False
+        error_origin = str(error)
+        failure_owner = MESSAGE_COMPARISON_OWNER
     else:
-        accepted = True
+        try:
+            derive_source_trace(
+                raw_episode,
+                decisions=(cast(RolloutDecision, decision),),
+            )
+        except ValueError as error:
+            accepted = False
+            error_origin = str(error)
+            failure_owner = DERIVE_SOURCE_TRACE_OWNER
+        else:
+            accepted = True
     return {
         "accepted": accepted,
         "hook_version": "v1",
@@ -117,7 +140,107 @@ def production_boundary_observation(
         "trace_bytes": trace_bytes,
         "transport_sha256": sha256(transport_bytes).hexdigest(),
         "trace_sha256": sha256(trace_bytes).hexdigest(),
-        "production_callable": "redco.analysis.stage_d_source_producer:_verify_trace_call",
+        "production_callable": MESSAGE_COMPARISON_OWNER,
+        "failure_owner": failure_owner,
+        "error_origin": error_origin,
+    }
+
+
+def _record_exactness_only_case_ids() -> frozenset[str]:
+    return frozenset(
+        case_id
+        for case_id in MUTATION_CASES
+        if case_id.startswith("record-")
+        or case_id in {"finish-reason-disagreement", "token-cap-disagreement"}
+    )
+
+
+def production_record_owner_observation(case_id: str) -> dict[str, Any]:
+    """Expose the deliberate post-repair record-binding boundary honestly."""
+    if case_id not in _record_exactness_only_case_ids():
+        raise AssertionError(f"no frozen record exactness vector for {case_id}")
+    return {
+        "bound": False,
+        "case_id": case_id,
+        "owner": "tests/stage_d_source_comparison_oracle.py:record_exactness_binding_observation",
+        "production_owner": None,
+        "status": "not_bound_post_repair",
+        "scope": RECORD_EXACTNESS_ONLY_SCOPE,
+        "error_origin": "record mutation is frozen exactness-only and not production-bound",
+    }
+
+
+def _production_decisions(source_trace: dict[str, Any]) -> tuple[RolloutDecision, ...]:
+    decisions: list[RolloutDecision] = []
+    for index, record in enumerate(extract_v2_rlm_provenance(source_trace)):
+        address = record.scientific_address
+        target_id: str | None = None
+        target_ordinal: int | None = None
+        node_kind = "root" if record.depth == 0 else "child"
+        if node_kind == "child":
+            assert record.parent_lineage is not None
+            assert record.parent_call_ordinal is not None
+            assert record.parent_tool_call_slot is not None
+            assert record.spawn_ordinal is not None
+            parent = PolicyEventAddress(
+                record.depth - 1,
+                record.parent_lineage,
+                record.parent_call_ordinal,
+                record.parent_turn or 0,
+                "policy",
+            )
+            target_id = structural_child_target_id(
+                parent,
+                rollout_id=str(source_trace["id"]),
+                parent_tool_call_slot=record.parent_tool_call_slot,
+                spawn_ordinal=record.spawn_ordinal,
+            )
+            target_ordinal = record.spawn_ordinal
+        decisions.append(
+            cast(
+                RolloutDecision,
+                SimpleNamespace(
+                    decision_id=f"oracle-derived-{index}",
+                    event_address=address,
+                    action=_prepared_action(71 + index),
+                    node_kind=node_kind,
+                    target_id=target_id,
+                    target_ordinal=target_ordinal,
+                ),
+            )
+        )
+    return tuple(decisions)
+
+
+def production_derived_owner_observation(case_id: str) -> dict[str, Any]:
+    """Exercise named ``derive_source_trace`` failures on disposable episode data."""
+    episode = json.loads(_episode())
+    trace = episode["traces"][0]
+    decisions = _production_decisions(trace)
+    if case_id == "derived-sampled-node-bijection":
+        trace["calls"] = trace["calls"][:-1]
+    elif case_id == "derived-reward-components":
+        trace["rewards"] = {}
+    elif case_id == "derived-finite-reward":
+        trace["rewards"]["exact_span_f1"] = "not-finite"
+    else:
+        raise AssertionError(f"no derive_source_trace owner mapping for {case_id}")
+    try:
+        derive_source_trace(canonical_json(episode), decisions=decisions)
+    except ValueError as error:
+        return {
+            "bound": True,
+            "case_id": case_id,
+            "owner": DERIVE_SOURCE_TRACE_OWNER,
+            "status": "rejected",
+            "error_origin": str(error),
+        }
+    return {
+        "bound": True,
+        "case_id": case_id,
+        "owner": DERIVE_SOURCE_TRACE_OWNER,
+        "status": "accepted",
+        "error_origin": None,
     }
 
 
@@ -256,17 +379,33 @@ def _mutation_cases() -> dict[str, tuple[dict[str, Any], dict[str, Any], bool]]:
         "tool-call-reordered": (
             {
                 "role": "assistant",
-                "tool_calls": [{"id": "a"}, {"id": "b"}],
+                "tool_calls": [
+                    {"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}},
+                    {"id": "b", "type": "function", "function": {"name": "x", "arguments": "{}"}},
+                ],
             },
             {
                 "role": "assistant",
-                "tool_calls": [{"id": "b"}, {"id": "a"}],
+                "tool_calls": [
+                    {"id": "b", "type": "function", "function": {"name": "x", "arguments": "{}"}},
+                    {"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}},
+                ],
             },
             False,
         ),
         "tool-call-id-changed": (
-            {"role": "assistant", "tool_calls": [{"id": "a"}]},
-            {"role": "assistant", "tool_calls": [{"id": "b"}]},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}}
+                ],
+            },
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {"id": "b", "type": "function", "function": {"name": "x", "arguments": "{}"}}
+                ],
+            },
             False,
         ),
         "tool-call-name-changed": (
