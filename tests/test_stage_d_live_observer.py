@@ -7,12 +7,13 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
 
 from redco.analysis.stage_d_branch_artifacts import StageDBranchTargetRoster
+from redco.analysis.stage_d_ledger_contracts import LedgerError
 from redco.analysis.stage_d_live_observer import (
     StageDForwardDirectiveObserver,
     StageDObserverIdentity,
@@ -22,7 +23,6 @@ from redco.analysis.stage_d_live_observer import (
 )
 from redco.analysis.stage_d_receipt_ledger import (
     GenesisBinding,
-    LedgerError,
     StageDReceiptLedger,
     inspect_ledger,
 )
@@ -43,19 +43,22 @@ def _sha256(value: bytes) -> str:
 
 
 def _conformance() -> bytes:
-    return canonical_json(
-        sign_payload(
-            {
-                "schema_version": 1,
-                "analysis": "served-stack-categorical-logprob-conformance-v1",
-                "passes": True,
-                "logprob_semantics": "served_chosen_token_post_transform",
-                "categorical_case_count": 3,
-                "served_stack_sha256": "a" * 64,
-                "tool_call_termination_includes_all_generated_tokens": True,
-                "eos_is_included_in_action_tokens_and_logprobs": True,
-            }
-        )
+    return cast(
+        bytes,
+        canonical_json(
+            sign_payload(
+                {
+                    "schema_version": 1,
+                    "analysis": "served-stack-categorical-logprob-conformance-v1",
+                    "passes": True,
+                    "logprob_semantics": "served_chosen_token_post_transform",
+                    "categorical_case_count": 3,
+                    "served_stack_sha256": "a" * 64,
+                    "tool_call_termination_includes_all_generated_tokens": True,
+                    "eos_is_included_in_action_tokens_and_logprobs": True,
+                }
+            )
+        ),
     )
 
 
@@ -80,6 +83,7 @@ def _observer(
     *,
     rollout_id: str = "trace-1",
     maximum_captured_session_call_count: int = 8,
+    child_parent_event: PolicyEventAddress | None = None,
     ledger: StageDReceiptLedger | None = None,
     validate_action: Any | None = None,
 ) -> tuple[
@@ -88,7 +92,7 @@ def _observer(
     StageDSourceRolloutProducer,
 ]:
     ledger = _ledger(root) if ledger is None else ledger
-    parent = PolicyEventAddress(0, "root", 0, 0)
+    parent = child_parent_event or PolicyEventAddress(0, "root", 0, 0)
     producer = StageDSourceRolloutProducer(
         ledger=ledger,
         group_id="group-1",
@@ -115,9 +119,7 @@ def _observer(
             continuation_replicates=1,
             failure_reward=-1.0,
             root_policy_turn_count=2,
-            maximum_captured_session_call_count=(
-                maximum_captured_session_call_count
-            ),
+            maximum_captured_session_call_count=(maximum_captured_session_call_count),
         ),
         runtime_snapshot=canonical_json(
             {
@@ -191,9 +193,7 @@ def _child_rlm(
     parent_call_ordinal: int | None = None,
     episode_spawn: int | None = None,
 ) -> dict[str, object]:
-    parent_call_ordinal = (
-        parent_turn if parent_call_ordinal is None else parent_call_ordinal
-    )
+    parent_call_ordinal = parent_turn if parent_call_ordinal is None else parent_call_ordinal
     lineage = derive_child_lineage(
         SpawnScope(1, "root", parent_call_ordinal, 0, parent_turn),
         spawn_ordinal=spawn,
@@ -304,9 +304,7 @@ def test_observer_accepts_bridge_boundary_on_returning_sessions(tmp_path: Path) 
         )
         await _deliver_response(observer, later_child, _response())
         child_decisions = tuple(
-            decision
-            for decision in producer._completed.values()
-            if decision.node_kind == "child"
+            decision for decision in producer._completed.values() if decision.node_kind == "child"
         )
         assert sum(decision.provenance.branch_selected for decision in child_decisions) == 2
         continuation = next(
@@ -381,9 +379,7 @@ def test_observer_tracks_policy_parent_across_compaction(tmp_path: Path) -> None
         )
         await _deliver_response(observer, child, _response())
         decision = next(
-            value
-            for value in producer._completed.values()
-            if value.node_kind == "child"
+            value for value in producer._completed.values() if value.node_kind == "child"
         )
         assert decision.target_ordinal == 2
         assert decision.provenance.branch_selected is False
@@ -447,7 +443,13 @@ def test_actual_interception_train_renderer_path_observes_bytes_once(
     class Renderer:
         supports_tools = True
 
-        def render(self, messages, *, tools=None, add_generation_prompt=False):
+        def render(
+            self,
+            messages: Any,
+            *,
+            tools: Any = None,
+            add_generation_prompt: bool = False,
+        ) -> Any:
             del messages, tools
             assert add_generation_prompt is True
             return SimpleNamespace(
@@ -457,10 +459,10 @@ def test_actual_interception_train_renderer_path_observes_bytes_once(
                 is_content=[False, False],
             )
 
-        def get_stop_token_ids(self):
+        def get_stop_token_ids(self) -> list[int]:
             return [2]
 
-        def parse_response(self, completion_ids, *, tools=None):
+        def parse_response(self, completion_ids: Any, *, tools: Any = None) -> Any:
             del tools
             assert completion_ids == [20, 2]
             return SimpleNamespace(
@@ -475,9 +477,7 @@ def test_actual_interception_train_renderer_path_observes_bytes_once(
             "choices": [
                 {
                     "token_ids": [20, 2],
-                    "logprobs": {
-                        "content": [{"logprob": -0.2}, {"logprob": -0.1}]
-                    },
+                    "logprobs": {"content": [{"logprob": -0.2}, {"logprob": -0.1}]},
                     "finish_reason": "stop",
                 }
             ],
@@ -589,6 +589,7 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
         RenderedTokens,
         ToolCallParseStatus,
     )
+
     env_root = Path(__file__).parents[1] / "environments" / "redco_evidence_selection_v2"
     sys.path.insert(0, str(env_root))
     from redco_evidence_selection_v2.source_env import _canonical_source_episode
@@ -674,23 +675,25 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
                 message_roles=["user"],
             )
 
-        def render(self, messages, *, tools=None, add_generation_prompt=False):
+        def render(
+            self,
+            messages: Any,
+            *,
+            tools: Any = None,
+            add_generation_prompt: bool = False,
+        ) -> Any:
             del tools
             assert add_generation_prompt is True
-            return self._rendered(
-                [10, 11]
-                if len(messages) == 1
-                else [10, 11, 20, 2, 30]
-            )
+            return self._rendered([10, 11] if len(messages) == 1 else [10, 11, 20, 2, 30])
 
-        def bridge_to_next_turn(self, *args, **kwargs):
+        def bridge_to_next_turn(self, *args: Any, **kwargs: Any) -> Any:
             del args, kwargs
             return self._rendered([10, 11, 20, 2, 30])
 
-        def get_stop_token_ids(self):
+        def get_stop_token_ids(self) -> list[int]:
             return [2]
 
-        def parse_response(self, completion_ids, *, tools=None):
+        def parse_response(self, completion_ids: Any, *, tools: Any = None) -> Any:
             del tools
             assert completion_ids in ([20, 2], [20, 21])
             call_index = self.parse_index
@@ -713,7 +716,7 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
 
     post_index = 0
 
-    async def post(*_args, **_kwargs):
+    async def post(*_args: Any, **_kwargs: Any) -> Any:
         nonlocal post_index
         call_index = post_index
         request_id = f"fixture-{call_index}"
@@ -788,7 +791,7 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
     server = InterceptionServer()
     server.sessions["secret"] = session
 
-    def rlm_headers(rlm: dict[str, object]):
+    def rlm_headers(rlm: dict[str, object]) -> Any:
         names = {
             "provenance_version": "X-RLM-Provenance-Version",
             "depth": "X-RLM-Depth",
@@ -806,28 +809,20 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
             "parent_tool_call_slot": "X-RLM-Parent-Tool-Call-Slot",
             "spawn_ordinal": "X-RLM-Spawn-Ordinal",
             "episode_spawn_ordinal": "X-RLM-Episode-Spawn-Ordinal",
-            "completed_predecessor_spawn_ordinals": (
-                "X-RLM-Completed-Predecessor-Spawn-Ordinals"
-            ),
-            "completed_episode_spawn_ordinals": (
-                "X-RLM-Completed-Episode-Spawn-Ordinals"
-            ),
+            "completed_predecessor_spawn_ordinals": ("X-RLM-Completed-Predecessor-Spawn-Ordinals"),
+            "completed_episode_spawn_ordinals": ("X-RLM-Completed-Episode-Spawn-Ordinals"),
         }
         headers = {"Authorization": "Bearer secret"}
         for key, value in rlm.items():
             if key not in names:
                 continue
             headers[names[key]] = (
-                ",".join(str(item) for item in value)
-                if isinstance(value, list)
-                else str(value)
+                ",".join(str(item) for item in value) if isinstance(value, list) else str(value)
             )
         return multidict.CIMultiDict(headers)
 
-    async def invoke(call_index: int, messages: list[dict[str, object]]):
-        body = canonical_json(
-            {"model": "ignored", "messages": messages, "tools": [wrapped_tool]}
-        )
+    async def invoke(call_index: int, messages: list[dict[str, object]]) -> Any:
+        body = canonical_json({"model": "ignored", "messages": messages, "tools": [wrapped_tool]})
         request = SimpleNamespace(
             headers=rlm_headers(calls[call_index]["rlm"]),
             path="/v1/chat/completions",
@@ -876,9 +871,7 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
     assert max_token_decisions[0].action.termination_kind == "max_tokens"
     assert max_token_decisions[0].action.action_token_ids == (20, 21)
     child_return_request = openai.post.await_args_list[3].kwargs["body"]
-    assert child_return_request["sampling_params"][
-        "routed_experts_prompt_start"
-    ] == 3
+    assert child_return_request["sampling_params"]["routed_experts_prompt_start"] == 3
     root_return_decision = next(
         decision
         for decision in producer._completed.values()
@@ -1163,9 +1156,7 @@ def test_max_token_malformed_action_completes_before_next_child_turn(
         )
         root = await observer.before_forward(_prepared(17, "root", _root_rlm()))
         await _deliver_response(observer, root, _response(finish_reason="tool_calls"))
-        child = await observer.before_forward(
-            _prepared(18, "child", _child_rlm(0, "diagnostic"))
-        )
+        child = await observer.before_forward(_prepared(18, "child", _child_rlm(0, "diagnostic")))
         truncated = _response(finish_reason="length")
         truncated.raw["choices"][0]["message"] = {
             "role": "assistant",
@@ -1202,9 +1193,7 @@ def test_observer_accepts_textual_refusal_as_ordinary_content(tmp_path: Path) ->
         observer, ledger, producer = _observer(tmp_path / "ledger")
         ticket = await observer.before_forward(_prepared(17, "root", _root_rlm()))
         response = _response()
-        response.raw["choices"][0]["message"]["content"] = (
-            "I cannot answer that request."
-        )
+        response.raw["choices"][0]["message"]["content"] = "I cannot answer that request."
         await _deliver_response(observer, ticket, response)
         (decision,) = producer._completed.values()
         assert decision.action.finish_reason == "stop"
