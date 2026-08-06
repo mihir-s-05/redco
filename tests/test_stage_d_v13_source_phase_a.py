@@ -11,7 +11,9 @@ import shutil
 import subprocess
 import sys
 import types
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any, cast
 
@@ -39,17 +41,11 @@ from redco.analysis.stage_d_v13_source_phase_a import (
     write_phase_a_outputs,
 )
 from redco.analysis.stage_d_v13_source_phase_a_decoder import (
-    PHASE_B_AUTHORIZATION_RELATIVE as LEGACY_PHASE_B_AUTHORIZATION_RELATIVE,
-)
-from redco.analysis.stage_d_v13_source_phase_a_decoder import (
     PHASE_B_BINDING_RELATIVE,
-    PHASE_C3_AUTHORIZATION_RELATIVE,
     DecoderInstrumentation,
     PhaseAWallError,
     PhaseBResumeAuthorizationError,
     PhaseBResumeUnavailable,
-    ResumeDecoderInstrumentation,
-    _synthetic_resume_source_rows,
     bounded_source_rows,
     legacy_datasets_decoder_probe,
     resume_decoder_invocation_count,
@@ -1210,6 +1206,135 @@ def _synthetic_resume_fixture(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
     return path, authorization
 
 
+@dataclass(slots=True)
+class _SyntheticResumeInstrumentation:
+    decoded_objects: list[dict[str, int | str]] = dataclass_field(default_factory=list)
+    materialized_ranges: list[list[int]] = dataclass_field(default_factory=list)
+    canonicalized_ordinals: list[int] = dataclass_field(default_factory=list)
+    evaluated_ordinals: list[int] = dataclass_field(default_factory=list)
+    emitted_ordinals: list[int] = dataclass_field(default_factory=list)
+
+    def record_decoded(self, *, start: int, rows: int) -> None:
+        end = start + rows - 1
+        previous_end = (
+            int(self.decoded_objects[-1]["end_ordinal"]) if self.decoded_objects else None
+        )
+        if rows <= 0 or (previous_end is not None and start != previous_end + 1):
+            raise ValueError("synthetic resume decoder logical batch order differs")
+        self.decoded_objects.append(
+            {
+                "kind": "pyarrow_record_batch",
+                "rows": rows,
+                "start_ordinal": start,
+                "end_ordinal": end,
+            }
+        )
+
+    def record_materialized(self, *, start: int, rows: int) -> None:
+        end = start + rows - 1
+        if start < 180:
+            raise ValueError("synthetic resume materialization began before ordinal 180")
+        self.materialized_ranges.append([start, end])
+
+    def record_canonicalized(self, ordinal: int) -> None:
+        if ordinal < 180:
+            raise ValueError("synthetic resume canonicalization began before ordinal 180")
+        self.canonicalized_ordinals.append(ordinal)
+
+    def record_evaluated(self, ordinal: int) -> None:
+        if ordinal < 180:
+            raise ValueError("synthetic resume evaluation began before ordinal 180")
+        self.evaluated_ordinals.append(ordinal)
+
+    def record_emitted(self, ordinal: int) -> None:
+        if ordinal < 180 or (
+            self.emitted_ordinals and ordinal != self.emitted_ordinals[-1] + 1
+        ):
+            raise ValueError("synthetic resume emitted ordinals are not contiguous")
+        self.emitted_ordinals.append(ordinal)
+
+
+def _synthetic_resume_source_rows(
+    path: Path,
+    *,
+    authorization: Mapping[str, Any],
+    instrumentation: _SyntheticResumeInstrumentation | None = None,
+) -> Iterator[tuple[int, dict[str, Any]]]:
+    """Test-local synthetic ordering fixture; never used by production code."""
+
+    required = {
+        "state",
+        "phase_b_authorized",
+        "preselection_checkpoint_sha256",
+        "source_sha256",
+        "schema_sha256",
+        "decoder_contract_sha256",
+        "start_ordinal",
+        "batch_size",
+        "row_groups",
+        "use_threads",
+        "source_order",
+    }
+    if not required.issubset(authorization):
+        raise PhaseBResumeAuthorizationError("synthetic resume binding is incomplete")
+    from redco.analysis.stage_d_v13_source_phase_a_bindings import PHASE_B_RESUME_CONTRACT
+
+    if (
+        authorization["state"] != "reviewed_preselection_checkpoint"
+        or authorization["phase_b_authorized"] is not True
+        or authorization["start_ordinal"] != 180
+        or authorization["batch_size"] != 180
+        or authorization["row_groups"] != [0]
+        or authorization["use_threads"] is not False
+        or authorization["source_order"] != "physical_ordinal"
+        or authorization["decoder_contract_sha256"] != sha256_json(PHASE_B_RESUME_CONTRACT)
+    ):
+        raise PhaseBResumeAuthorizationError("synthetic resume binding differs")
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    if authorization["source_sha256"] != sha256_bytes(path.read_bytes()):
+        raise PhaseBResumeAuthorizationError("synthetic resume source hash differs")
+    if authorization["schema_sha256"] != source_schema_sha256(path):
+        raise PhaseBResumeAuthorizationError("synthetic resume source schema differs")
+    import pyarrow.parquet as parquet
+
+    parquet_file = parquet.ParquetFile(path)
+    metadata = parquet_file.metadata
+    if metadata is None or metadata.num_rows <= 180:
+        raise PhaseBResumeAuthorizationError("synthetic resume source has no post-cutoff rows")
+    observer = instrumentation or _SyntheticResumeInstrumentation()
+
+    def rows() -> Iterator[tuple[int, dict[str, Any]]]:
+        next_ordinal = 0
+        for batch in parquet_file.iter_batches(
+            batch_size=180, row_groups=[0], use_threads=False
+        ):
+            row_count = int(batch.num_rows)
+            observer.record_decoded(start=next_ordinal, rows=row_count)
+            batch_start = next_ordinal
+            next_ordinal += row_count
+            if next_ordinal <= 180:
+                continue
+            if batch_start < 180:
+                raise PhaseBResumeAuthorizationError(
+                    "synthetic resume batch straddles ordinal 180"
+                )
+            decoded_rows = batch.to_pylist()
+            if len(decoded_rows) != row_count:
+                raise ValueError("synthetic resume batch cardinality changed")
+            observer.record_materialized(start=batch_start, rows=row_count)
+            for offset, row in enumerate(decoded_rows):
+                ordinal = batch_start + offset
+                if not isinstance(row, dict):
+                    raise ValueError(f"synthetic resume row {ordinal} is not an object")
+                observer.record_canonicalized(ordinal)
+                observer.record_evaluated(ordinal)
+                observer.record_emitted(ordinal)
+                yield ordinal, row
+
+    return rows()
+
+
 def test_phase_a_resume_invocation_count_is_zero() -> None:
     assert phase_a_result()["phase_a_wall"]["phase_b_resume_decoder_invocations"] == 0
     assert resume_decoder_invocation_count() == 0
@@ -1217,7 +1342,7 @@ def test_phase_a_resume_invocation_count_is_zero() -> None:
 
 def test_dormant_resume_decoder_starts_at_ordinal_180(tmp_path: Path) -> None:
     path, authorization = _synthetic_resume_fixture(tmp_path)
-    instrumentation = ResumeDecoderInstrumentation()
+    instrumentation = _SyntheticResumeInstrumentation()
     rows = list(
         _synthetic_resume_source_rows(
             path, authorization=authorization, instrumentation=instrumentation
@@ -1260,12 +1385,21 @@ def test_dormant_resume_decoder_requires_reviewed_checkpoint(tmp_path: Path) -> 
 
 def test_foundation_resume_entrypoint_rejects_all_caller_authority() -> None:
     resume_entrypoint = cast(Any, resume_source_rows)
-    with pytest.raises(PhaseBResumeUnavailable, match="Authorization C3 is absent"):
+    with pytest.raises(PhaseBResumeUnavailable, match="repeatable raw resume iterator is retired"):
         resume_source_rows()
     with pytest.raises(TypeError):
         resume_entrypoint(Path("alternate.parquet"))
     with pytest.raises(TypeError):
         resume_entrypoint(authorization=True)
+
+
+def test_gate_g_removes_production_synthetic_resume_seam() -> None:
+    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
+    assert not hasattr(decoder, "_synthetic_resume_source_rows")
+    assert not hasattr(decoder, "_validate_synthetic_resume_authorization")
+    assert not hasattr(decoder, "_resume_rows")
+    assert not hasattr(decoder, "ResumeDecoderInstrumentation")
+    assert "_synthetic_resume_source_rows" not in decoder.__all__
 
 
 def _git_test(repo: Path, *arguments: str) -> str:
@@ -1279,25 +1413,55 @@ def _git_test(repo: Path, *arguments: str) -> str:
     return result.stdout.strip()
 
 
-def _synthetic_c3_chain(
+def test_repair_r_legacy_c3_owners_are_retired_and_gate_rejects_legacy_path(
+    tmp_path: Path,
+) -> None:
+    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+
+    for retired in (
+        "_validate_c3_artifact",
+        "_validate_head_authorization_c3",
+        "_authenticate_c3_and_source",
+        "PHASE_B_AUTHORIZATION_RELATIVE",
+        "PHASE_C3_AUTHORIZATION_RELATIVE",
+    ):
+        assert not hasattr(decoder, retired)
+
+    with pytest.raises(PhaseBResumeUnavailable, match="C3-v1"):
+        decoder.validate_future_phase_b_authorization_artifact()
+    with pytest.raises(PhaseBResumeUnavailable, match="repeatable raw resume iterator"):
+        decoder.resume_source_rows()
+
+    repo, _gate = _synthetic_gate_chain(tmp_path, legacy_c=True)
+    with pytest.raises(selection.SelectionGateError, match="legacy"):
+        selection._validate_c3_v2(repo)
+
+
+
+def _synthetic_gate_chain(
     tmp_path: Path,
     *,
     terminal: str = "c3",
-    b_mutation: str | None = None,
-    c3_mutation: str | None = None,
-    extra_b_file: bool = False,
-    extra_r_file: bool = False,
-    extra_c3_file: bool = False,
-    merge_r: bool = False,
-) -> tuple[Path, Path, dict[str, Any]]:
-    """Create a disposable F -> B -> R -> C3 repository without QASPER rows."""
+    mutation: str | None = None,
+    extra_g: bool = False,
+    legacy_c: bool = False,
+) -> tuple[Path, str | None]:
+    """Create only synthetic F -> B -> R -> G -> C3-v2 history."""
 
     from redco.analysis.stage_d_v13_source_phase_a_bindings import (
+        PHASE_A_AUDIT_RELATIVE,
         PHASE_A_STATUS_SIGNATURE,
         PHASE_B_BINDING_DOMAIN,
         PHASE_B_RESUME_CONTRACT_V2_SHA256,
-        PHASE_B_RESUME_CONTRACT_V3,
-        PHASE_C3_AUTHORIZATION_DOMAIN,
+        PHASE_B_SOURCE_SELECTION_CONTRACT_V4,
+        PHASE_B_SOURCE_SELECTION_CONTRACT_V4_SHA256,
+        PHASE_C3_V2_AUTHORIZATION_DOMAIN,
+        PHASE_C3_V2_AUTHORIZATION_RELATIVE,
+        SELECTION_CLAIM_RELATIVE,
+        SELECTION_GATE_APPROVAL_TEXT_SHA256,
+        SELECTION_GATE_APPROVAL_THREAD_ID,
+        SELECTION_RECEIPT_RELATIVE,
     )
     from redco.analysis.stage_d_v13_source_phase_a_decoder import (
         PHASE_A_CONFIG_RELATIVE,
@@ -1305,21 +1469,21 @@ def _synthetic_c3_chain(
         _resume_contract_v3_hash,
         git_blob_sha1,
     )
+    from redco.analysis.stage_d_v13_source_selection import (
+        LEGACY_C_AUTHORIZATION_RELATIVE,
+        compute_scan_id,
+    )
 
-    repo = tmp_path / "repair-r-c3-repo"
+    repo = tmp_path / "gate-g-repo"
     repo.mkdir(parents=True)
     _git_test(repo, "init", "--quiet")
-    _git_test(repo, "config", "user.email", "repair-r@example.invalid")
-    _git_test(repo, "config", "user.name", "Repair R Test")
+    _git_test(repo, "config", "user.email", "gate-g@example.invalid")
+    _git_test(repo, "config", "user.name", "Gate G Test")
     (repo / "parent.txt").write_text("pre-F", encoding="utf-8")
     _git_test(repo, "add", "parent.txt")
     _git_test(repo, "commit", "--quiet", "-m", "pre-F")
 
-    source_relative = Path(SOURCE_ARTIFACT_RELATIVE)
-    source_path = repo / source_relative
-    source_path.parent.mkdir(parents=True)
-    source_bytes = b"synthetic source bytes; no Parquet rows"
-    source_path.write_bytes(source_bytes)
+    source_bytes = b"synthetic source bytes; no production rows"
     source_contract = {
         "path": "qasper/train/0000.parquet",
         "revision": "synthetic-revision",
@@ -1327,18 +1491,30 @@ def _synthetic_c3_chain(
         "schema_sha256": "s" * 64,
         "row_count": 888,
     }
-    manifest_relative = Path("reports/stage-d1-support-v13-foundation-tree-manifest-f1.json")
+    manifest_relative = Path(
+        "reports/stage-d1-support-v13-foundation-tree-manifest-f1.json"
+    )
     manifest_path = repo / manifest_relative
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest = {"qasper": copy.deepcopy(source_contract), "source": copy.deepcopy(source_contract)}
-    manifest_path.write_bytes(canonical_json_bytes(manifest))
-    config_path = repo / Path(PHASE_A_CONFIG_RELATIVE)
+    manifest_path.write_bytes(
+        canonical_json_bytes(
+            {"qasper": copy.deepcopy(source_contract), "source": copy.deepcopy(source_contract)}
+        )
+    )
+    config_path = repo / PHASE_A_CONFIG_RELATIVE
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_bytes(b"synthetic phase-a config")
+    audit_path = repo / PHASE_A_AUDIT_RELATIVE
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    audit_path.write_bytes(
+        canonical_json_bytes(
+            {"source_authentication": {"forbidden_witness": {"witness_sha256": "a" * 64}}}
+        )
+    )
     for relative in REPAIR_DIFF_ALLOWLIST:
-        repair_path = repo / relative
-        repair_path.parent.mkdir(parents=True, exist_ok=True)
-        repair_path.write_text("foundation", encoding="utf-8")
+        path = repo / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("foundation", encoding="utf-8")
     _git_test(repo, "add", ".")
     _git_test(repo, "commit", "--quiet", "-m", "F")
     foundation_commit = _git_test(repo, "rev-parse", "HEAD")
@@ -1380,8 +1556,8 @@ def _synthetic_c3_chain(
         "bindings": {
             "source_artifact": {
                 "path": SOURCE_ARTIFACT_RELATIVE,
-                "sha256": sha256_bytes(source_bytes),
-                "schema_sha256": "s" * 64,
+                "sha256": source_contract["sha256"],
+                "schema_sha256": source_contract["schema_sha256"],
                 "row_count": 888,
             },
             "phase_a_config": {
@@ -1391,406 +1567,580 @@ def _synthetic_c3_chain(
             "decoder_contract_sha256": PHASE_B_RESUME_CONTRACT_V2_SHA256,
         },
     }
-    if b_mutation == "foundation":
-        b_payload["foundation_commit"] = "0" * 40
-    elif b_mutation == "tree":
-        b_payload["foundation_tree_sha1"] = "0" * 40
-    elif b_mutation == "manifest":
-        cast(dict[str, Any], b_payload["foundation_manifest"])["sha256"] = "0" * 64
-    elif b_mutation == "manifest_path":
-        cast(dict[str, Any], b_payload["foundation_manifest"])["path"] = "wrong.json"
-    elif b_mutation == "status":
-        b_payload["status_signature"] = "0" * 64
-    elif b_mutation == "source_schema":
-        cast(dict[str, Any], b_payload["bindings"])["source_artifact"]["schema_sha256"] = "0" * 64
-    elif b_mutation == "source_row_count":
-        cast(dict[str, Any], b_payload["bindings"])["source_artifact"]["row_count"] = 887
-    elif b_mutation == "source_bytes":
-        cast(dict[str, Any], b_payload["bindings"])["source_artifact"]["sha256"] = "0" * 64
-    elif b_mutation == "v2_digest":
-        cast(dict[str, Any], b_payload["bindings"])["decoder_contract_sha256"] = sha256_json(
-            PHASE_B_RESUME_CONTRACT_V3
-        )
     b_path.write_bytes(canonical_json_bytes(b_payload))
-    if extra_b_file:
-        (repo / "extra-b.py").write_text("unapproved", encoding="utf-8")
     _git_test(repo, "add", PHASE_B_BINDING_RELATIVE)
-    if extra_b_file:
-        _git_test(repo, "add", "extra-b.py")
     _git_test(repo, "commit", "--quiet", "-m", "B")
-    binding_commit = _git_test(repo, "rev-parse", "HEAD")
     b_raw = b_path.read_bytes()
     if terminal == "b":
-        return repo, b_path, b_payload
+        return repo, None
 
-    if merge_r:
-        _git_test(repo, "checkout", "-b", "repair-side")
-        (repo / "side.txt").write_text("side", encoding="utf-8")
-        _git_test(repo, "add", "side.txt")
-        _git_test(repo, "commit", "--quiet", "-m", "side")
-        _git_test(repo, "checkout", "--quiet", "-")
     for relative in REPAIR_DIFF_ALLOWLIST:
-        repair_path = repo / relative
-        repair_path.write_bytes(repair_path.read_bytes() + b"\nrepair")
-    if extra_r_file:
-        (repo / "extra-r.py").write_text("unapproved", encoding="utf-8")
+        path = repo / relative
+        path.write_bytes(path.read_bytes() + b"\nrepair")
     _git_test(repo, "add", *REPAIR_DIFF_ALLOWLIST)
-    if extra_r_file:
-        _git_test(repo, "add", "extra-r.py")
     _git_test(repo, "commit", "--quiet", "-m", "R")
-    repair_commit = _git_test(repo, "rev-parse", "HEAD")
-    if merge_r:
-        _git_test(repo, "merge", "--no-ff", "--quiet", "repair-side", "-m", "merge-R")
-        repair_commit = _git_test(repo, "rev-parse", "HEAD")
     if terminal == "r":
-        return repo, repo / PHASE_C3_AUTHORIZATION_RELATIVE, b_payload
+        return repo, None
 
-    c3_path = repo / PHASE_C3_AUTHORIZATION_RELATIVE
+    gate_path = repo / "src/redco/analysis/stage_d_v13_source_selection.py"
+    gate_path.parent.mkdir(parents=True, exist_ok=True)
+    gate_path.write_bytes(b"synthetic Gate G module; no source access")
+    for relative in REPAIR_DIFF_ALLOWLIST:
+        path = repo / relative
+        path.write_bytes(path.read_bytes() + b"\ngate")
+    if extra_g:
+        (repo / "unapproved-g.txt").write_text("unapproved", encoding="utf-8")
+    _git_test(repo, "add", "src/redco/analysis/stage_d_v13_source_selection.py")
+    _git_test(repo, "add", *REPAIR_DIFF_ALLOWLIST)
+    if extra_g:
+        _git_test(repo, "add", "unapproved-g.txt")
+    _git_test(repo, "commit", "--quiet", "-m", "G")
+    gate_commit = _git_test(repo, "rev-parse", "HEAD")
+    if legacy_c:
+        legacy_path = repo / LEGACY_C_AUTHORIZATION_RELATIVE
+        legacy_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy_path.write_bytes(b"{}")
+        _git_test(repo, "add", LEGACY_C_AUTHORIZATION_RELATIVE)
+        _git_test(repo, "commit", "--quiet", "-m", "legacy-C")
+        gate_commit = _git_test(repo, "rev-parse", "HEAD")
+    if terminal == "g":
+        return repo, gate_commit
+
+    c3_path = repo / PHASE_C3_V2_AUTHORIZATION_RELATIVE
     c3_path.parent.mkdir(parents=True, exist_ok=True)
-    user_authorization = {
-        "reviewed": True,
-        "scope": "local_phase_b_source_selection_only",
-        "launch_authorized": False,
-        "provider_calls_authorized": False,
-        "model_calls_authorized": False,
-    }
+    audit_raw = audit_path.read_bytes()
+    binding_commit = _git_test(repo, "rev-parse", "HEAD~2")
+    repair_commit = _git_test(repo, "rev-parse", "HEAD~1")
     c3_payload: dict[str, Any] = {
-        "schema_version": 1,
-        "domain": PHASE_C3_AUTHORIZATION_DOMAIN,
-        "state": "C3",
+        "schema_version": 2,
+        "domain": PHASE_C3_V2_AUTHORIZATION_DOMAIN,
+        "state": "C3-v2",
         "draft_unfrozen": False,
-        "foundation_only": False,
-        "non_authorizing": False,
-        "candidate": {
-            "source_ordinal": None,
-            "paper_id": None,
-            "example_id": None,
-            "row": None,
-            "seed": None,
-            "address": None,
-        },
+        "candidate": None,
         "seed": None,
         "address": None,
-        "phase_b_authorized": True,
-        "source_selection_authorized": True,
+        "phase_b_authorized": False,
+        "phase_b_source_selection_authorized": True,
+        "source_selection_authorized": False,
         "launch_authorized": False,
         "provider_calls_authorized": False,
         "model_calls_authorized": False,
         "prime_gpu_scientific_launch_authorized": False,
+        "science_authorized": False,
         "status_signature": PHASE_A_STATUS_SIGNATURE,
         "foundation_commit": foundation_commit,
         "foundation_tree_sha1": foundation_tree,
         "binding_commit": binding_commit,
         "repair_commit": repair_commit,
+        "gate_commit": gate_commit,
         "binding_artifact": {
             "path": PHASE_B_BINDING_RELATIVE,
             "sha256": sha256_bytes(b_raw),
             "git_blob_sha1": git_blob_sha1(b_raw),
-            "status_signature": PHASE_A_STATUS_SIGNATURE,
         },
         "source": copy.deepcopy(source_contract),
-        "bindings": {
-            **copy.deepcopy(b_payload["bindings"]),
-            "user_authorization_sha256": sha256_bytes(
-                canonical_json_bytes(user_authorization)
-            ),
-        },
-        "user_authorization": user_authorization,
-        "resume_authorization": {
-            "state": "reviewed_preselection_checkpoint",
-            "phase_b_authorized": True,
+        "contracts": {
+            "v2_sha256": PHASE_B_RESUME_CONTRACT_V2_SHA256,
+            "v3_sha256": _resume_contract_v3_hash(),
+            "v4_sha256": PHASE_B_SOURCE_SELECTION_CONTRACT_V4_SHA256,
             "preselection_checkpoint_sha256": sha256_bytes(b_raw),
-            "source_sha256": source_contract["sha256"],
-            "schema_sha256": source_contract["schema_sha256"],
-            "decoder_contract_v2_sha256": PHASE_B_RESUME_CONTRACT_V2_SHA256,
-            "decoder_contract_v3_sha256": _resume_contract_v3_hash(),
+        },
+        "runtime_versions": {
+            "python": "3.12.3",
+            "datasets": "5.0.0",
+            "pyarrow": "25.0.0",
+        },
+        "approval": {
+            "thread_id": SELECTION_GATE_APPROVAL_THREAD_ID,
+            "text_sha256": SELECTION_GATE_APPROVAL_TEXT_SHA256,
+        },
+        "scan": {
+            "scan_id": compute_scan_id(gate_commit),
+            "attempt_limit": 1,
+            "retry": False,
             "start_ordinal": 180,
-            "batch_size": 180,
-            "row_groups": [0],
-            "use_threads": False,
-            "source_order": "physical_ordinal",
+            "final_possible_ordinal": 887,
+            "stop_rule": cast(str, PHASE_B_SOURCE_SELECTION_CONTRACT_V4["stop_rule"]),
+        },
+        "paths": {"claim": SELECTION_CLAIM_RELATIVE, "receipt": SELECTION_RECEIPT_RELATIVE},
+        "forbidden_universe": {
+            "artifact_path": PHASE_A_AUDIT_RELATIVE,
+            "artifact_sha256": sha256_bytes(audit_raw),
+            "witness_sha256": "a" * 64,
         },
     }
-    if c3_mutation == "preselection_digest":
-        c3_payload["resume_authorization"]["preselection_checkpoint_sha256"] = "a" * 64
-    elif c3_mutation == "preselection_nonhex":
-        c3_payload["resume_authorization"]["preselection_checkpoint_sha256"] = "g" * 64
-    elif c3_mutation == "preselection_short":
-        c3_payload["resume_authorization"]["preselection_checkpoint_sha256"] = "a" * 63
-    elif c3_mutation == "resume_unknown_null":
-        c3_payload["resume_authorization"]["unknown"] = None
-    elif c3_mutation == "user_unknown_null":
-        c3_payload["user_authorization"]["unknown"] = None
-    elif c3_mutation == "v2_substitute":
-        c3_payload["resume_authorization"][
-            "decoder_contract_v2_sha256"
-        ] = _resume_contract_v3_hash()
-    elif c3_mutation == "v3_substitute":
-        c3_payload["resume_authorization"][
-            "decoder_contract_v3_sha256"
-        ] = PHASE_B_RESUME_CONTRACT_V2_SHA256
-    elif c3_mutation in {"wrong_source", "source_schema"}:
-        c3_payload["source"]["schema_sha256"] = "0" * 64
-    elif c3_mutation == "wrong_foundation":
-        c3_payload["foundation_commit"] = "0" * 40
-    elif c3_mutation == "wrong_repair":
-        c3_payload["repair_commit"] = "0" * 40
-    elif c3_mutation == "wrong_b":
-        c3_payload["binding_commit"] = "0" * 40
-    elif c3_mutation == "binding_sha":
-        c3_payload["binding_artifact"]["sha256"] = "0" * 64
-    elif c3_mutation == "binding_blob":
-        c3_payload["binding_artifact"]["git_blob_sha1"] = "0" * 40
-    elif c3_mutation == "status":
-        c3_payload["status_signature"] = "0" * 64
+    if mutation == "scan":
+        cast(dict[str, Any], c3_payload["scan"])["scan_id"] = "tampered"
+    elif mutation == "v4":
+        cast(dict[str, Any], c3_payload["contracts"])["v4_sha256"] = "0" * 64
+    elif mutation == "approval":
+        cast(dict[str, Any], c3_payload["approval"])["text_sha256"] = "0" * 64
+    elif mutation == "source":
+        cast(dict[str, Any], c3_payload["source"])["sha256"] = "0" * 64
+    elif mutation == "candidate":
+        c3_payload["candidate"] = {"source_ordinal": 180}
+    elif mutation == "forbidden":
+        cast(dict[str, Any], c3_payload["forbidden_universe"])["witness_sha256"] = "0" * 64
+    elif mutation == "raw_refs":
+        cast(dict[str, Any], c3_payload["forbidden_universe"])["raw_reference_spans"] = []
+    elif mutation == "unknown":
+        c3_payload["unknown"] = None
     c3_path.write_bytes(canonical_json_bytes(c3_payload))
-    if extra_c3_file:
-        (repo / "extra-c3.py").write_text("unapproved", encoding="utf-8")
-    _git_test(repo, "add", PHASE_C3_AUTHORIZATION_RELATIVE)
-    if extra_c3_file:
-        _git_test(repo, "add", "extra-c3.py")
-    _git_test(repo, "commit", "--quiet", "-m", "C3")
-    return repo, c3_path, c3_payload
-
-
-def _patch_public_c3_runtime(
-    monkeypatch: pytest.MonkeyPatch,
-    repo: Path,
-) -> Any:
-    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
-    monkeypatch.setattr(decoder, "PROJECT_ROOT", repo)
-    monkeypatch.setattr(
-        decoder,
-        "_validate_production_source_metadata",
-        lambda *_args: None,
-    )
-    monkeypatch.setattr(
-        decoder,
-        "_require_runtime_versions_only",
-        lambda: (types.SimpleNamespace(__version__="25.0.0"), "5.0.0"),
-    )
-    return decoder
-
-
-def test_repair_r_valid_synthetic_f_b_r_c3_uses_public_no_argument_path(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo, _path, expected = _synthetic_c3_chain(tmp_path)
-    decoder = _patch_public_c3_runtime(monkeypatch, repo)
-    assert decoder.validate_future_phase_b_authorization_artifact() == expected
-    assert expected["source_selection_authorized"] is True
-    assert expected["launch_authorized"] is False
-    assert expected["provider_calls_authorized"] is False
-    assert expected["model_calls_authorized"] is False
-    assert expected["candidate"]["source_ordinal"] is None
-
-
-def test_repair_r_rejects_changed_binding_b_worktree_bytes(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo, _path, _payload = _synthetic_c3_chain(tmp_path)
-    binding_path = repo / PHASE_B_BINDING_RELATIVE
-    binding_path.write_bytes(binding_path.read_bytes() + b"\nchanged")
-    decoder = _patch_public_c3_runtime(monkeypatch, repo)
-    with pytest.raises(PhaseBResumeAuthorizationError, match="Binding B worktree bytes"):
-        decoder.validate_future_phase_b_authorization_artifact()
-
-
-def test_repair_r_legacy_direct_b_to_c_path_is_rejected(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo, _path, _payload = _synthetic_c3_chain(tmp_path, terminal="r")
-    legacy_path = repo / LEGACY_PHASE_B_AUTHORIZATION_RELATIVE
-    legacy_path.parent.mkdir(parents=True, exist_ok=True)
-    legacy_path.write_bytes(b"{}")
-    _git_test(repo, "add", LEGACY_PHASE_B_AUTHORIZATION_RELATIVE)
-    _git_test(repo, "commit", "--quiet", "-m", "legacy-C")
-    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
-    monkeypatch.setattr(decoder, "PROJECT_ROOT", repo)
-    monkeypatch.setattr(
-        decoder,
-        "_require_runtime_versions_only",
-        lambda: pytest.fail("runtime was inspected before legacy-path rejection"),
-    )
-    monkeypatch.setattr(
-        decoder,
-        "_validate_production_source_metadata",
-        lambda *_args: pytest.fail("source was inspected before legacy-path rejection"),
-    )
-    before = decoder.resume_decoder_invocation_count()
-    for entrypoint in (
-        decoder.validate_future_phase_b_authorization_artifact,
-        decoder.resume_source_rows,
-    ):
-        with pytest.raises(PhaseBResumeAuthorizationError, match="legacy"):
-            entrypoint()
-    assert decoder.resume_decoder_invocation_count() == before
-
-
-@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
-    "kwargs",
-    (
-        {"extra_b_file": True},
-        {"extra_r_file": True},
-        {"extra_c3_file": True},
-        {"merge_r": True},
-    ),
-)
-def test_repair_r_chain_rejects_extra_paths_and_merge(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    kwargs: dict[str, Any],
-) -> None:
-    repo, _path, _payload = _synthetic_c3_chain(tmp_path, **kwargs)
-    decoder = _patch_public_c3_runtime(monkeypatch, repo)
-    with pytest.raises(PhaseBResumeAuthorizationError):
-        decoder.validate_future_phase_b_authorization_artifact()
+    _git_test(repo, "add", PHASE_C3_V2_AUTHORIZATION_RELATIVE)
+    _git_test(repo, "commit", "--quiet", "-m", "C3-v2")
+    return repo, gate_commit
 
 
 @pytest.mark.parametrize(  # type: ignore[untyped-decorator]
     "mutation",
-    (
-        "preselection_digest",
-        "preselection_nonhex",
-        "preselection_short",
-        "resume_unknown_null",
-        "user_unknown_null",
-        "v2_substitute",
-        "v3_substitute",
-        "wrong_source",
-        "wrong_foundation",
-        "wrong_repair",
-        "wrong_b",
-        "binding_sha",
-        "binding_blob",
-        "status",
-    ),
+    ("scan", "v4", "approval", "source", "candidate", "forbidden", "raw_refs", "unknown"),
 )
-def test_repair_r_c3_exact_nested_bindings_fail_closed(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    mutation: str,
+def test_gate_g_c3_v2_schema_mutations_fail_closed(tmp_path: Path, mutation: str) -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    repo, _gate = _synthetic_gate_chain(tmp_path, mutation=mutation)
+    with pytest.raises(selection.SelectionGateError):
+        selection._validate_c3_v2(repo)
+
+
+def test_gate_g_validates_exact_future_chain_without_source_access(tmp_path: Path) -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    repo, gate = _synthetic_gate_chain(tmp_path)
+    artifact, gate_commit, inputs = selection._validate_c3_v2(repo)
+    assert artifact["state"] == "C3-v2"
+    assert gate_commit == gate
+    assert inputs["source_contract"]["row_count"] == 888
+    assert inputs["audit_raw"]
+
+
+def test_gate_g_rejects_legacy_c_and_extra_gate_paths(tmp_path: Path) -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    legacy_repo, _gate = _synthetic_gate_chain(
+        tmp_path / "legacy", terminal="g", legacy_c=True
+    )
+    with pytest.raises(selection.SelectionGateError, match="legacy"):
+        selection._validate_c3_v2(legacy_repo)
+    extra_repo, _gate = _synthetic_gate_chain(tmp_path / "extra", extra_g=True)
+    with pytest.raises(selection.SelectionGateError, match="R to G"):
+        selection._validate_c3_v2(extra_repo)
+
+
+def test_gate_g_absent_c3_fails_before_runtime_source_or_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    repo, _path, _payload = _synthetic_c3_chain(tmp_path, c3_mutation=mutation)
-    decoder = _patch_public_c3_runtime(monkeypatch, repo)
-    with pytest.raises(PhaseBResumeAuthorizationError):
-        decoder.validate_future_phase_b_authorization_artifact()
-
-
-@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
-    "mutation",
-    (
-        "foundation",
-        "tree",
-        "manifest",
-        "source_schema",
-        "source_row_count",
-        "source_bytes",
-        "v2_digest",
-    ),
-)
-def test_repair_r_b_checkpoint_and_source_metadata_fail_closed(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    mutation: str,
-) -> None:
-    repo, _path, _payload = _synthetic_c3_chain(tmp_path, b_mutation=mutation)
-    decoder = _patch_public_c3_runtime(monkeypatch, repo)
-    with pytest.raises(PhaseBResumeAuthorizationError):
-        decoder.validate_future_phase_b_authorization_artifact()
-
-
-def test_repair_r_c3_absent_at_r_fails_before_runtime_or_source(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo, _path, _payload = _synthetic_c3_chain(tmp_path, terminal="r")
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
     decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
+    repo, _gate = _synthetic_gate_chain(tmp_path, terminal="g")
     monkeypatch.setattr(decoder, "PROJECT_ROOT", repo)
     monkeypatch.setattr(
         decoder,
         "_require_runtime_versions_only",
-        lambda: pytest.fail("runtime was inspected before C3") ,
+        lambda: pytest.fail("runtime was inspected before C3-v2"),
     )
     monkeypatch.setattr(
         decoder,
         "_validate_production_source_metadata",
-        lambda *_args: pytest.fail("source was inspected before C3"),
+        lambda *_args: pytest.fail("source was inspected before C3-v2"),
     )
-    before = decoder.resume_decoder_invocation_count()
-    with pytest.raises(PhaseBResumeUnavailable, match="C3"):
-        decoder.validate_future_phase_b_authorization_artifact()
-    with pytest.raises(PhaseBResumeUnavailable, match="C3"):
-        decoder.resume_source_rows()
-    assert decoder.resume_decoder_invocation_count() == before == 0
+    with pytest.raises(selection.SelectionGateError, match="C3-v2 is absent"):
+        selection.activate_selection_gate()
+    assert not (repo / selection.SELECTION_CLAIM_RELATIVE).exists()
 
 
-def test_repair_r_resume_authenticates_runtime_and_source_exactly_once(
-    tmp_path: Path,
+def _synthetic_selection_row(
+    paper_id: str, question_id: str, *, two_questions: bool = False
+) -> dict[str, Any]:
+    span = f"{paper_id} first synthetic evidence span is long enough"
+    answers: list[dict[str, Any]] = [
+        {"answer": [{"unanswerable": False, "evidence": [span]}]}
+    ]
+    questions = [question_id]
+    question_ids = [question_id]
+    if two_questions:
+        answers.append({"answer": [{"unanswerable": True}]})
+        questions.append("unreachable")
+        question_ids.append("unreachable")
+    return {
+        "id": paper_id,
+        "title": f"Synthetic {paper_id}",
+        "abstract": span,
+        "full_text": {"section_name": [], "paragraphs": []},
+        "qas": {"question": questions, "question_id": question_ids, "answers": answers},
+    }
+
+
+class _SyntheticRows:
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.rows = rows
+        self.requested: list[int] = []
+
+    def iter_rows(
+        self, *, start_ordinal: int, end_ordinal: int
+    ) -> Iterator[tuple[int, dict[str, Any]]]:
+        assert (start_ordinal, end_ordinal) == (180, 887)
+        for offset, row in enumerate(self.rows):
+            ordinal = 180 + offset
+            self.requested.append(ordinal)
+            yield ordinal, row
+
+
+@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
+    "collision_kind", ("example", "rendered", "row", "address")
+)
+def test_gate_g_terminal_collision_stops_before_later_candidate(
+    collision_kind: str,
+) -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    first = _synthetic_selection_row("first-paper", "first", two_questions=True)
+    later = _synthetic_selection_row("later-paper", "later")
+    selected = select_first_eligible(first)
+    assert selected is not None
+    chosen, _index = selected
+    universe = selection.SelectionUniverse(
+        paper_ids=frozenset(),
+        example_ids=(
+            frozenset({chosen["example_id"]})
+            if collision_kind == "example"
+            else frozenset()
+        ),
+        rendered_paper_sha256=(
+            frozenset({sha256_bytes(str(chosen["paper"]).encode("utf-8"))})
+            if collision_kind == "rendered"
+            else frozenset()
+        ),
+        reference_spans=frozenset(),
+        row_sha256=(
+            frozenset({source_row_sha256(first)})
+            if collision_kind == "row"
+            else frozenset()
+        ),
+        addresses=frozenset(),
+    )
+    if collision_kind == "address":
+        universe = selection.SelectionUniverse(
+            paper_ids=frozenset(),
+            example_ids=frozenset(),
+            rendered_paper_sha256=frozenset(),
+            reference_spans=frozenset(),
+            row_sha256=frozenset(),
+            addresses=frozenset({selection._candidate_address_sha256(first, chosen)}),
+        )
+    fake = _SyntheticRows([first, later])
+    outcome = selection._scan_once(fake, universe)
+    assert outcome["disposition"] == "terminal_collision"
+    assert outcome["collision_class"] == {
+        "example": "example_id_collision",
+        "rendered": "rendered_paper_collision",
+        "row": "source_row_collision",
+        "address": "source_address_collision",
+    }[collision_kind]
+    assert fake.requested == [180]
+    assert outcome["candidate"] is None
+
+
+def test_gate_g_continuable_paper_and_reference_collisions_continue() -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    for kind in ("paper", "reference"):
+        first = _synthetic_selection_row("first-paper", "first")
+        later = _synthetic_selection_row("later-paper", "later")
+        selected = select_first_eligible(first)
+        assert selected is not None
+        span = selected[0]["reference_evidence"][0]
+        universe = selection.SelectionUniverse(
+            paper_ids=frozenset({"first-paper"}) if kind == "paper" else frozenset(),
+            example_ids=frozenset(),
+            rendered_paper_sha256=frozenset(),
+            reference_spans=frozenset({span}) if kind == "reference" else frozenset(),
+            row_sha256=frozenset(),
+            addresses=frozenset(),
+        )
+        fake = _SyntheticRows([first, later])
+        outcome = selection._scan_once(fake, universe)
+        assert outcome["disposition"] == "eligible_candidate"
+        assert outcome["stop_ordinal"] == 181
+        assert fake.requested == [180, 181]
+
+
+def test_gate_g_exhaustion_stops_at_final_ordinal() -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    empty_rows = [
+        {
+            "id": f"empty-{ordinal}",
+            "title": "Synthetic empty",
+            "abstract": "no exact evidence",
+            "full_text": {"section_name": [], "paragraphs": []},
+            "qas": {"question": [], "question_id": [], "answers": []},
+        }
+        for ordinal in range(708)
+    ]
+    fake = _SyntheticRows(empty_rows)
+    outcome = selection._scan_once(
+        fake,
+        selection.SelectionUniverse(
+            paper_ids=frozenset(),
+            example_ids=frozenset(),
+            rendered_paper_sha256=frozenset(),
+            reference_spans=frozenset(),
+            row_sha256=frozenset(),
+            addresses=frozenset(),
+        ),
+    )
+    assert outcome["disposition"] == "exhausted"
+    assert outcome["stop_ordinal"] == 887
+    assert fake.requested[-1] == 887
+    assert len(fake.requested) == 708
+
+
+def test_gate_g_reconstructs_authenticated_reference_projection_without_source_access() -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
+    bindings = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_bindings")
+    head = decoder._git_text(ROOT, "rev-parse", "--verify", "HEAD^{commit}")
+    audit_raw = decoder._git_blob_at_commit(ROOT, head, bindings.PHASE_A_AUDIT_RELATIVE)
+    universe = selection._authenticated_forbidden_universe(ROOT, head, audit_raw)
+    assert len(universe.reference_spans) == 414
+    assert len(universe.paper_ids) == 238
+    assert bindings.RECOVERED_REFERENCE_PAPER_ID in universe.paper_ids
+    assert bindings.RECOVERED_REFERENCE_SHA256 in {
+        sha256_bytes(value.encode("utf-8")) for value in universe.reference_spans
+    }
+
+
+def _committed_recovery_extension_raw() -> bytes:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
+    return cast(
+        bytes,
+        decoder._git_blob_at_commit(
+            ROOT,
+            decoder._git_text(ROOT, "rev-parse", "--verify", "HEAD^{commit}"),
+            selection.SUCCESSOR_EXTENSION_RELATIVE,
+        ),
+    )
+
+
+@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
+    "mutation", ("missing", "duplicate", "altered", "extra_reference")
+)
+def test_gate_g_recovery_record_mutations_fail_closed(mutation: str) -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    records = [json.loads(line) for line in _committed_recovery_extension_raw().splitlines()]
+    target_index = next(
+        index
+        for index, record in enumerate(records)
+        if record.get("example_id") == selection.RECOVERED_REFERENCE_EXAMPLE_ID
+    )
+    if mutation == "missing":
+        del records[target_index]
+    elif mutation == "duplicate":
+        records.append(copy.deepcopy(records[target_index]))
+    elif mutation == "altered":
+        records[target_index]["paper"] += " altered"
+    else:
+        records[target_index]["reference_evidence"].append("extra")
+    mutated = b"\n".join(canonical_json_bytes(record) for record in records)
+    with pytest.raises(selection.SelectionGateError):
+        selection._locate_recovery_record(mutated)
+
+
+@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
+    "field_name", ("extension_sha256", "canonical_row_sha256", "rendered_paper_sha256")
+)
+def test_gate_g_recovery_projection_mutations_fail_closed(
+    monkeypatch: pytest.MonkeyPatch, field_name: str
+) -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
+    bindings = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_bindings")
+    head = decoder._git_text(ROOT, "rev-parse", "--verify", "HEAD^{commit}")
+    audit = json.loads(
+        decoder._git_blob_at_commit(ROOT, head, bindings.PHASE_A_AUDIT_RELATIVE)
+    )
+    projection = cast(
+        dict[str, Any],
+        cast(dict[str, Any], selection.PHASE_B_SOURCE_SELECTION_CONTRACT_V4["forbidden_universe"])[
+            "recovery_projection"
+        ],
+    )
+    monkeypatch.setitem(projection, field_name, "0" * 64)
+    with pytest.raises(selection.SelectionGateError):
+        selection._authenticated_recovery_reference(ROOT, head, audit)
+
+
+def test_gate_g_recovery_wrong_address_manifest_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo, _path, _payload = _synthetic_c3_chain(tmp_path)
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
     decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
+    bindings = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_bindings")
+    head = decoder._git_text(ROOT, "rev-parse", "--verify", "HEAD^{commit}")
+    audit = json.loads(
+        decoder._git_blob_at_commit(ROOT, head, bindings.PHASE_A_AUDIT_RELATIVE)
+    )
+    monkeypatch.setattr(selection, "SUCCESSOR_ADDRESS_AUDIT_V1_SHA256", "0" * 64)
+    with pytest.raises(selection.SelectionGateError):
+        selection._authenticated_recovery_reference(ROOT, head, audit)
+
+
+def test_gate_g_recovery_omission_fails_before_any_side_effect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
+    repo, _gate = _synthetic_gate_chain(tmp_path)
+    monkeypatch.setattr(decoder, "PROJECT_ROOT", repo)
     events: list[str] = []
-    monkeypatch.setattr(decoder, "PROJECT_ROOT", repo)
 
-    def fake_runtime() -> tuple[Any, str]:
+    def omitted(*_args: Any) -> Any:
+        events.append("universe")
+        raise selection.SelectionGateError("simulated 413/414 omission")
+
+    monkeypatch.setattr(selection, "_authenticated_forbidden_universe", omitted)
+    monkeypatch.setattr(
+        selection,
+        "validate_output_paths",
+        lambda *_args, **_kwargs: pytest.fail("output paths validated before universe"),
+    )
+    monkeypatch.setattr(
+        selection,
+        "_create_exclusive_claim",
+        lambda *_args, **_kwargs: pytest.fail("claim created before universe"),
+    )
+    monkeypatch.setattr(
+        decoder,
+        "_require_runtime_versions_only",
+        lambda: pytest.fail("runtime inspected before universe"),
+    )
+    monkeypatch.setattr(
+        decoder,
+        "_validate_production_source_metadata",
+        lambda *_args: pytest.fail("source inspected before universe"),
+    )
+    with pytest.raises(selection.SelectionGateError, match="413/414"):
+        selection.activate_selection_gate()
+    assert events == ["universe"]
+    assert not (repo / selection.SELECTION_CLAIM_RELATIVE).exists()
+    assert not (repo / selection.SELECTION_RECEIPT_RELATIVE).exists()
+
+
+def test_gate_g_immutable_reference_inputs_reject_claim_and_receipt_aliases(
+    tmp_path: Path,
+) -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    bindings = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_bindings")
+    forbidden = cast(
+        Mapping[str, Any], bindings.PHASE_B_SOURCE_SELECTION_CONTRACT_V4["forbidden_universe"]
+    )
+    raw_sources = cast(Mapping[str, str], forbidden["raw_reference_source_hashes"])
+    immutable = {
+        *raw_sources,
+        bindings.PHASE_A_AUDIT_RELATIVE,
+        bindings.SUCCESSOR_EXTENSION_RELATIVE,
+        bindings.SUCCESSOR_EXTENSION_MANIFEST_RELATIVE,
+        bindings.SUCCESSOR_MANIFEST_RELATIVE,
+        bindings.SUCCESSOR_ADDRESS_AUDIT_V1_RELATIVE,
+    }
+    for output in (selection.SELECTION_CLAIM_RELATIVE, selection.SELECTION_RECEIPT_RELATIVE):
+        for relative in sorted(immutable):
+            source = tmp_path / relative
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_bytes(b"immutable input")
+            destination = tmp_path / output
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            os.link(source, destination)
+            with pytest.raises(ValueError, match="hard-link alias"):
+                selection.validate_output_paths(
+                    tmp_path,
+                    {relative: "0" * 64},
+                    output_paths=(
+                        selection.SELECTION_CLAIM_RELATIVE,
+                        selection.SELECTION_RECEIPT_RELATIVE,
+                    ),
+                )
+            destination.unlink()
+
+
+def test_gate_g_actuator_claims_before_runtime_source_and_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
+    repo, _gate = _synthetic_gate_chain(tmp_path)
+    monkeypatch.setattr(decoder, "PROJECT_ROOT", repo)
+    events: list[str] = []
+    original_claim = selection._create_exclusive_claim
+    original_validate_paths = selection.validate_output_paths
+
+    def claim(root: Path, payload: dict[str, Any]) -> bytes:
+        events.append("claim")
+        return cast(bytes, original_claim(root, payload))
+
+    monkeypatch.setattr(selection, "_create_exclusive_claim", claim)
+
+    def validate_paths(*args: Any, **kwargs: Any) -> None:
+        events.append("paths")
+        original_validate_paths(*args, **kwargs)
+
+    monkeypatch.setattr(selection, "validate_output_paths", validate_paths)
+
+    def runtime() -> tuple[Any, str]:
         events.append("runtime")
         return types.SimpleNamespace(__version__="25.0.0"), "5.0.0"
 
-    def fake_source(*_args: Any) -> object:
+    def source(*_args: Any) -> object:
         events.append("source")
         return object()
 
-    def fake_resume(*_args: Any) -> Iterator[tuple[int, dict[str, Any]]]:
-        events.append("resume")
-        return iter(())
+    def universe(*_args: Any) -> Any:
+        events.append("universe")
+        return selection.SelectionUniverse(
+            paper_ids=frozenset(),
+            example_ids=frozenset(),
+            rendered_paper_sha256=frozenset(),
+            reference_spans=frozenset(),
+            row_sha256=frozenset(),
+            addresses=frozenset(),
+        )
 
-    monkeypatch.setattr(decoder, "_require_runtime_versions_only", fake_runtime)
-    monkeypatch.setattr(decoder, "_validate_production_source_metadata", fake_source)
-    monkeypatch.setattr(decoder, "_resume_rows", fake_resume)
-    assert list(decoder.resume_source_rows()) == []
-    assert events == ["runtime", "source", "resume"]
+    def scan(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        events.append("scan")
+        return {
+            "disposition": "exhausted",
+            "stop_ordinal": 887,
+            "candidate": None,
+            "transcript_sha256": "a" * 64,
+        }
+
+    monkeypatch.setattr(decoder, "_require_runtime_versions_only", runtime)
+    monkeypatch.setattr(decoder, "_validate_production_source_metadata", source)
+    monkeypatch.setattr(selection, "_authenticated_forbidden_universe", universe)
+    monkeypatch.setattr(selection, "_scan_once", scan)
+    receipt = selection.activate_selection_gate()
+    assert events == ["universe", "paths", "claim", "runtime", "source", "scan"]
+    assert receipt["attempt"] == 1
+    assert receipt["retry"] is False
+    assert receipt["candidate"] is None
+    assert (repo / selection.SELECTION_CLAIM_RELATIVE).is_file()
+    assert (repo / selection.SELECTION_RECEIPT_RELATIVE).is_file()
+    with pytest.raises(selection.SelectionGateAlreadyClaimed):
+        selection.activate_selection_gate()
+    assert events == [
+        "universe",
+        "paths",
+        "claim",
+        "runtime",
+        "source",
+        "scan",
+        "universe",
+        "paths",
+        "claim",
+    ]
 
 
-@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
-    "version_field",
-    ("python", "pyarrow", "datasets"),
-)
-def test_repair_r_runtime_mismatch_fails_before_source_access(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    version_field: str,
-) -> None:
-    repo, _path, _payload = _synthetic_c3_chain(tmp_path)
-    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
-    monkeypatch.setattr(decoder, "PROJECT_ROOT", repo)
-    monkeypatch.setitem(sys.modules, "pyarrow", types.SimpleNamespace(__version__="25.0.0"))
-    monkeypatch.setitem(sys.modules, "datasets", types.SimpleNamespace(__version__="5.0.0"))
-    current_python = ".".join(map(str, sys.version_info[:3]))
-    monkeypatch.setattr(decoder, "SUPPORTED_PYTHON", current_python)
-    if version_field == "python":
-        monkeypatch.setattr(decoder, "SUPPORTED_PYTHON", "0.0.0")
-    elif version_field == "pyarrow":
-        monkeypatch.setattr(decoder, "SUPPORTED_PYARROW", "0.0.0")
-    else:
-        monkeypatch.setattr(decoder, "SUPPORTED_DATASETS", "0.0.0")
-    monkeypatch.setattr(
-        decoder,
-        "_validate_production_source_metadata",
-        lambda *_args: pytest.fail("source was inspected after runtime mismatch"),
-    )
-    with pytest.raises(RuntimeError):
-        decoder.validate_future_phase_b_authorization_artifact()
-
-
-def test_repair_r_preserves_v2_digest_and_uses_distinct_v3_contract() -> None:
+def test_gate_g_v2_v3_history_is_frozen_and_v4_is_distinct() -> None:
     from redco.analysis.stage_d_v13_source_phase_a_bindings import (
         PHASE_B_RESUME_CONTRACT_V2_SHA256,
-        PHASE_B_RESUME_CONTRACT_V3,
+        PHASE_B_SOURCE_SELECTION_CONTRACT_V4,
+        PHASE_B_SOURCE_SELECTION_CONTRACT_V4_SHA256,
     )
     from redco.analysis.stage_d_v13_source_phase_a_decoder import (
         _resume_contract_hash,
@@ -1798,5 +2148,13 @@ def test_repair_r_preserves_v2_digest_and_uses_distinct_v3_contract() -> None:
     )
 
     assert _resume_contract_hash() == PHASE_B_RESUME_CONTRACT_V2_SHA256
-    assert _resume_contract_v3_hash() == sha256_json(PHASE_B_RESUME_CONTRACT_V3)
+    assert PHASE_B_RESUME_CONTRACT_V2_SHA256 == (
+        "cade25b90061b817423307b5e63fb6c76756ac3f5b365671572a6d16eb2e8e08"
+    )
+    assert _resume_contract_v3_hash() == (
+        "6dbe84a853f0e995e6a6821b0340b44e0c197b7a7783af709c668d0ae96f6151"
+    )
     assert _resume_contract_v3_hash() != PHASE_B_RESUME_CONTRACT_V2_SHA256
+    assert sha256_json(PHASE_B_SOURCE_SELECTION_CONTRACT_V4) == (
+        PHASE_B_SOURCE_SELECTION_CONTRACT_V4_SHA256
+    )

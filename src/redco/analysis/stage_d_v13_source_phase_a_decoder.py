@@ -48,15 +48,8 @@ PHASE_A_CUTOFF = 179
 PHASE_A_BATCH_SIZE = PHASE_A_CUTOFF + 1
 PHASE_B_RESUME_START_ORDINAL = PHASE_A_CUTOFF + 1
 PHASE_B_RESUME_BATCH_SIZE = PHASE_A_BATCH_SIZE
-PHASE_B_AUTHORIZATION_RELATIVE = (
-    "configs/stage-d/v13-draft/stage-d1-support-v13-phase-b-authorization-c-v1.json"
-)
 PHASE_B_BINDING_RELATIVE = (
     "configs/stage-d/v13-draft/stage-d1-support-v13-phase-b-binding-b-v1.json"
-)
-PHASE_C3_AUTHORIZATION_RELATIVE = (
-    "configs/stage-d/v13-draft/"
-    "stage-d1-support-v13-phase-b-authorization-c3-v1.json"
 )
 PHASE_A_VERSION = "stage-d-v13-source-authentication-phase-a-v2"
 
@@ -255,66 +248,6 @@ class DecoderInstrumentation:
             "post_cutoff_logical_row_materialized": post_cutoff_logical,
             "post_cutoff_row_canonicalized": post_cutoff_canonical,
             "physical_io_may_span_row_group": True,
-        }
-
-
-@dataclass(slots=True)
-class ResumeDecoderInstrumentation:
-    """Bounded observations exposed by the dormant Phase-B resume seam."""
-
-    decoded_objects: list[dict[str, int | str]] = field(default_factory=list)
-    materialized_ranges: list[list[int]] = field(default_factory=list)
-    canonicalized_ordinals: list[int] = field(default_factory=list)
-    evaluated_ordinals: list[int] = field(default_factory=list)
-    emitted_ordinals: list[int] = field(default_factory=list)
-
-    def record_decoded(self, *, start: int, rows: int) -> None:
-        end = start + rows - 1
-        previous_end = (
-            int(self.decoded_objects[-1]["end_ordinal"]) if self.decoded_objects else None
-        )
-        if rows <= 0 or (previous_end is not None and start != previous_end + 1):
-            raise ValueError("resume decoder logical batch order differs")
-        self.decoded_objects.append(
-            {
-                "kind": "pyarrow_record_batch",
-                "rows": rows,
-                "start_ordinal": start,
-                "end_ordinal": end,
-            }
-        )
-
-    def record_materialized(self, *, start: int, rows: int) -> None:
-        end = start + rows - 1
-        if start < PHASE_B_RESUME_START_ORDINAL:
-            raise ValueError("resume materialization began before ordinal 180")
-        self.materialized_ranges.append([start, end])
-
-    def record_canonicalized(self, ordinal: int) -> None:
-        if ordinal < PHASE_B_RESUME_START_ORDINAL:
-            raise ValueError("resume canonicalization began before ordinal 180")
-        self.canonicalized_ordinals.append(ordinal)
-
-    def record_evaluated(self, ordinal: int) -> None:
-        if ordinal < PHASE_B_RESUME_START_ORDINAL:
-            raise ValueError("resume evaluation began before ordinal 180")
-        self.evaluated_ordinals.append(ordinal)
-
-    def record_emitted(self, ordinal: int) -> None:
-        if ordinal < PHASE_B_RESUME_START_ORDINAL or (
-            self.emitted_ordinals and ordinal != self.emitted_ordinals[-1] + 1
-        ):
-            raise ValueError("resume emitted ordinals are not contiguous")
-        self.emitted_ordinals.append(ordinal)
-
-    def to_payload(self) -> dict[str, Any]:
-        return {
-            "decoded_objects": self.decoded_objects,
-            "materialized_ranges": self.materialized_ranges,
-            "canonicalized_ordinals": self.canonicalized_ordinals,
-            "evaluated_ordinals": self.evaluated_ordinals,
-            "emitted_ordinals": self.emitted_ordinals,
-            "invocation_count_observed": 1,
         }
 
 
@@ -522,58 +455,6 @@ def _resume_contract_v3_hash() -> str:
     )
 
     return cast(str, sha256_json(PHASE_B_RESUME_CONTRACT_V3))
-
-
-def _validate_synthetic_resume_authorization(
-    path: Path, authorization: Mapping[str, Any]
-) -> tuple[Any, Any]:
-    required = {
-        "state",
-        "phase_b_authorized",
-        "preselection_checkpoint_sha256",
-        "source_sha256",
-        "schema_sha256",
-        "decoder_contract_sha256",
-        "start_ordinal",
-        "batch_size",
-        "row_groups",
-        "use_threads",
-        "source_order",
-    }
-    if not required.issubset(authorization):
-        raise PhaseBResumeAuthorizationError("reviewed resume authorization fields are incomplete")
-    if (
-        authorization["state"] != "reviewed_preselection_checkpoint"
-        or authorization["phase_b_authorized"] is not True
-        or not isinstance(authorization["preselection_checkpoint_sha256"], str)
-        or len(authorization["preselection_checkpoint_sha256"]) != 64
-        or authorization["start_ordinal"] != PHASE_B_RESUME_START_ORDINAL
-        or authorization["batch_size"] != PHASE_B_RESUME_BATCH_SIZE
-        or authorization["row_groups"] != [0]
-        or authorization["use_threads"] is not False
-        or authorization["source_order"] != "physical_ordinal"
-        or authorization["decoder_contract_sha256"] != _resume_contract_hash()
-    ):
-        raise PhaseBResumeAuthorizationError(
-            "resume authorization does not match the frozen contract"
-        )
-    if not path.is_file():
-        raise FileNotFoundError(path)
-    actual_source_sha256 = sha256_file(path)
-    actual_schema_sha256 = source_schema_sha256(path)
-    if authorization["source_sha256"] != actual_source_sha256:
-        raise PhaseBResumeAuthorizationError("resume source hash differs")
-    if authorization["schema_sha256"] != actual_schema_sha256:
-        raise PhaseBResumeAuthorizationError("resume source schema differs")
-    try:
-        import pyarrow.parquet as parquet
-    except ImportError as error:
-        raise RuntimeError("Phase B requires the pinned PyArrow decoder") from error
-    parquet_file = parquet.ParquetFile(path)
-    metadata = parquet_file.metadata
-    if metadata is None or metadata.num_rows <= PHASE_B_RESUME_START_ORDINAL:
-        raise PhaseBResumeAuthorizationError("resume source has no post-cutoff rows")
-    return parquet, parquet_file
 
 
 def _git_text(repo_root: Path, *arguments: str) -> str:
@@ -903,237 +784,6 @@ def _git_path_exists_at_commit(repo_root: Path, commit: str, relative: str) -> b
     return result.returncode == 0
 
 
-def _validate_c3_artifact(
-    repo_root: Path,
-    c3_raw: bytes,
-    *,
-    head: str,
-    repair_commit: str,
-    binding_commit: str,
-    foundation_commit: str,
-    b_raw: bytes,
-    b: Mapping[str, Any],
-    source_contract: Mapping[str, Any],
-    production: bool,
-) -> dict[str, Any]:
-    from redco.analysis.stage_d_v13_source_phase_a_bindings import (
-        PHASE_A_STATUS_SIGNATURE,
-        PHASE_C3_AUTHORIZATION_DOMAIN,
-    )
-
-    parsed = _parse_canonical_object(c3_raw, "Authorization C3")
-    expected_keys = {
-        "schema_version",
-        "domain",
-        "state",
-        "draft_unfrozen",
-        "foundation_only",
-        "non_authorizing",
-        "candidate",
-        "seed",
-        "address",
-        "phase_b_authorized",
-        "source_selection_authorized",
-        "launch_authorized",
-        "provider_calls_authorized",
-        "model_calls_authorized",
-        "prime_gpu_scientific_launch_authorized",
-        "status_signature",
-        "foundation_commit",
-        "foundation_tree_sha1",
-        "binding_commit",
-        "repair_commit",
-        "binding_artifact",
-        "source",
-        "bindings",
-        "user_authorization",
-        "resume_authorization",
-    }
-    if set(parsed) != expected_keys:
-        raise PhaseBResumeAuthorizationError("Authorization C3 schema has unexpected fields")
-    if (
-        parsed["schema_version"] != 1
-        or parsed["domain"] != PHASE_C3_AUTHORIZATION_DOMAIN
-        or parsed["state"] != "C3"
-        or parsed["draft_unfrozen"] is not False
-        or parsed["foundation_only"] is not False
-        or parsed["non_authorizing"] is not False
-        or parsed["phase_b_authorized"] is not True
-        or parsed["source_selection_authorized"] is not True
-        or parsed["launch_authorized"] is not False
-        or parsed["provider_calls_authorized"] is not False
-        or parsed["model_calls_authorized"] is not False
-        or parsed["prime_gpu_scientific_launch_authorized"] is not False
-        or parsed["status_signature"] != PHASE_A_STATUS_SIGNATURE
-        or parsed["foundation_commit"] != foundation_commit
-        or parsed["binding_commit"] != binding_commit
-        or parsed["repair_commit"] != repair_commit
-        or parsed["foundation_tree_sha1"] != b["foundation_tree_sha1"]
-    ):
-        raise PhaseBResumeAuthorizationError("Authorization C3 state or chain identity differs")
-    _require_null_candidate(parsed, "Authorization C3")
-    if production and (head == BINDING_B_COMMIT or repair_commit == BINDING_B_COMMIT):
-        raise PhaseBResumeAuthorizationError("Authorization C3 cannot use legacy direct B to C")
-
-    binding_artifact = parsed["binding_artifact"]
-    if (
-        not isinstance(binding_artifact, dict)
-        or set(binding_artifact) != {"path", "sha256", "git_blob_sha1", "status_signature"}
-        or binding_artifact["path"] != PHASE_B_BINDING_RELATIVE
-        or binding_artifact["sha256"] != sha256_bytes(b_raw)
-        or binding_artifact["git_blob_sha1"] != git_blob_sha1(b_raw)
-        or binding_artifact["status_signature"] != PHASE_A_STATUS_SIGNATURE
-    ):
-        raise PhaseBResumeAuthorizationError("Authorization C3 binding artifact identity differs")
-    if production and (
-        binding_artifact["sha256"] != BINDING_B_SHA256
-        or binding_artifact["git_blob_sha1"] != BINDING_B_GIT_BLOB_SHA1
-    ):
-        raise PhaseBResumeAuthorizationError("Authorization C3 B artifact is not approved")
-
-    source = parsed["source"]
-    expected_source = {
-        "path": source_contract["path"],
-        "revision": source_contract["revision"],
-        "sha256": source_contract["sha256"],
-        "schema_sha256": source_contract["schema_sha256"],
-        "row_count": source_contract["row_count"],
-    }
-    if source != expected_source:
-        raise PhaseBResumeAuthorizationError("Authorization C3 source binding differs")
-    bindings = parsed["bindings"]
-    b_bindings = b.get("bindings")
-    if not isinstance(bindings, dict) or not isinstance(b_bindings, dict):
-        raise PhaseBResumeAuthorizationError("Authorization C3 input bindings are missing")
-    user_authorization = parsed["user_authorization"]
-    expected_user_keys = {
-        "reviewed",
-        "scope",
-        "launch_authorized",
-        "provider_calls_authorized",
-        "model_calls_authorized",
-    }
-    if (
-        not isinstance(user_authorization, dict)
-        or set(user_authorization) != expected_user_keys
-        or user_authorization
-        != {
-            "reviewed": True,
-            "scope": "local_phase_b_source_selection_only",
-            "launch_authorized": False,
-            "provider_calls_authorized": False,
-            "model_calls_authorized": False,
-        }
-    ):
-        raise PhaseBResumeAuthorizationError("Authorization C3 user scope differs")
-    expected_bindings = dict(b_bindings)
-    expected_bindings["user_authorization_sha256"] = sha256_bytes(
-        canonical_json_bytes(user_authorization)
-    )
-    if bindings != expected_bindings:
-        raise PhaseBResumeAuthorizationError("Authorization C3 bindings differ from B")
-
-    resume = parsed["resume_authorization"]
-    expected_resume = {
-        "state": "reviewed_preselection_checkpoint",
-        "phase_b_authorized": True,
-        "preselection_checkpoint_sha256": (
-            BINDING_B_SHA256 if production else sha256_bytes(b_raw)
-        ),
-        "source_sha256": source_contract["sha256"],
-        "schema_sha256": source_contract["schema_sha256"],
-        "decoder_contract_v2_sha256": _resume_contract_hash(),
-        "decoder_contract_v3_sha256": _resume_contract_v3_hash(),
-        "start_ordinal": PHASE_B_RESUME_START_ORDINAL,
-        "batch_size": PHASE_B_RESUME_BATCH_SIZE,
-        "row_groups": [0],
-        "use_threads": False,
-        "source_order": "physical_ordinal",
-    }
-    if resume != expected_resume:
-        raise PhaseBResumeAuthorizationError(
-            "Authorization C3 nested resume contract is not exact"
-        )
-    return parsed
-
-
-def _validate_head_authorization_c3(repo_root: Path) -> dict[str, Any]:
-    """Validate only the production F -> B -> R -> C3 chain from HEAD."""
-
-    production = repo_root.resolve() == _DEFAULT_PROJECT_ROOT
-    legacy_path = repo_root / PHASE_B_AUTHORIZATION_RELATIVE
-    c3_path = repo_root / PHASE_C3_AUTHORIZATION_RELATIVE
-    if legacy_path.is_file():
-        raise PhaseBResumeAuthorizationError(
-            "legacy direct B-to-C authorization path is forbidden after Repair R"
-        )
-    head = _git_text(repo_root, "rev-parse", "--verify", "HEAD^{commit}")
-    if not _FULL_COMMIT_SHA.fullmatch(head):
-        raise PhaseBResumeAuthorizationError("current HEAD is not a full Git commit SHA")
-    if _git_path_exists_at_commit(repo_root, head, PHASE_B_AUTHORIZATION_RELATIVE):
-        raise PhaseBResumeAuthorizationError("legacy direct B-to-C artifact is in the HEAD tree")
-    if not c3_path.is_file() or not _git_path_exists_at_commit(
-        repo_root, head, PHASE_C3_AUTHORIZATION_RELATIVE
-    ):
-        raise PhaseBResumeAuthorizationError("Authorization C3 is absent from exact HEAD")
-    c3_parents = _commit_parents(repo_root, head)
-    if len(c3_parents) != 1:
-        raise PhaseBResumeAuthorizationError("C3 must have exactly one direct parent R")
-    repair_commit = c3_parents[0]
-    repair_parents = _commit_parents(repo_root, repair_commit)
-    if len(repair_parents) != 1:
-        raise PhaseBResumeAuthorizationError("Repair R must have exactly one direct parent B")
-    binding_commit = repair_parents[0]
-    binding_parents = _commit_parents(repo_root, binding_commit)
-    if len(binding_parents) != 1:
-        raise PhaseBResumeAuthorizationError("Binding B must have exactly one direct parent F")
-    foundation_commit = binding_parents[0]
-    foundation_parents = _commit_parents(repo_root, foundation_commit)
-    if len(foundation_parents) != 1:
-        raise PhaseBResumeAuthorizationError("Foundation F must have exactly one direct parent")
-    if production and (
-        foundation_commit != FOUNDATION_F_COMMIT
-        or binding_commit != BINDING_B_COMMIT
-        or foundation_parents[0] != FOUNDATION_F_PARENT_COMMIT
-    ):
-        raise PhaseBResumeAuthorizationError("future C3 chain does not match approved F and B")
-    expected_f_to_b = [f"A\t{PHASE_B_BINDING_RELATIVE}"]
-    expected_b_to_r = sorted(f"M\t{path}" for path in REPAIR_DIFF_ALLOWLIST)
-    expected_r_to_c3 = [f"A\t{PHASE_C3_AUTHORIZATION_RELATIVE}"]
-    if sorted(_diff_paths(repo_root, foundation_commit, binding_commit)) != expected_f_to_b:
-        raise PhaseBResumeAuthorizationError("F to B differs outside the Binding B artifact")
-    if sorted(_diff_paths(repo_root, binding_commit, repair_commit)) != expected_b_to_r:
-        raise PhaseBResumeAuthorizationError("B to R differs outside the exact repair allowlist")
-    if sorted(_diff_paths(repo_root, repair_commit, head)) != expected_r_to_c3:
-        raise PhaseBResumeAuthorizationError("R to C3 differs outside the C3 artifact")
-    worktree_b = repo_root / PHASE_B_BINDING_RELATIVE
-    b_raw = _git_blob_at_commit(repo_root, binding_commit, PHASE_B_BINDING_RELATIVE)
-    c3_raw = _git_blob_at_commit(repo_root, head, PHASE_C3_AUTHORIZATION_RELATIVE)
-    if not worktree_b.is_file() or worktree_b.read_bytes() != b_raw:
-        raise PhaseBResumeAuthorizationError("Binding B worktree bytes differ from Git")
-    if c3_path.read_bytes() != c3_raw:
-        raise PhaseBResumeAuthorizationError("Authorization C3 worktree bytes differ from Git")
-    b, base_inputs = _validate_b_checkpoint(
-        repo_root,
-        foundation_commit,
-        binding_commit,
-        b_raw,
-        production=production,
-    )
-    return _validate_c3_artifact(
-        repo_root,
-        c3_raw,
-        head=head,
-        repair_commit=repair_commit,
-        binding_commit=binding_commit,
-        foundation_commit=foundation_commit,
-        b_raw=b_raw,
-        b=b,
-        source_contract=cast(dict[str, Any], base_inputs["source_contract"]),
-        production=production,
-    )
-
-
 def _require_runtime_versions_only() -> tuple[Any, str]:
     """Check exact runtime versions without touching the production source."""
 
@@ -1184,98 +834,20 @@ def _validate_production_source_metadata(
     return parquet_file
 
 
-def _authenticate_c3_and_source() -> tuple[dict[str, Any], Any]:
-    """Authenticate C3, the exact runtime, and source metadata exactly once."""
-
-    root = _repository_root()
-    if (root / PHASE_B_AUTHORIZATION_RELATIVE).is_file():
-        raise PhaseBResumeAuthorizationError(
-            "legacy direct B-to-C artifact cannot authorize after Repair R"
-        )
-    if not (root / PHASE_C3_AUTHORIZATION_RELATIVE).is_file():
-        raise PhaseBResumeUnavailable(
-            "Authorization C3 is absent; Repair R cannot resume Phase B"
-        )
-    artifact = _validate_head_authorization_c3(root)
-    pyarrow, _datasets_version = _require_runtime_versions_only()
-    parquet_file = _validate_production_source_metadata(
-        root,
-        cast(Mapping[str, Any], artifact["source"]),
-        pyarrow,
-    )
-    return artifact, parquet_file
-
-
 def validate_future_phase_b_authorization_artifact() -> dict[str, Any]:
-    """Validate the non-caller-controlled F -> B -> R -> C3 activation path."""
+    """Reject the retired repeatable C3-v1 activation surface."""
 
-    artifact, _parquet_file = _authenticate_c3_and_source()
-    return artifact
-
-
-def _repository_root() -> Path:
-    return PROJECT_ROOT
+    raise PhaseBResumeUnavailable(
+        "C3-v1 authorization is retired; use the one-attempt Gate-G actuator"
+    )
 
 
 def resume_source_rows() -> Iterator[tuple[int, dict[str, Any]]]:
-    """Open the fixed Phase-B source only after a future committed C artifact.
+    """Reject the retired repeatable raw production iterator."""
 
-    The no-argument signature prevents caller-supplied paths, hashes, flags,
-    checkpoints, and mappings from acting as authority.  In Foundation F the
-    absent C artifact fails before the Parquet path is even inspected.
-    """
-
-    _artifact, parquet_file = _authenticate_c3_and_source()
-    global _RESUME_DECODER_INVOCATIONS
-    _RESUME_DECODER_INVOCATIONS += 1
-    return _resume_rows(parquet_file, ResumeDecoderInstrumentation())
-
-
-def _synthetic_resume_source_rows(
-    path: Path,
-    *,
-    authorization: Mapping[str, Any],
-    instrumentation: ResumeDecoderInstrumentation | None = None,
-) -> Iterator[tuple[int, dict[str, Any]]]:
-    """Private synthetic-fixture seam for decoder ordering tests only."""
-
-    _parquet, parquet_file = _validate_synthetic_resume_authorization(path, authorization)
-    observer = instrumentation or ResumeDecoderInstrumentation()
-    return _resume_rows(parquet_file, observer)
-
-
-def _resume_rows(
-    parquet_file: Any,
-    observer: ResumeDecoderInstrumentation,
-) -> Iterator[tuple[int, dict[str, Any]]]:
-    next_ordinal = 0
-    for batch in parquet_file.iter_batches(
-        batch_size=PHASE_B_RESUME_BATCH_SIZE,
-        row_groups=[0],
-        use_threads=False,
-    ):
-        rows = int(batch.num_rows)
-        observer.record_decoded(start=next_ordinal, rows=rows)
-        batch_start = next_ordinal
-        next_ordinal += rows
-        if next_ordinal <= PHASE_B_RESUME_START_ORDINAL:
-            continue
-        if batch_start < PHASE_B_RESUME_START_ORDINAL:
-            raise PhaseBResumeAuthorizationError(
-                "resume batch straddles the reviewed start ordinal"
-            )
-        decoded_rows = batch.to_pylist()
-        if len(decoded_rows) != rows:
-            raise ValueError("resume PyArrow batch cardinality changed during conversion")
-        observer.record_materialized(start=batch_start, rows=rows)
-        for offset, row in enumerate(decoded_rows):
-            ordinal = batch_start + offset
-            if not isinstance(row, dict):
-                raise ValueError(f"resume source row {ordinal} is not an object")
-            observer.record_canonicalized(ordinal)
-            observer.record_evaluated(ordinal)
-            observer.record_emitted(ordinal)
-            yield ordinal, row
+    raise PhaseBResumeUnavailable(
+        "repeatable raw resume iterator is retired; use the one-attempt Gate-G actuator"
+    )
 
 
 __all__ = [
@@ -1292,11 +864,9 @@ __all__ = [
     "PHASE_A_CONFIG_SHA256",
     "PHASE_A_CUTOFF",
     "PHASE_A_VERSION",
-    "PHASE_B_AUTHORIZATION_RELATIVE",
     "PHASE_B_BINDING_RELATIVE",
     "PHASE_B_RESUME_BATCH_SIZE",
     "PHASE_B_RESUME_START_ORDINAL",
-    "PHASE_C3_AUTHORIZATION_RELATIVE",
     "PROJECT_ROOT",
     "SOURCE_ARTIFACT_RELATIVE",
     "SOURCE_BYTES",
@@ -1318,8 +888,6 @@ __all__ = [
     "PhaseAWallError",
     "PhaseBResumeAuthorizationError",
     "PhaseBResumeUnavailable",
-    "ResumeDecoderInstrumentation",
-    "_synthetic_resume_source_rows",
     "authenticate_source_artifact",
     "bounded_source_rows",
     "canonical_source_row_bytes",

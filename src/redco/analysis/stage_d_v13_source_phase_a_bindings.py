@@ -97,15 +97,9 @@ PHASE_B_BINDING_RELATIVE = (
     "configs/stage-d/v13-draft/stage-d1-support-v13-phase-b-binding-b-v1.json"
 )
 PHASE_B_BINDING_DOMAIN = "redco-stage-d1-support-v13-phase-b-binding-b-v1"
-PHASE_B_AUTHORIZATION_DOMAIN = (
-    "redco-stage-d1-support-v13-phase-b-authorization-c-v2"
-)
 PHASE_C3_AUTHORIZATION_RELATIVE = (
     "configs/stage-d/v13-draft/"
     "stage-d1-support-v13-phase-b-authorization-c3-v1.json"
-)
-PHASE_C3_AUTHORIZATION_DOMAIN = (
-    "redco-stage-d1-support-v13-phase-b-authorization-c3-v1"
 )
 PHASE_B_RESUME_CONTRACT_V2_SHA256 = (
     "cade25b90061b817423307b5e63fb6c76756ac3f5b365671572a6d16eb2e8e08"
@@ -298,6 +292,195 @@ PHASE_B_RESUME_CONTRACT_V3: dict[str, object] = {
     },
 }
 
+# Selection Gate G is a new, non-authorizing checkpoint after the committed
+# Repair R.  The v2/v3 objects and their historical meanings remain frozen.
+REPAIR_R_COMMIT = "60f3b0565efa27ec18680a8b8089f53626ef39f6"
+PHASE_C3_V2_AUTHORIZATION_RELATIVE = (
+    "configs/stage-d/v13-draft/"
+    "stage-d1-support-v13-phase-b-authorization-c3-v2.json"
+)
+PHASE_C3_V2_AUTHORIZATION_DOMAIN = (
+    "redco-stage-d1-support-v13-phase-b-authorization-c3-v2"
+)
+PHASE_A_AUDIT_RELATIVE = "reports/stage-d1-support-v13-source-phase-a-audit-v1.json"
+PHASE_A_AUDIT_SHA256 = (
+    "e92c6ddb63c86c6fbc99490f0575625f3be12b1c852da284d6f08d92760362bc"
+)
+PHASE_A_WITNESS_SHA256 = (
+    "907e7e7a23cd9aaeb4b4be6e38521f8f522927a8a3eb9149c8088ff2b6b34b8b"
+)
+SUCCESSOR_EXTENSION_RELATIVE = "datasets/stage-d/qasper-successor-extension-v1.jsonl"
+SUCCESSOR_EXTENSION_SHA256 = (
+    "8a1b55482d3c5f151741f42ba645b1cad2a0d20e2a445f69432c4e31c0c744b8"
+)
+SUCCESSOR_EXTENSION_GIT_BLOB_SHA1 = "6f4ebb4d5c44287f0664620f0145784cf5f1bfba"
+SUCCESSOR_EXTENSION_MANIFEST_RELATIVE = (
+    "datasets/stage-d/qasper-successor-extension-manifest-v1.json"
+)
+SUCCESSOR_EXTENSION_MANIFEST_SHA256 = (
+    "6960fcd92e4c7806cefa70da00dd1d3b65ba69fda1d0c0d1938a5205b4dfda69"
+)
+SUCCESSOR_EXTENSION_MANIFEST_GIT_BLOB_SHA1 = "5b2d865372270ad15deed71c8b18104cbc0b0765"
+SUCCESSOR_MANIFEST_RELATIVE = "datasets/stage-d/qasper-support-successor-manifest-v1.json"
+SUCCESSOR_MANIFEST_SHA256 = (
+    "f090d4cd382fce120ab3bd3ae15a2123102941e53fbc344f3a2098880d2daba6"
+)
+SUCCESSOR_MANIFEST_GIT_BLOB_SHA1 = "6bf5ba929d0254dc4ce65fb9eb8717ef8fc76f4c"
+SUCCESSOR_ADDRESS_AUDIT_V1_RELATIVE = (
+    "reports/stage-d1-support-successor-address-audit-v1.json"
+)
+SUCCESSOR_ADDRESS_AUDIT_V1_SHA256 = (
+    "ee5fc07b6bf76d470d9bcf26e1085d3055a283fb3df3212359353d5b2586d6df"
+)
+SUCCESSOR_ADDRESS_AUDIT_V1_GIT_BLOB_SHA1 = "c67f1066726c3bca4563b69b524441ff8da41bfe"
+SUCCESSOR_EXTENSION_INTRODUCED_COMMIT = "6d1d8543e4056f851b0f0dd6dff9b73701c93fae"
+RECOVERED_REFERENCE_SOURCE_ORDINAL = 89
+RECOVERED_REFERENCE_PAPER_ID = "1911.03894"
+RECOVERED_REFERENCE_EXAMPLE_ID = "qasper-71f2b368228a748fd348f1abf540236568a61b07"
+RECOVERED_REFERENCE_QUESTION_INDEX = 0
+RECOVERED_REFERENCE_CANONICAL_ROW_SHA256 = (
+    "4453db56b2a8f6055ddad911274e9a672d3ae61788d945e6c670e5ec0f7e059a"
+)
+RECOVERED_REFERENCE_RENDERED_PAPER_SHA256 = (
+    "8e77d988ff4e6f2b79232d7f991a00d3092dc10d9560414fd9295a363243583f"
+)
+RECOVERED_REFERENCE_SHA256 = (
+    "f51c54401b49f414690423a810f6bbb204a7e804a41a2d53f665c9e96baa9df0"
+)
+RECOVERED_REFERENCE_CARDINALITY = 1
+RECOVERED_REFERENCE_EXPECTED_DIGEST_COUNT = 414
+SELECTION_CLAIM_RELATIVE = "runs/stage-d/stage-d1-support-v13-source-selection-claim-v1.json"
+SELECTION_RECEIPT_RELATIVE = (
+    "reports/stage-d1-support-v13-source-selection-receipt-v2.json"
+)
+SELECTION_GATE_APPROVAL_THREAD_ID = "019f9ab9-ec45-7ac3-82b1-09757b92a7c3"
+SELECTION_GATE_APPROVAL_TEXT = (
+    "Stage D Selection Gate G CPU-only checkpoint: replace the repeatable raw "
+    "production iterator with a one-attempt first-disposition source-selection "
+    "actuator; do not authorize launch, provider, model, Prime, GPU, wallet, or science."
+)
+SELECTION_GATE_APPROVAL_TEXT_SHA256 = (
+    "b09b13cea7e01dafadd092e0cb3b4b9e85b8f89e1688c69ad185fe597a3b5996"
+)
+
+PHASE_B_SOURCE_SELECTION_CONTRACT_V4: dict[str, object] = {
+    "schema_version": 1,
+    "version": "stage-d-v13-phase-b-source-selection-v4",
+    "authorization_artifact": PHASE_C3_V2_AUTHORIZATION_RELATIVE,
+    "authorization_domain": PHASE_C3_V2_AUTHORIZATION_DOMAIN,
+    "predecessor_repair_r": REPAIR_R_COMMIT,
+    "start_ordinal": 180,
+    "final_possible_ordinal": 887,
+    "attempt_limit": 1,
+    "retry": False,
+    "stop_rule": (
+        "first_eligible_candidate_or_terminal_identity_collision_or_exhaustion"
+    ),
+    "source_order": "physical_ordinal",
+    "decoder": {
+        "batch_size": 180,
+        "row_groups": [0],
+        "use_threads": False,
+        "logical_readahead": False,
+        "metadata_only_for_authentication": True,
+    },
+    "selector": {
+        "maximum_paper_characters": 60_000,
+        "minimum_exact_span_characters": 20,
+        "first_eligible_question_per_paper": True,
+        "collision_dispositions": APPROVED_COLLISION_DISPOSITIONS,
+    },
+    "forbidden_universe": {
+        "artifact_path": PHASE_A_AUDIT_RELATIVE,
+        "artifact_sha256": PHASE_A_AUDIT_SHA256,
+        "witness_sha256": PHASE_A_WITNESS_SHA256,
+        "required_sets": [
+            "paper_ids",
+            "example_ids",
+            "rendered_paper_sha256",
+            "reference_spans",
+            "row_sha256",
+            "addresses",
+        ],
+        "raw_reference_spans_required_in_c3_v2": False,
+        "raw_reference_spans_source": "authenticated_committed_historical_artifacts",
+        "raw_reference_source_hashes": {
+            "datasets/stage-d/qasper-support-successor-v1.jsonl": (
+                "d118db801f660d2163fa3bdd676e842da436d69362b754be7d01afff58eabeab"
+            ),
+            "datasets/stage-d/qasper-support-successor-v2.jsonl": (
+                "f5b762a5380c976995517a556400f12c44afb4e77d73b1291991762519508408"
+            ),
+            "datasets/stage-d/qasper-support-successor-v3.jsonl": (
+                "ffd7c6e658ed8cad8278c29a01b97bbeb742e1c552eb63aca2079a6d4ef3c070"
+            ),
+            "datasets/stage-d/qasper-support-successor-v4.jsonl": (
+                "b7cdd5a0998dcfde739fe5a542b2e8b4dc6e8ef6c18ed7100df81860be3a1735"
+            ),
+            "datasets/stage-d/qasper-support-successor-v5.jsonl": (
+                "bb576082ba15535d7b0a996ea5c14dd008ebde634a0d8c5c7258f81d5ac9577d"
+            ),
+            "datasets/stage-d/qasper-support-successor-v6.jsonl": (
+                "153c25a1697737d4df58883adedf55e056d6cd58f08f86e2489391b40b5183ac"
+            ),
+            "datasets/stage-d/qasper-deterministic-v4.jsonl": (
+                "88fa2c114d2f251b8ce0400023980fe652e4733d14b0357f5517f517d5775d71"
+            ),
+        },
+        "recovery_projection": {
+            "extension_path": SUCCESSOR_EXTENSION_RELATIVE,
+            "extension_sha256": SUCCESSOR_EXTENSION_SHA256,
+            "extension_git_blob_sha1": SUCCESSOR_EXTENSION_GIT_BLOB_SHA1,
+            "extension_manifest_path": SUCCESSOR_EXTENSION_MANIFEST_RELATIVE,
+            "extension_manifest_sha256": SUCCESSOR_EXTENSION_MANIFEST_SHA256,
+            "extension_manifest_git_blob_sha1": SUCCESSOR_EXTENSION_MANIFEST_GIT_BLOB_SHA1,
+            "successor_manifest_path": SUCCESSOR_MANIFEST_RELATIVE,
+            "successor_manifest_sha256": SUCCESSOR_MANIFEST_SHA256,
+            "successor_manifest_git_blob_sha1": SUCCESSOR_MANIFEST_GIT_BLOB_SHA1,
+            "address_audit_path": SUCCESSOR_ADDRESS_AUDIT_V1_RELATIVE,
+            "address_audit_sha256": SUCCESSOR_ADDRESS_AUDIT_V1_SHA256,
+            "address_audit_git_blob_sha1": SUCCESSOR_ADDRESS_AUDIT_V1_GIT_BLOB_SHA1,
+            "introduced_commit": SUCCESSOR_EXTENSION_INTRODUCED_COMMIT,
+            "source_ordinal": RECOVERED_REFERENCE_SOURCE_ORDINAL,
+            "paper_id": RECOVERED_REFERENCE_PAPER_ID,
+            "example_id": RECOVERED_REFERENCE_EXAMPLE_ID,
+            "question_index": RECOVERED_REFERENCE_QUESTION_INDEX,
+            "canonical_row_sha256": RECOVERED_REFERENCE_CANONICAL_ROW_SHA256,
+            "rendered_paper_sha256": RECOVERED_REFERENCE_RENDERED_PAPER_SHA256,
+            "reference_cardinality": RECOVERED_REFERENCE_CARDINALITY,
+            "reference_sha256": RECOVERED_REFERENCE_SHA256,
+            "expected_reference_digest_count": RECOVERED_REFERENCE_EXPECTED_DIGEST_COUNT,
+        },
+    },
+    "paths": {
+        "claim": SELECTION_CLAIM_RELATIVE,
+        "receipt": SELECTION_RECEIPT_RELATIVE,
+    },
+    "derivation": {
+        "law": "stage_d_collection.py frozen v1 scientific group and source seed law",
+        "outcome_independent_scan_id": True,
+    },
+    "approval": {
+        "thread_id": SELECTION_GATE_APPROVAL_THREAD_ID,
+        "text_sha256": SELECTION_GATE_APPROVAL_TEXT_SHA256,
+    },
+    "authorization": {
+        "phase_b_authorized": False,
+        "phase_b_source_selection_authorized": True,
+        "source_selection_authorized": False,
+        "launch_authorized": False,
+        "provider_calls_authorized": False,
+        "model_calls_authorized": False,
+        "prime_gpu_scientific_launch_authorized": False,
+        "science_authorized": False,
+    },
+}
+# This literal is the reviewed digest of the canonical object above.  It is
+# intentionally not derived from a future C3-v2 artifact.
+PHASE_B_SOURCE_SELECTION_CONTRACT_V4_SHA256 = (
+    "aeb47f23445a0aeddef5a4d66dbec2788b58401367478ed81b3d935a0a16f09f"
+)
+
 
 __all__ = [
     "APPROVED_BEHAVIOR_HASHES",
@@ -306,14 +489,47 @@ __all__ = [
     "APPROVED_DERIVATION_VECTOR",
     "BEHAVIOR_BINDING_FILES",
     "FOUNDATION_STATUS_ENVELOPE",
+    "PHASE_A_AUDIT_RELATIVE",
+    "PHASE_A_AUDIT_SHA256",
     "PHASE_A_STATUS_SIGNATURE",
-    "PHASE_B_AUTHORIZATION_DOMAIN",
+    "PHASE_A_WITNESS_SHA256",
     "PHASE_B_BINDING_DOMAIN",
     "PHASE_B_BINDING_RELATIVE",
     "PHASE_B_RESUME_CONTRACT",
     "PHASE_B_RESUME_CONTRACT_V2",
     "PHASE_B_RESUME_CONTRACT_V2_SHA256",
     "PHASE_B_RESUME_CONTRACT_V3",
-    "PHASE_C3_AUTHORIZATION_DOMAIN",
+    "PHASE_B_SOURCE_SELECTION_CONTRACT_V4",
+    "PHASE_B_SOURCE_SELECTION_CONTRACT_V4_SHA256",
     "PHASE_C3_AUTHORIZATION_RELATIVE",
+    "PHASE_C3_V2_AUTHORIZATION_DOMAIN",
+    "PHASE_C3_V2_AUTHORIZATION_RELATIVE",
+    "RECOVERED_REFERENCE_CANONICAL_ROW_SHA256",
+    "RECOVERED_REFERENCE_CARDINALITY",
+    "RECOVERED_REFERENCE_EXAMPLE_ID",
+    "RECOVERED_REFERENCE_EXPECTED_DIGEST_COUNT",
+    "RECOVERED_REFERENCE_PAPER_ID",
+    "RECOVERED_REFERENCE_QUESTION_INDEX",
+    "RECOVERED_REFERENCE_RENDERED_PAPER_SHA256",
+    "RECOVERED_REFERENCE_SHA256",
+    "RECOVERED_REFERENCE_SOURCE_ORDINAL",
+    "REPAIR_R_COMMIT",
+    "SELECTION_CLAIM_RELATIVE",
+    "SELECTION_GATE_APPROVAL_TEXT",
+    "SELECTION_GATE_APPROVAL_TEXT_SHA256",
+    "SELECTION_GATE_APPROVAL_THREAD_ID",
+    "SELECTION_RECEIPT_RELATIVE",
+    "SUCCESSOR_ADDRESS_AUDIT_V1_GIT_BLOB_SHA1",
+    "SUCCESSOR_ADDRESS_AUDIT_V1_RELATIVE",
+    "SUCCESSOR_ADDRESS_AUDIT_V1_SHA256",
+    "SUCCESSOR_EXTENSION_GIT_BLOB_SHA1",
+    "SUCCESSOR_EXTENSION_INTRODUCED_COMMIT",
+    "SUCCESSOR_EXTENSION_MANIFEST_GIT_BLOB_SHA1",
+    "SUCCESSOR_EXTENSION_MANIFEST_RELATIVE",
+    "SUCCESSOR_EXTENSION_MANIFEST_SHA256",
+    "SUCCESSOR_EXTENSION_RELATIVE",
+    "SUCCESSOR_EXTENSION_SHA256",
+    "SUCCESSOR_MANIFEST_GIT_BLOB_SHA1",
+    "SUCCESSOR_MANIFEST_RELATIVE",
+    "SUCCESSOR_MANIFEST_SHA256",
 ]
