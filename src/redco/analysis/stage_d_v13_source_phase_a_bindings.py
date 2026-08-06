@@ -100,6 +100,16 @@ PHASE_B_BINDING_DOMAIN = "redco-stage-d1-support-v13-phase-b-binding-b-v1"
 PHASE_B_AUTHORIZATION_DOMAIN = (
     "redco-stage-d1-support-v13-phase-b-authorization-c-v2"
 )
+PHASE_C3_AUTHORIZATION_RELATIVE = (
+    "configs/stage-d/v13-draft/"
+    "stage-d1-support-v13-phase-b-authorization-c3-v1.json"
+)
+PHASE_C3_AUTHORIZATION_DOMAIN = (
+    "redco-stage-d1-support-v13-phase-b-authorization-c3-v1"
+)
+PHASE_B_RESUME_CONTRACT_V2_SHA256 = (
+    "cade25b90061b817423307b5e63fb6c76756ac3f5b365671572a6d16eb2e8e08"
+)
 
 FOUNDATION_STATUS_ENVELOPE: dict[str, object] = {
     "draft_unfrozen": True,
@@ -141,7 +151,7 @@ APPROVED_COLLISION_DISPOSITIONS: dict[str, str] = {
     "source_address_collision": "terminal_fail_closed",
 }
 
-PHASE_B_RESUME_CONTRACT: dict[str, object] = {
+PHASE_B_RESUME_CONTRACT_V2: dict[str, object] = {
     "schema_version": 1,
     "version": "stage-d-v13-phase-b-resume-v2",
     "start_ordinal": 180,
@@ -222,6 +232,72 @@ PHASE_B_RESUME_CONTRACT: dict[str, object] = {
     },
 }
 
+# This alias preserves the v2 object and its historical digest for the
+# already-committed Binding B.  Repaired runtime validation must use the
+# separately versioned v3 contract below.
+PHASE_B_RESUME_CONTRACT = PHASE_B_RESUME_CONTRACT_V2
+
+PHASE_B_RESUME_CONTRACT_V3: dict[str, object] = {
+    "schema_version": 1,
+    "version": "stage-d-v13-phase-b-resume-v3",
+    "start_ordinal": 180,
+    "batch_size": 180,
+    "row_groups": [0],
+    "use_threads": False,
+    "logical_readahead": False,
+    "source_order": "physical_ordinal",
+    "authorization_state": "reviewed_preselection_checkpoint",
+    "binding_artifact": PHASE_B_BINDING_RELATIVE,
+    "authorization_artifact": PHASE_C3_AUTHORIZATION_RELATIVE,
+    "legacy_v2_contract_sha256": PHASE_B_RESUME_CONTRACT_V2_SHA256,
+    "preselection_checkpoint_sha256": (
+        "93915d220f1bcb6357f0910633e6d8f2b5fa7d5727f71ae665f34d5bf36c1e8e"
+    ),
+    "runtime_versions": {
+        "python": "3.12.3",
+        "datasets": "5.0.0",
+        "pyarrow": "25.0.0",
+    },
+    "source_contract": {
+        "path": "qasper/train/0000.parquet",
+        "revision": "06806e4608976fc2fac0a090ac425d5b2b29caf4",
+        "sha256": (
+            "9af08092ee26c4f700202c1f90d1592b662926f23f3a308a10ff0a53345e37fe"
+        ),
+        "schema_sha256": (
+            "85c0addf53d5cfbcb709744f75a3a5f47272b854db453173f6cde96666cf965b"
+        ),
+        "row_count": 888,
+    },
+    "checkpoint_chain": {
+        "pre_f_parent": "exact_parent_of_foundation_f",
+        "foundation_f": "exact_parent_of_binding_b",
+        "binding_b": "exact_parent_of_repair_r",
+        "repair_r": "exact_parent_of_authorization_c3",
+        "authorization_c3": "exact_current_head_commit",
+    },
+    "git_authentication": {
+        "chain": "pre_f_parent_to_f_to_direct_b_to_direct_r_to_direct_c3",
+        "f_to_b_diff": "exact_binding_b_artifact_only",
+        "b_to_r_diff": "exact_three_file_repair_allowlist",
+        "r_to_c3_diff": "exact_c3_artifact_only",
+        "legacy_c_path_forbidden": True,
+        "caller_supplied_authority_forbidden": True,
+        "self_commit_or_blob_hash_forbidden": True,
+        "replace_refs_and_git_path_environment_forbidden": True,
+    },
+    "activation_scope": {
+        "source_selection_authorized": True,
+        "launch_authorized": False,
+        "provider_calls_authorized": False,
+        "model_calls_authorized": False,
+        "prime_gpu_scientific_launch_authorized": False,
+        "science_authorized": False,
+        "caller_authority": False,
+        "phase_b_source_selection_only": True,
+    },
+}
+
 
 __all__ = [
     "APPROVED_BEHAVIOR_HASHES",
@@ -235,4 +311,9 @@ __all__ = [
     "PHASE_B_BINDING_DOMAIN",
     "PHASE_B_BINDING_RELATIVE",
     "PHASE_B_RESUME_CONTRACT",
+    "PHASE_B_RESUME_CONTRACT_V2",
+    "PHASE_B_RESUME_CONTRACT_V2_SHA256",
+    "PHASE_B_RESUME_CONTRACT_V3",
+    "PHASE_C3_AUTHORIZATION_DOMAIN",
+    "PHASE_C3_AUTHORIZATION_RELATIVE",
 ]

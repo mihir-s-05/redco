@@ -10,6 +10,8 @@ import re
 import shutil
 import subprocess
 import sys
+import types
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
 
@@ -37,21 +39,22 @@ from redco.analysis.stage_d_v13_source_phase_a import (
     write_phase_a_outputs,
 )
 from redco.analysis.stage_d_v13_source_phase_a_decoder import (
-    PHASE_B_AUTHORIZATION_RELATIVE,
+    PHASE_B_AUTHORIZATION_RELATIVE as LEGACY_PHASE_B_AUTHORIZATION_RELATIVE,
+)
+from redco.analysis.stage_d_v13_source_phase_a_decoder import (
+    PHASE_B_BINDING_RELATIVE,
+    PHASE_C3_AUTHORIZATION_RELATIVE,
     DecoderInstrumentation,
     PhaseAWallError,
     PhaseBResumeAuthorizationError,
     PhaseBResumeUnavailable,
     ResumeDecoderInstrumentation,
     _synthetic_resume_source_rows,
-    _validate_committed_c_in_repo,
-    _validate_synthetic_head_authorization_c,
     bounded_source_rows,
     legacy_datasets_decoder_probe,
     resume_decoder_invocation_count,
     resume_source_rows,
     source_schema_sha256,
-    validate_future_phase_b_authorization_artifact,
 )
 from redco.analysis.stage_d_v13_source_phase_a_selector import (
     CollisionClassification,
@@ -1257,7 +1260,7 @@ def test_dormant_resume_decoder_requires_reviewed_checkpoint(tmp_path: Path) -> 
 
 def test_foundation_resume_entrypoint_rejects_all_caller_authority() -> None:
     resume_entrypoint = cast(Any, resume_source_rows)
-    with pytest.raises(PhaseBResumeUnavailable, match="artifact C is absent"):
+    with pytest.raises(PhaseBResumeUnavailable, match="Authorization C3 is absent"):
         resume_source_rows()
     with pytest.raises(TypeError):
         resume_entrypoint(Path("alternate.parquet"))
@@ -1276,65 +1279,73 @@ def _git_test(repo: Path, *arguments: str) -> str:
     return result.stdout.strip()
 
 
-def _synthetic_committed_c(
+def _synthetic_c3_chain(
     tmp_path: Path,
     *,
-    non_direct_b: bool = False,
-    extra_c_file: bool = False,
-    extra_b_file: bool = False,
+    terminal: str = "c3",
     b_mutation: str | None = None,
-) -> tuple[Path, Path, str, str, str, dict[str, Any]]:
+    c3_mutation: str | None = None,
+    extra_b_file: bool = False,
+    extra_r_file: bool = False,
+    extra_c3_file: bool = False,
+    merge_r: bool = False,
+) -> tuple[Path, Path, dict[str, Any]]:
+    """Create a disposable F -> B -> R -> C3 repository without QASPER rows."""
+
     from redco.analysis.stage_d_v13_source_phase_a_bindings import (
         PHASE_A_STATUS_SIGNATURE,
-        PHASE_B_AUTHORIZATION_DOMAIN,
         PHASE_B_BINDING_DOMAIN,
-        PHASE_B_BINDING_RELATIVE,
-        PHASE_B_RESUME_CONTRACT,
+        PHASE_B_RESUME_CONTRACT_V2_SHA256,
+        PHASE_B_RESUME_CONTRACT_V3,
+        PHASE_C3_AUTHORIZATION_DOMAIN,
     )
-    from redco.analysis.stage_d_v13_source_phase_a_decoder import git_blob_sha1
+    from redco.analysis.stage_d_v13_source_phase_a_decoder import (
+        PHASE_A_CONFIG_RELATIVE,
+        REPAIR_DIFF_ALLOWLIST,
+        _resume_contract_v3_hash,
+        git_blob_sha1,
+    )
 
-    repo = tmp_path / "future-c-repo"
+    repo = tmp_path / "repair-r-c3-repo"
     repo.mkdir(parents=True)
     _git_test(repo, "init", "--quiet")
-    _git_test(repo, "config", "user.email", "foundation-test@example.invalid")
-    _git_test(repo, "config", "user.name", "Foundation Test")
-    (repo / "foundation.txt").write_text("F", encoding="utf-8")
+    _git_test(repo, "config", "user.email", "repair-r@example.invalid")
+    _git_test(repo, "config", "user.name", "Repair R Test")
+    (repo / "parent.txt").write_text("pre-F", encoding="utf-8")
+    _git_test(repo, "add", "parent.txt")
+    _git_test(repo, "commit", "--quiet", "-m", "pre-F")
+
     source_relative = Path(SOURCE_ARTIFACT_RELATIVE)
     source_path = repo / source_relative
     source_path.parent.mkdir(parents=True)
-    source_path.write_bytes(b"synthetic-authenticated-source")
-    config_relative = Path(
-        "configs/stage-d/v13-draft/"
-        "stage-d1-support-source-authentication-phase-a-v1.json"
-    )
-    config_path = repo / config_relative
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_bytes(b"synthetic-phase-a-config")
+    source_bytes = b"synthetic source bytes; no Parquet rows"
+    source_path.write_bytes(source_bytes)
+    source_contract = {
+        "path": "qasper/train/0000.parquet",
+        "revision": "synthetic-revision",
+        "sha256": sha256_bytes(source_bytes),
+        "schema_sha256": "s" * 64,
+        "row_count": 888,
+    }
     manifest_relative = Path("reports/stage-d1-support-v13-foundation-tree-manifest-f1.json")
     manifest_path = repo / manifest_relative
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_bytes(b"synthetic-foundation-manifest")
+    manifest = {"qasper": copy.deepcopy(source_contract), "source": copy.deepcopy(source_contract)}
+    manifest_path.write_bytes(canonical_json_bytes(manifest))
+    config_path = repo / Path(PHASE_A_CONFIG_RELATIVE)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_bytes(b"synthetic phase-a config")
+    for relative in REPAIR_DIFF_ALLOWLIST:
+        repair_path = repo / relative
+        repair_path.parent.mkdir(parents=True, exist_ok=True)
+        repair_path.write_text("foundation", encoding="utf-8")
     _git_test(repo, "add", ".")
     _git_test(repo, "commit", "--quiet", "-m", "F")
     foundation_commit = _git_test(repo, "rev-parse", "HEAD")
-    foundation_tree_sha1 = _git_test(repo, "rev-parse", "HEAD^{tree}")
-    if non_direct_b:
-        (repo / "intermediate.txt").write_text("intermediate", encoding="utf-8")
-        _git_test(repo, "add", "intermediate.txt")
-        _git_test(repo, "commit", "--quiet", "-m", "intermediate")
+    foundation_tree = _git_test(repo, "rev-parse", "HEAD^{tree}")
+
     b_path = repo / PHASE_B_BINDING_RELATIVE
     b_path.parent.mkdir(parents=True, exist_ok=True)
-    source_bytes = source_path.read_bytes()
-    source_binding = {
-        "path": SOURCE_ARTIFACT_RELATIVE,
-        "sha256": sha256_bytes(source_bytes),
-        "schema_sha256": "s" * 64,
-        "row_count": 0,
-    }
-    config_binding = {
-        "path": str(config_relative).replace("\\", "/"),
-        "sha256": sha256_bytes(config_path.read_bytes()),
-    }
     b_payload: dict[str, Any] = {
         "schema_version": 1,
         "domain": PHASE_B_BINDING_DOMAIN,
@@ -1360,16 +1371,24 @@ def _synthetic_committed_c(
         "prime_gpu_scientific_launch_authorized": False,
         "status_signature": PHASE_A_STATUS_SIGNATURE,
         "foundation_commit": foundation_commit,
-        "foundation_tree_sha1": foundation_tree_sha1,
+        "foundation_tree_sha1": foundation_tree,
         "foundation_manifest": {
             "path": str(manifest_relative).replace("\\", "/"),
             "sha256": sha256_bytes(manifest_path.read_bytes()),
             "git_blob_sha1": git_blob_sha1(manifest_path.read_bytes()),
         },
         "bindings": {
-            "source_artifact": source_binding,
-            "phase_a_config": config_binding,
-            "decoder_contract_sha256": sha256_json(PHASE_B_RESUME_CONTRACT),
+            "source_artifact": {
+                "path": SOURCE_ARTIFACT_RELATIVE,
+                "sha256": sha256_bytes(source_bytes),
+                "schema_sha256": "s" * 64,
+                "row_count": 888,
+            },
+            "phase_a_config": {
+                "path": PHASE_A_CONFIG_RELATIVE,
+                "sha256": sha256_bytes(config_path.read_bytes()),
+            },
+            "decoder_contract_sha256": PHASE_B_RESUME_CONTRACT_V2_SHA256,
         },
     }
     if b_mutation == "foundation":
@@ -1378,26 +1397,56 @@ def _synthetic_committed_c(
         b_payload["foundation_tree_sha1"] = "0" * 40
     elif b_mutation == "manifest":
         cast(dict[str, Any], b_payload["foundation_manifest"])["sha256"] = "0" * 64
+    elif b_mutation == "manifest_path":
+        cast(dict[str, Any], b_payload["foundation_manifest"])["path"] = "wrong.json"
     elif b_mutation == "status":
         b_payload["status_signature"] = "0" * 64
-    elif b_mutation == "source":
+    elif b_mutation == "source_schema":
+        cast(dict[str, Any], b_payload["bindings"])["source_artifact"]["schema_sha256"] = "0" * 64
+    elif b_mutation == "source_row_count":
+        cast(dict[str, Any], b_payload["bindings"])["source_artifact"]["row_count"] = 887
+    elif b_mutation == "source_bytes":
         cast(dict[str, Any], b_payload["bindings"])["source_artifact"]["sha256"] = "0" * 64
-    elif b_mutation == "path":
-        cast(dict[str, Any], b_payload["foundation_manifest"])["path"] = "wrong.json"
+    elif b_mutation == "v2_digest":
+        cast(dict[str, Any], b_payload["bindings"])["decoder_contract_sha256"] = sha256_json(
+            PHASE_B_RESUME_CONTRACT_V3
+        )
     b_path.write_bytes(canonical_json_bytes(b_payload))
-    duplicate_b = repo / (
-        PHASE_B_BINDING_RELATIVE.replace(".json", "-duplicate.json")
-    )
     if extra_b_file:
-        duplicate_b.write_bytes(b_path.read_bytes())
+        (repo / "extra-b.py").write_text("unapproved", encoding="utf-8")
     _git_test(repo, "add", PHASE_B_BINDING_RELATIVE)
     if extra_b_file:
-        _git_test(repo, "add", str(duplicate_b.relative_to(repo)).replace("\\", "/"))
+        _git_test(repo, "add", "extra-b.py")
     _git_test(repo, "commit", "--quiet", "-m", "B")
     binding_commit = _git_test(repo, "rev-parse", "HEAD")
-    b_bytes = b_path.read_bytes()
-    path = repo / PHASE_B_AUTHORIZATION_RELATIVE
-    path.parent.mkdir(parents=True, exist_ok=True)
+    b_raw = b_path.read_bytes()
+    if terminal == "b":
+        return repo, b_path, b_payload
+
+    if merge_r:
+        _git_test(repo, "checkout", "-b", "repair-side")
+        (repo / "side.txt").write_text("side", encoding="utf-8")
+        _git_test(repo, "add", "side.txt")
+        _git_test(repo, "commit", "--quiet", "-m", "side")
+        _git_test(repo, "checkout", "--quiet", "-")
+    for relative in REPAIR_DIFF_ALLOWLIST:
+        repair_path = repo / relative
+        repair_path.write_bytes(repair_path.read_bytes() + b"\nrepair")
+    if extra_r_file:
+        (repo / "extra-r.py").write_text("unapproved", encoding="utf-8")
+    _git_test(repo, "add", *REPAIR_DIFF_ALLOWLIST)
+    if extra_r_file:
+        _git_test(repo, "add", "extra-r.py")
+    _git_test(repo, "commit", "--quiet", "-m", "R")
+    repair_commit = _git_test(repo, "rev-parse", "HEAD")
+    if merge_r:
+        _git_test(repo, "merge", "--no-ff", "--quiet", "repair-side", "-m", "merge-R")
+        repair_commit = _git_test(repo, "rev-parse", "HEAD")
+    if terminal == "r":
+        return repo, repo / PHASE_C3_AUTHORIZATION_RELATIVE, b_payload
+
+    c3_path = repo / PHASE_C3_AUTHORIZATION_RELATIVE
+    c3_path.parent.mkdir(parents=True, exist_ok=True)
     user_authorization = {
         "reviewed": True,
         "scope": "local_phase_b_source_selection_only",
@@ -1405,10 +1454,10 @@ def _synthetic_committed_c(
         "provider_calls_authorized": False,
         "model_calls_authorized": False,
     }
-    payload: dict[str, Any] = {
+    c3_payload: dict[str, Any] = {
         "schema_version": 1,
-        "domain": PHASE_B_AUTHORIZATION_DOMAIN,
-        "state": "C",
+        "domain": PHASE_C3_AUTHORIZATION_DOMAIN,
+        "state": "C3",
         "draft_unfrozen": False,
         "foundation_only": False,
         "non_authorizing": False,
@@ -1430,21 +1479,16 @@ def _synthetic_committed_c(
         "prime_gpu_scientific_launch_authorized": False,
         "status_signature": PHASE_A_STATUS_SIGNATURE,
         "foundation_commit": foundation_commit,
-        "foundation_tree_sha1": foundation_tree_sha1,
+        "foundation_tree_sha1": foundation_tree,
         "binding_commit": binding_commit,
+        "repair_commit": repair_commit,
         "binding_artifact": {
             "path": PHASE_B_BINDING_RELATIVE,
-            "sha256": sha256_bytes(b_bytes),
-            "git_blob_sha1": git_blob_sha1(b_bytes),
+            "sha256": sha256_bytes(b_raw),
+            "git_blob_sha1": git_blob_sha1(b_raw),
             "status_signature": PHASE_A_STATUS_SIGNATURE,
         },
-        "source": {
-            "path": "qasper/train/0000.parquet",
-            "revision": "06806e4608976fc2fac0a090ac425d5b2b29caf4",
-            "sha256": sha256_bytes(source_bytes),
-            "schema_sha256": "s" * 64,
-            "row_count": 0,
-        },
+        "source": copy.deepcopy(source_contract),
         "bindings": {
             **copy.deepcopy(b_payload["bindings"]),
             "user_authorization_sha256": sha256_bytes(
@@ -1455,10 +1499,11 @@ def _synthetic_committed_c(
         "resume_authorization": {
             "state": "reviewed_preselection_checkpoint",
             "phase_b_authorized": True,
-            "preselection_checkpoint_sha256": "c" * 64,
-            "source_sha256": sha256_bytes(source_bytes),
-            "schema_sha256": "s" * 64,
-            "decoder_contract_sha256": sha256_json(PHASE_B_RESUME_CONTRACT),
+            "preselection_checkpoint_sha256": sha256_bytes(b_raw),
+            "source_sha256": source_contract["sha256"],
+            "schema_sha256": source_contract["schema_sha256"],
+            "decoder_contract_v2_sha256": PHASE_B_RESUME_CONTRACT_V2_SHA256,
+            "decoder_contract_v3_sha256": _resume_contract_v3_hash(),
             "start_ordinal": 180,
             "batch_size": 180,
             "row_groups": [0],
@@ -1466,179 +1511,292 @@ def _synthetic_committed_c(
             "source_order": "physical_ordinal",
         },
     }
-    path.write_bytes(canonical_json_bytes(payload))
-    if extra_c_file:
-        (repo / "unexpected-code.py").write_text("tampered", encoding="utf-8")
-    _git_test(repo, "add", PHASE_B_AUTHORIZATION_RELATIVE)
-    if extra_c_file:
-        _git_test(repo, "add", "unexpected-code.py")
-    _git_test(repo, "commit", "--quiet", "-m", "C")
-    c_commit = _git_test(repo, "rev-parse", "HEAD")
-    return repo, path, foundation_commit, binding_commit, c_commit, payload
+    if c3_mutation == "preselection_digest":
+        c3_payload["resume_authorization"]["preselection_checkpoint_sha256"] = "a" * 64
+    elif c3_mutation == "preselection_nonhex":
+        c3_payload["resume_authorization"]["preselection_checkpoint_sha256"] = "g" * 64
+    elif c3_mutation == "preselection_short":
+        c3_payload["resume_authorization"]["preselection_checkpoint_sha256"] = "a" * 63
+    elif c3_mutation == "resume_unknown_null":
+        c3_payload["resume_authorization"]["unknown"] = None
+    elif c3_mutation == "user_unknown_null":
+        c3_payload["user_authorization"]["unknown"] = None
+    elif c3_mutation == "v2_substitute":
+        c3_payload["resume_authorization"][
+            "decoder_contract_v2_sha256"
+        ] = _resume_contract_v3_hash()
+    elif c3_mutation == "v3_substitute":
+        c3_payload["resume_authorization"][
+            "decoder_contract_v3_sha256"
+        ] = PHASE_B_RESUME_CONTRACT_V2_SHA256
+    elif c3_mutation in {"wrong_source", "source_schema"}:
+        c3_payload["source"]["schema_sha256"] = "0" * 64
+    elif c3_mutation == "wrong_foundation":
+        c3_payload["foundation_commit"] = "0" * 40
+    elif c3_mutation == "wrong_repair":
+        c3_payload["repair_commit"] = "0" * 40
+    elif c3_mutation == "wrong_b":
+        c3_payload["binding_commit"] = "0" * 40
+    elif c3_mutation == "binding_sha":
+        c3_payload["binding_artifact"]["sha256"] = "0" * 64
+    elif c3_mutation == "binding_blob":
+        c3_payload["binding_artifact"]["git_blob_sha1"] = "0" * 40
+    elif c3_mutation == "status":
+        c3_payload["status_signature"] = "0" * 64
+    c3_path.write_bytes(canonical_json_bytes(c3_payload))
+    if extra_c3_file:
+        (repo / "extra-c3.py").write_text("unapproved", encoding="utf-8")
+    _git_test(repo, "add", PHASE_C3_AUTHORIZATION_RELATIVE)
+    if extra_c3_file:
+        _git_test(repo, "add", "extra-c3.py")
+    _git_test(repo, "commit", "--quiet", "-m", "C3")
+    return repo, c3_path, c3_payload
+
+
+def _patch_public_c3_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    repo: Path,
+) -> Any:
+    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
+    monkeypatch.setattr(decoder, "PROJECT_ROOT", repo)
+    monkeypatch.setattr(
+        decoder,
+        "_validate_production_source_metadata",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        decoder,
+        "_require_runtime_versions_only",
+        lambda: (types.SimpleNamespace(__version__="25.0.0"), "5.0.0"),
+    )
+    return decoder
+
+
+def test_repair_r_valid_synthetic_f_b_r_c3_uses_public_no_argument_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, _path, expected = _synthetic_c3_chain(tmp_path)
+    decoder = _patch_public_c3_runtime(monkeypatch, repo)
+    assert decoder.validate_future_phase_b_authorization_artifact() == expected
+    assert expected["source_selection_authorized"] is True
+    assert expected["launch_authorized"] is False
+    assert expected["provider_calls_authorized"] is False
+    assert expected["model_calls_authorized"] is False
+    assert expected["candidate"]["source_ordinal"] is None
+
+
+def test_repair_r_rejects_changed_binding_b_worktree_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, _path, _payload = _synthetic_c3_chain(tmp_path)
+    binding_path = repo / PHASE_B_BINDING_RELATIVE
+    binding_path.write_bytes(binding_path.read_bytes() + b"\nchanged")
+    decoder = _patch_public_c3_runtime(monkeypatch, repo)
+    with pytest.raises(PhaseBResumeAuthorizationError, match="Binding B worktree bytes"):
+        decoder.validate_future_phase_b_authorization_artifact()
+
+
+def test_repair_r_legacy_direct_b_to_c_path_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, _path, _payload = _synthetic_c3_chain(tmp_path, terminal="r")
+    legacy_path = repo / LEGACY_PHASE_B_AUTHORIZATION_RELATIVE
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_bytes(b"{}")
+    _git_test(repo, "add", LEGACY_PHASE_B_AUTHORIZATION_RELATIVE)
+    _git_test(repo, "commit", "--quiet", "-m", "legacy-C")
+    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
+    monkeypatch.setattr(decoder, "PROJECT_ROOT", repo)
+    monkeypatch.setattr(
+        decoder,
+        "_require_runtime_versions_only",
+        lambda: pytest.fail("runtime was inspected before legacy-path rejection"),
+    )
+    monkeypatch.setattr(
+        decoder,
+        "_validate_production_source_metadata",
+        lambda *_args: pytest.fail("source was inspected before legacy-path rejection"),
+    )
+    before = decoder.resume_decoder_invocation_count()
+    for entrypoint in (
+        decoder.validate_future_phase_b_authorization_artifact,
+        decoder.resume_source_rows,
+    ):
+        with pytest.raises(PhaseBResumeAuthorizationError, match="legacy"):
+            entrypoint()
+    assert decoder.resume_decoder_invocation_count() == before
 
 
 @pytest.mark.parametrize(  # type: ignore[untyped-decorator]
-    "mutation", ("missing", "wrong_ancestry", "working_tree", "wrong_source")
+    "kwargs",
+    (
+        {"extra_b_file": True},
+        {"extra_r_file": True},
+        {"extra_c3_file": True},
+        {"merge_r": True},
+    ),
 )
-def test_future_phase_b_authorization_is_unusable_without_committed_c(
-    tmp_path: Path, mutation: str, monkeypatch: pytest.MonkeyPatch
+def test_repair_r_chain_rejects_extra_paths_and_merge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kwargs: dict[str, Any],
 ) -> None:
-    if mutation == "missing":
-        repo, path, _foundation_commit, binding_commit, c_commit, payload = _synthetic_committed_c(
-            tmp_path
-        )
-        assert _validate_committed_c_in_repo(repo) == payload
-        assert _validate_synthetic_head_authorization_c(repo) == payload
+    repo, _path, _payload = _synthetic_c3_chain(tmp_path, **kwargs)
+    decoder = _patch_public_c3_runtime(monkeypatch, repo)
+    with pytest.raises(PhaseBResumeAuthorizationError):
+        decoder.validate_future_phase_b_authorization_artifact()
 
-        # A local replacement ref and all Git path-redirection variables must
-        # be ignored by the authentication subprocess.
-        decoder = importlib.import_module(
-            "redco.analysis.stage_d_v13_source_phase_a_decoder"
-        )
-        monkeypatch.setattr(decoder, "PROJECT_ROOT", repo)
-        assert validate_future_phase_b_authorization_artifact() == payload
-        original_blob = decoder._git_text(
-            repo, "rev-parse", "--verify", f"{c_commit}:{PHASE_B_AUTHORIZATION_RELATIVE}"
-        )
-        fake_payload = copy.deepcopy(payload)
-        fake_payload["user_authorization"]["reviewed"] = False
-        path.write_bytes(canonical_json_bytes(fake_payload))
-        _git_test(repo, "add", PHASE_B_AUTHORIZATION_RELATIVE)
-        _git_test(repo, "commit", "--quiet", "-m", "fake-replacement")
-        replacement_commit = _git_test(repo, "rev-parse", "HEAD")
-        _git_test(repo, "checkout", "--quiet", c_commit)
-        _git_test(repo, "replace", c_commit, replacement_commit)
-        for variable in (
-            "GIT_REPLACE_REF_BASE",
-            "GIT_DIR",
-            "GIT_WORK_TREE",
-            "GIT_COMMON_DIR",
-            "GIT_OBJECT_DIRECTORY",
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-            "GIT_INDEX_FILE",
-        ):
-            monkeypatch.setenv(variable, str(tmp_path / "spoofed-git-location"))
-        assert (
-            decoder._git_text(
-                repo,
-                "rev-parse",
-                "--verify",
-                f"{c_commit}:{PHASE_B_AUTHORIZATION_RELATIVE}",
-            )
-            == original_blob
-        )
-        assert _validate_committed_c_in_repo(repo) == payload
-        for variable in (
-            "GIT_REPLACE_REF_BASE",
-            "GIT_DIR",
-            "GIT_WORK_TREE",
-            "GIT_COMMON_DIR",
-            "GIT_OBJECT_DIRECTORY",
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-            "GIT_INDEX_FILE",
-        ):
-            monkeypatch.delenv(variable, raising=False)
-        _git_test(repo, "replace", "-d", c_commit)
 
-        _git_test(repo, "checkout", "--quiet", binding_commit)
-        with pytest.raises(PhaseBResumeAuthorizationError, match="absent"):
-            _validate_committed_c_in_repo(repo)
-        _git_test(repo, "checkout", "--quiet", c_commit)
-        path.unlink()
-        with pytest.raises(PhaseBResumeAuthorizationError, match="absent"):
-            _validate_committed_c_in_repo(repo)
-        with pytest.raises(TypeError):
-            validate_future_phase_b_authorization_artifact(path)  # type: ignore[call-arg]
-        with pytest.raises(PhaseBResumeUnavailable, match="absent"):
-            validate_future_phase_b_authorization_artifact()
-        return
-    repo, path, _foundation_commit, _binding_commit, _c_commit, payload = _synthetic_committed_c(
-        tmp_path
+@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
+    "mutation",
+    (
+        "preselection_digest",
+        "preselection_nonhex",
+        "preselection_short",
+        "resume_unknown_null",
+        "user_unknown_null",
+        "v2_substitute",
+        "v3_substitute",
+        "wrong_source",
+        "wrong_foundation",
+        "wrong_repair",
+        "wrong_b",
+        "binding_sha",
+        "binding_blob",
+        "status",
+    ),
+)
+def test_repair_r_c3_exact_nested_bindings_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    repo, _path, _payload = _synthetic_c3_chain(tmp_path, c3_mutation=mutation)
+    decoder = _patch_public_c3_runtime(monkeypatch, repo)
+    with pytest.raises(PhaseBResumeAuthorizationError):
+        decoder.validate_future_phase_b_authorization_artifact()
+
+
+@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
+    "mutation",
+    (
+        "foundation",
+        "tree",
+        "manifest",
+        "source_schema",
+        "source_row_count",
+        "source_bytes",
+        "v2_digest",
+    ),
+)
+def test_repair_r_b_checkpoint_and_source_metadata_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    repo, _path, _payload = _synthetic_c3_chain(tmp_path, b_mutation=mutation)
+    decoder = _patch_public_c3_runtime(monkeypatch, repo)
+    with pytest.raises(PhaseBResumeAuthorizationError):
+        decoder.validate_future_phase_b_authorization_artifact()
+
+
+def test_repair_r_c3_absent_at_r_fails_before_runtime_or_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, _path, _payload = _synthetic_c3_chain(tmp_path, terminal="r")
+    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
+    monkeypatch.setattr(decoder, "PROJECT_ROOT", repo)
+    monkeypatch.setattr(
+        decoder,
+        "_require_runtime_versions_only",
+        lambda: pytest.fail("runtime was inspected before C3") ,
     )
-    if mutation == "wrong_ancestry":
-        indirect = _synthetic_committed_c(tmp_path / "indirect", non_direct_b=True)[0]
-        with pytest.raises(PhaseBResumeAuthorizationError, match="state or ancestry"):
-            _validate_committed_c_in_repo(indirect)
-        payload["foundation_commit"] = "0" * 40
-        path.write_bytes(canonical_json_bytes(payload))
-        _git_test(repo, "add", PHASE_B_AUTHORIZATION_RELATIVE)
-        _git_test(repo, "commit", "--amend", "--quiet", "--no-edit")
-        with pytest.raises(PhaseBResumeAuthorizationError, match="state or ancestry"):
-            _validate_committed_c_in_repo(repo)
-        extra = _synthetic_committed_c(tmp_path / "extra", extra_c_file=True)[0]
-        with pytest.raises(PhaseBResumeAuthorizationError, match="outside"):
-            _validate_committed_c_in_repo(extra)
-        for b_mutation in ("foundation", "tree", "manifest", "status", "source", "path"):
-            malformed_b = _synthetic_committed_c(
-                tmp_path / f"b-{b_mutation}", b_mutation=b_mutation
-            )[0]
-            with pytest.raises(PhaseBResumeAuthorizationError):
-                _validate_committed_c_in_repo(malformed_b)
-        duplicate_b = _synthetic_committed_c(
-            tmp_path / "duplicate-b", extra_b_file=True
-        )[0]
-        with pytest.raises(PhaseBResumeAuthorizationError, match="future B"):
-            _validate_committed_c_in_repo(duplicate_b)
-        non_direct_c, _non_direct_c_path, *_ = _synthetic_committed_c(
-            tmp_path / "non-direct-c"
-        )
-        (non_direct_c / "post-c.txt").write_text("post C", encoding="utf-8")
-        _git_test(non_direct_c, "add", "post-c.txt")
-        _git_test(non_direct_c, "commit", "--quiet", "-m", "post-C")
-        with pytest.raises(PhaseBResumeAuthorizationError, match="future B"):
-            _validate_committed_c_in_repo(non_direct_c)
-        for c_mutation in ("binding_artifact", "binding_commit", "foundation", "signature"):
-            mutated_c, mutated_c_path, *_ = _synthetic_committed_c(
-                tmp_path / f"c-{c_mutation}"
-            )
-            mutated_payload = json.loads(mutated_c_path.read_bytes())
-            if c_mutation == "binding_artifact":
-                mutated_payload["binding_artifact"]["sha256"] = "0" * 64
-            elif c_mutation == "binding_commit":
-                mutated_payload["binding_commit"] = "0" * 40
-            elif c_mutation == "foundation":
-                mutated_payload["foundation_commit"] = "0" * 40
-            else:
-                mutated_payload["status_signature"] = "0" * 64
-            mutated_c_path.write_bytes(canonical_json_bytes(mutated_payload))
-            _git_test(mutated_c, "add", PHASE_B_AUTHORIZATION_RELATIVE)
-            _git_test(mutated_c, "commit", "--amend", "--quiet", "--no-edit")
-            with pytest.raises(PhaseBResumeAuthorizationError):
-                _validate_committed_c_in_repo(mutated_c)
-        flags_repo, flags_path, *_ = _synthetic_committed_c(tmp_path / "flags")
-        flags_payload = json.loads(flags_path.read_bytes())
-        flags_payload["launch_authorized"] = True
-        flags_path.write_bytes(canonical_json_bytes(flags_payload))
-        _git_test(flags_repo, "add", PHASE_B_AUTHORIZATION_RELATIVE)
-        _git_test(flags_repo, "commit", "--amend", "--quiet", "--no-edit")
-        with pytest.raises(PhaseBResumeAuthorizationError, match="state or ancestry"):
-            _validate_committed_c_in_repo(flags_repo)
-        resume_repo, resume_path, *_ = _synthetic_committed_c(tmp_path / "resume")
-        resume_payload = json.loads(resume_path.read_bytes())
-        resume_payload["resume_authorization"]["start_ordinal"] = 181
-        resume_path.write_bytes(canonical_json_bytes(resume_payload))
-        _git_test(resume_repo, "add", PHASE_B_AUTHORIZATION_RELATIVE)
-        _git_test(resume_repo, "commit", "--amend", "--quiet", "--no-edit")
-        with pytest.raises(PhaseBResumeAuthorizationError, match="resume decoder binding"):
-            _validate_committed_c_in_repo(resume_repo)
-        return
-    elif mutation == "working_tree":
-        path.write_bytes(path.read_bytes() + b"\n")
-        with pytest.raises(PhaseBResumeAuthorizationError, match="worktree bytes"):
-            _validate_committed_c_in_repo(repo)
-        return
-    elif mutation == "wrong_source":
-        payload["source"]["sha256"] = "a" * 64
-        path.write_bytes(canonical_json_bytes(payload))
-        _git_test(repo, "add", PHASE_B_AUTHORIZATION_RELATIVE)
-        _git_test(repo, "commit", "--amend", "--quiet", "--no-edit")
-        with pytest.raises(PhaseBResumeAuthorizationError, match="source binding"):
-            _validate_committed_c_in_repo(repo)
-        return
-    if mutation == "flags":
-        payload["launch_authorized"] = True
-        path.write_bytes(canonical_json_bytes(payload))
-        _git_test(repo, "add", PHASE_B_AUTHORIZATION_RELATIVE)
-        _git_test(repo, "commit", "--quiet", "-m", "C-launch-mutation")
-        with pytest.raises(PhaseBResumeAuthorizationError, match="state or ancestry"):
-            _validate_committed_c_in_repo(repo)
+    monkeypatch.setattr(
+        decoder,
+        "_validate_production_source_metadata",
+        lambda *_args: pytest.fail("source was inspected before C3"),
+    )
+    before = decoder.resume_decoder_invocation_count()
+    with pytest.raises(PhaseBResumeUnavailable, match="C3"):
+        decoder.validate_future_phase_b_authorization_artifact()
+    with pytest.raises(PhaseBResumeUnavailable, match="C3"):
+        decoder.resume_source_rows()
+    assert decoder.resume_decoder_invocation_count() == before == 0
+
+
+def test_repair_r_resume_authenticates_runtime_and_source_exactly_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, _path, _payload = _synthetic_c3_chain(tmp_path)
+    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
+    events: list[str] = []
+    monkeypatch.setattr(decoder, "PROJECT_ROOT", repo)
+
+    def fake_runtime() -> tuple[Any, str]:
+        events.append("runtime")
+        return types.SimpleNamespace(__version__="25.0.0"), "5.0.0"
+
+    def fake_source(*_args: Any) -> object:
+        events.append("source")
+        return object()
+
+    def fake_resume(*_args: Any) -> Iterator[tuple[int, dict[str, Any]]]:
+        events.append("resume")
+        return iter(())
+
+    monkeypatch.setattr(decoder, "_require_runtime_versions_only", fake_runtime)
+    monkeypatch.setattr(decoder, "_validate_production_source_metadata", fake_source)
+    monkeypatch.setattr(decoder, "_resume_rows", fake_resume)
+    assert list(decoder.resume_source_rows()) == []
+    assert events == ["runtime", "source", "resume"]
+
+
+@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
+    "version_field",
+    ("python", "pyarrow", "datasets"),
+)
+def test_repair_r_runtime_mismatch_fails_before_source_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version_field: str,
+) -> None:
+    repo, _path, _payload = _synthetic_c3_chain(tmp_path)
+    decoder = importlib.import_module("redco.analysis.stage_d_v13_source_phase_a_decoder")
+    monkeypatch.setattr(decoder, "PROJECT_ROOT", repo)
+    monkeypatch.setitem(sys.modules, "pyarrow", types.SimpleNamespace(__version__="25.0.0"))
+    monkeypatch.setitem(sys.modules, "datasets", types.SimpleNamespace(__version__="5.0.0"))
+    current_python = ".".join(map(str, sys.version_info[:3]))
+    monkeypatch.setattr(decoder, "SUPPORTED_PYTHON", current_python)
+    if version_field == "python":
+        monkeypatch.setattr(decoder, "SUPPORTED_PYTHON", "0.0.0")
+    elif version_field == "pyarrow":
+        monkeypatch.setattr(decoder, "SUPPORTED_PYARROW", "0.0.0")
+    else:
+        monkeypatch.setattr(decoder, "SUPPORTED_DATASETS", "0.0.0")
+    monkeypatch.setattr(
+        decoder,
+        "_validate_production_source_metadata",
+        lambda *_args: pytest.fail("source was inspected after runtime mismatch"),
+    )
+    with pytest.raises(RuntimeError):
+        decoder.validate_future_phase_b_authorization_artifact()
+
+
+def test_repair_r_preserves_v2_digest_and_uses_distinct_v3_contract() -> None:
+    from redco.analysis.stage_d_v13_source_phase_a_bindings import (
+        PHASE_B_RESUME_CONTRACT_V2_SHA256,
+        PHASE_B_RESUME_CONTRACT_V3,
+    )
+    from redco.analysis.stage_d_v13_source_phase_a_decoder import (
+        _resume_contract_hash,
+        _resume_contract_v3_hash,
+    )
+
+    assert _resume_contract_hash() == PHASE_B_RESUME_CONTRACT_V2_SHA256
+    assert _resume_contract_v3_hash() == sha256_json(PHASE_B_RESUME_CONTRACT_V3)
+    assert _resume_contract_v3_hash() != PHASE_B_RESUME_CONTRACT_V2_SHA256

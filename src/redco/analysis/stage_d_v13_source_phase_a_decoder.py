@@ -54,7 +54,37 @@ PHASE_B_AUTHORIZATION_RELATIVE = (
 PHASE_B_BINDING_RELATIVE = (
     "configs/stage-d/v13-draft/stage-d1-support-v13-phase-b-binding-b-v1.json"
 )
+PHASE_C3_AUTHORIZATION_RELATIVE = (
+    "configs/stage-d/v13-draft/"
+    "stage-d1-support-v13-phase-b-authorization-c3-v1.json"
+)
 PHASE_A_VERSION = "stage-d-v13-source-authentication-phase-a-v2"
+
+# Repair R is deliberately pinned to the already reviewed F -> B history.
+# These identities are authentication constants, not values supplied by a
+# future authorization artifact or by a caller.
+FOUNDATION_F_COMMIT = "2970411b1ad3a68ec9a7a7f98d41428e3a8301e9"
+FOUNDATION_F_PARENT_COMMIT = "c41fd18446cecf1c7c98e5aa3a962d1568072c1b"
+FOUNDATION_F_TREE_SHA1 = "8a1c3bde8233075c0bdd63c3626a7c8e936bad8a"
+BINDING_B_COMMIT = "ca04e22bf9c9e19f1aa2dad092403d5d9668269c"
+BINDING_B_SHA256 = "93915d220f1bcb6357f0910633e6d8f2b5fa7d5727f71ae665f34d5bf36c1e8e"
+BINDING_B_GIT_BLOB_SHA1 = "fc35188882620db0d7827cb82582750065bdf211"
+FOUNDATION_MANIFEST_RELATIVE = (
+    "reports/stage-d1-support-v13-foundation-tree-manifest-f1.json"
+)
+FOUNDATION_MANIFEST_SHA256 = "533ccd093d4e5f26fe77090da6dc1c16a9bfa220f449de9f2c25f55d921dd416"
+FOUNDATION_MANIFEST_GIT_BLOB_SHA1 = "00cf30f1853171598ee5410bba844e4ce76da51f"
+PHASE_A_CONFIG_RELATIVE = (
+    "configs/stage-d/v13-draft/"
+    "stage-d1-support-source-authentication-phase-a-v1.json"
+)
+PHASE_A_CONFIG_SHA256 = "0579823d966463f6bd33df3596174c132c553ed646d23aff000c62a2d4aa651c"
+B_PRESELECTION_CHECKPOINT_SHA256 = BINDING_B_SHA256
+REPAIR_DIFF_ALLOWLIST = (
+    "src/redco/analysis/stage_d_v13_source_phase_a_bindings.py",
+    "src/redco/analysis/stage_d_v13_source_phase_a_decoder.py",
+    "tests/test_stage_d_v13_source_phase_a.py",
+)
 
 _FULL_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 _DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -349,7 +379,8 @@ def authenticate_source_artifact(root: Path) -> dict[str, Any]:
         import datasets
     except ImportError as error:
         raise RuntimeError("Phase A requires the pinned PyArrow/datasets environment") from error
-    datasets_version = str(datasets.__version__)
+    datasets_version = str(getattr(datasets, "__version__", ""))
+    pyarrow_version = str(getattr(pyarrow, "__version__", ""))
     _require_supported_versions(pyarrow, datasets_version)
     parquet_file = parquet.ParquetFile(path)
     metadata = parquet_file.metadata
@@ -381,7 +412,7 @@ def authenticate_source_artifact(root: Path) -> dict[str, Any]:
         "decoder": {
             "python": SUPPORTED_PYTHON,
             "datasets": datasets_version,
-            "pyarrow": str(pyarrow.__version__),
+            "pyarrow": pyarrow_version,
             "loader": (
                 "pyarrow.parquet.ParquetFile.iter_batches(batch_size=180, "
                 "row_groups=[0], use_threads=False)"
@@ -398,9 +429,12 @@ def legacy_datasets_decoder_probe(path: Path) -> dict[str, Any]:
     """Inspect the pinned legacy adapter without iterating or decoding a row."""
 
     try:
-        from datasets import load_dataset
+        import datasets
     except ImportError as error:
         raise RuntimeError("Phase A requires the pinned datasets environment") from error
+    load_dataset = getattr(datasets, "load_dataset", None)
+    if not callable(load_dataset):
+        raise RuntimeError("Phase A requires the pinned datasets environment")
     dataset = load_dataset(
         "parquet", data_files={"train": str(path)}, split="train", streaming=True
     )
@@ -471,9 +505,23 @@ def resume_decoder_invocation_count() -> int:
 
 
 def _resume_contract_hash() -> str:
-    from redco.analysis.stage_d_v13_source_phase_a_bindings import PHASE_B_RESUME_CONTRACT
+    """Return the frozen v2 digest used only by the committed Binding B."""
 
-    return cast(str, sha256_json(PHASE_B_RESUME_CONTRACT))
+    from redco.analysis.stage_d_v13_source_phase_a_bindings import (
+        PHASE_B_RESUME_CONTRACT_V2_SHA256,
+    )
+
+    return PHASE_B_RESUME_CONTRACT_V2_SHA256
+
+
+def _resume_contract_v3_hash() -> str:
+    """Return the separately versioned repaired runtime contract digest."""
+
+    from redco.analysis.stage_d_v13_source_phase_a_bindings import (
+        PHASE_B_RESUME_CONTRACT_V3,
+    )
+
+    return cast(str, sha256_json(PHASE_B_RESUME_CONTRACT_V3))
 
 
 def _validate_synthetic_resume_authorization(
@@ -577,6 +625,10 @@ def _validate_c_binding(
     relative: str,
     label: str,
 ) -> bytes:
+    if relative == SOURCE_ARTIFACT_RELATIVE:
+        raise PhaseBResumeAuthorizationError(
+            "production source bindings must come from the authenticated F manifest"
+        )
     expected_keys = {"path", "sha256"}
     if label == "source":
         expected_keys.update({"schema_sha256", "row_count"})
@@ -641,22 +693,83 @@ def _require_null_candidate(parsed: Mapping[str, Any], label: str) -> None:
         raise PhaseBResumeAuthorizationError(f"{label} candidate identity is not null")
 
 
-def _validate_b_artifact(
+def _authenticated_manifest_source(
+    manifest_raw: bytes,
+    *,
+    production: bool,
+) -> dict[str, Any]:
+    """Project the authenticated F manifest to the source contract.
+
+    This reads only the small manifest Git blob.  In particular, it never
+    reads the Parquet blob from Git merely to validate Binding B or C3.
+    """
+
+    manifest = _parse_canonical_object(manifest_raw, "Foundation manifest")
+    source = manifest.get("source")
+    qasper = manifest.get("qasper")
+    required = ("path", "revision", "sha256", "schema_sha256", "row_count")
+    if (
+        not isinstance(source, dict)
+        or not isinstance(qasper, dict)
+        or not set(required).issubset(source)
+        or not set(required).issubset(qasper)
+    ):
+        raise PhaseBResumeAuthorizationError(
+            "Foundation manifest does not expose a complete source contract"
+        )
+    contract = {key: source[key] for key in required}
+    if any(qasper.get(key) != contract[key] for key in required):
+        raise PhaseBResumeAuthorizationError(
+            "Foundation manifest source and QASPER contracts differ"
+        )
+    if production and contract != {
+        "path": SOURCE_PATH,
+        "revision": SOURCE_REVISION,
+        "sha256": SOURCE_SHA256,
+        "schema_sha256": SOURCE_SCHEMA_SHA256,
+        "row_count": SOURCE_ROW_COUNT,
+    }:
+        raise PhaseBResumeAuthorizationError(
+            "Foundation manifest source is not the pinned QASPER object"
+        )
+    if production:
+        files = manifest.get("files")
+        source_file = next(
+            (
+                item
+                for item in files
+                if isinstance(item, dict)
+                and item.get("path") == SOURCE_ARTIFACT_RELATIVE
+            ),
+            None,
+        ) if isinstance(files, list) else None
+        if (
+            not isinstance(source_file, dict)
+            or source_file.get("bytes") != SOURCE_BYTES
+            or source_file.get("sha256") != SOURCE_SHA256
+        ):
+            raise PhaseBResumeAuthorizationError(
+                "Foundation manifest does not authenticate the source artifact file"
+            )
+    return contract
+
+
+def _validate_b_checkpoint(
     repo_root: Path,
     foundation_commit: str,
+    binding_commit: str,
     b_raw: bytes,
-) -> tuple[dict[str, Any], dict[str, bytes]]:
+    *,
+    production: bool,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Validate B without opening or hashing the production Parquet blob."""
+
     from redco.analysis.stage_d_v13_source_phase_a_bindings import (
         PHASE_A_STATUS_SIGNATURE,
         PHASE_B_BINDING_DOMAIN,
     )
 
     parsed = _parse_canonical_object(b_raw, "Binding B")
-    forbidden = {"binding_commit", "authorization_commit", "git_blob_sha1"}
-    if forbidden.intersection(parsed):
-        raise PhaseBResumeAuthorizationError(
-            "Binding B must not self-authenticate its commit or blob"
-        )
     expected_keys = {
         "schema_version",
         "domain",
@@ -701,29 +814,43 @@ def _validate_b_artifact(
             "Binding B state or ancestry/Foundation F identity differs"
         )
     _require_null_candidate(parsed, "Binding B")
+    if production and (
+        foundation_commit != FOUNDATION_F_COMMIT
+        or binding_commit != BINDING_B_COMMIT
+        or sha256_bytes(b_raw) != BINDING_B_SHA256
+        or git_blob_sha1(b_raw) != BINDING_B_GIT_BLOB_SHA1
+    ):
+        raise PhaseBResumeAuthorizationError("Binding B does not match the approved checkpoint")
     tree_sha1 = _git_tree_at_commit(repo_root, foundation_commit)
     if parsed["foundation_tree_sha1"] != tree_sha1:
         raise PhaseBResumeAuthorizationError("Binding B Foundation F tree identity differs")
+    if production and tree_sha1 != FOUNDATION_F_TREE_SHA1:
+        raise PhaseBResumeAuthorizationError("Foundation F tree is not the approved tree")
+
     manifest_record = parsed["foundation_manifest"]
     if (
         not isinstance(manifest_record, dict)
         or set(manifest_record) != {"path", "sha256", "git_blob_sha1"}
-        or manifest_record.get("path")
-        != "reports/stage-d1-support-v13-foundation-tree-manifest-f1.json"
-        or manifest_record.get("sha256") is None
-        or manifest_record.get("git_blob_sha1") is None
+        or manifest_record.get("path") != FOUNDATION_MANIFEST_RELATIVE
+        or not isinstance(manifest_record.get("sha256"), str)
+        or not isinstance(manifest_record.get("git_blob_sha1"), str)
     ):
         raise PhaseBResumeAuthorizationError("Binding B Foundation manifest binding is missing")
-    manifest_raw = _git_blob_at_commit(
-        repo_root,
-        foundation_commit,
-        "reports/stage-d1-support-v13-foundation-tree-manifest-f1.json",
-    )
+    manifest_raw = _git_blob_at_commit(repo_root, foundation_commit, FOUNDATION_MANIFEST_RELATIVE)
+    actual_manifest_sha = sha256_bytes(manifest_raw)
+    actual_manifest_blob = git_blob_sha1(manifest_raw)
     if (
-        manifest_record["sha256"] != sha256_bytes(manifest_raw)
-        or manifest_record["git_blob_sha1"] != git_blob_sha1(manifest_raw)
+        manifest_record["sha256"] != actual_manifest_sha
+        or manifest_record["git_blob_sha1"] != actual_manifest_blob
     ):
         raise PhaseBResumeAuthorizationError("Binding B Foundation manifest binding differs")
+    if production and (
+        actual_manifest_sha != FOUNDATION_MANIFEST_SHA256
+        or actual_manifest_blob != FOUNDATION_MANIFEST_GIT_BLOB_SHA1
+    ):
+        raise PhaseBResumeAuthorizationError("Foundation manifest is not the approved artifact")
+    source_contract = _authenticated_manifest_source(manifest_raw, production=production)
+
     bindings = parsed["bindings"]
     if not isinstance(bindings, dict) or set(bindings) != {
         "source_artifact",
@@ -732,82 +859,69 @@ def _validate_b_artifact(
     }:
         raise PhaseBResumeAuthorizationError("Binding B input bindings are missing or unexpected")
     source_binding = bindings["source_artifact"]
-    source_raw = _validate_c_binding(
-        repo_root,
-        foundation_commit,
-        source_binding,
-        relative=SOURCE_ARTIFACT_RELATIVE,
-        label="source",
-    )
-    config_raw = _validate_c_binding(
-        repo_root,
-        foundation_commit,
-        bindings["phase_a_config"],
-        relative=(
-            "configs/stage-d/v13-draft/"
-            "stage-d1-support-source-authentication-phase-a-v1.json"
-        ),
-        label="config",
-    )
+    expected_source_binding = {
+        "path": SOURCE_ARTIFACT_RELATIVE,
+        "sha256": source_contract["sha256"],
+        "schema_sha256": source_contract["schema_sha256"],
+        "row_count": source_contract["row_count"],
+    }
+    if source_binding != expected_source_binding:
+        raise PhaseBResumeAuthorizationError("Binding B source metadata binding differs")
+    config_binding = bindings["phase_a_config"]
+    if (
+        not isinstance(config_binding, dict)
+        or set(config_binding) != {"path", "sha256"}
+        or config_binding["path"] != PHASE_A_CONFIG_RELATIVE
+        or not isinstance(config_binding["sha256"], str)
+    ):
+        raise PhaseBResumeAuthorizationError("Binding B phase-A config binding differs")
+    config_raw = _git_blob_at_commit(repo_root, foundation_commit, PHASE_A_CONFIG_RELATIVE)
+    config_sha = sha256_bytes(config_raw)
+    if config_binding["sha256"] != config_sha:
+        raise PhaseBResumeAuthorizationError("Binding B phase-A config bytes differ")
+    if production and config_sha != PHASE_A_CONFIG_SHA256:
+        raise PhaseBResumeAuthorizationError("Phase-A config is not the approved artifact")
     if bindings["decoder_contract_sha256"] != _resume_contract_hash():
-        raise PhaseBResumeAuthorizationError("Binding B decoder contract binding differs")
-    if not source_raw or not config_raw or not manifest_raw:
-        raise PhaseBResumeAuthorizationError("Binding B contains an empty authenticated input")
+        raise PhaseBResumeAuthorizationError(
+            "Binding B must retain the frozen v2 decoder contract digest"
+        )
     return parsed, {
-        "source": source_raw,
-        "config": config_raw,
         "manifest": manifest_raw,
+        "config": config_raw,
+        "source_contract": source_contract,
     }
 
 
-def _validate_head_authorization_c(repo_root: Path) -> dict[str, Any]:
-    """Validate the artifact-only F -> B -> C chain from authenticated HEAD."""
+def _git_path_exists_at_commit(repo_root: Path, commit: str, relative: str) -> bool:
+    result = hardened_git(
+        repo_root,
+        "rev-parse",
+        "--verify",
+        f"{commit}:{relative}",
+        text=True,
+    )
+    return result.returncode == 0
 
-    worktree_c = repo_root / PHASE_B_AUTHORIZATION_RELATIVE
-    worktree_b = repo_root / PHASE_B_BINDING_RELATIVE
-    if not worktree_c.is_file():
-        raise PhaseBResumeAuthorizationError("Phase-B authorization artifact C is absent")
-    head = _git_text(repo_root, "rev-parse", "--verify", "HEAD^{commit}")
-    if not _FULL_COMMIT_SHA.fullmatch(head):
-        raise PhaseBResumeAuthorizationError("current HEAD is not a full Git commit SHA")
-    c_parents = _commit_parents(repo_root, head)
-    if len(c_parents) != 1:
-        raise PhaseBResumeAuthorizationError("future C must have exactly one direct parent B")
-    binding_commit = c_parents[0]
-    b_parents = _commit_parents(repo_root, binding_commit)
-    if len(b_parents) != 1:
-        raise PhaseBResumeAuthorizationError("future B must have exactly one direct parent F")
-    foundation_commit = b_parents[0]
-    if _diff_paths(repo_root, foundation_commit, binding_commit) != [
-        f"A\t{PHASE_B_BINDING_RELATIVE}"
-    ]:
-        raise PhaseBResumeAuthorizationError("future B differs from F outside the binding artifact")
-    if _diff_paths(repo_root, binding_commit, head) != [
-        f"A\t{PHASE_B_AUTHORIZATION_RELATIVE}"
-    ]:
-        raise PhaseBResumeAuthorizationError(
-            "future C differs from B outside the authorization artifact"
-        )
-    b_raw = _git_blob_at_commit(repo_root, binding_commit, PHASE_B_BINDING_RELATIVE)
-    c_raw = _git_blob_at_commit(repo_root, head, PHASE_B_AUTHORIZATION_RELATIVE)
-    if not worktree_b.is_file() or worktree_b.read_bytes() != b_raw:
-        raise PhaseBResumeAuthorizationError("future B worktree bytes differ from its Git blob")
-    if worktree_c.read_bytes() != c_raw:
-        raise PhaseBResumeAuthorizationError(
-            "future C worktree bytes differ from the exact committed Git blob"
-        )
-    b, base_inputs = _validate_b_artifact(repo_root, foundation_commit, b_raw)
+
+def _validate_c3_artifact(
+    repo_root: Path,
+    c3_raw: bytes,
+    *,
+    head: str,
+    repair_commit: str,
+    binding_commit: str,
+    foundation_commit: str,
+    b_raw: bytes,
+    b: Mapping[str, Any],
+    source_contract: Mapping[str, Any],
+    production: bool,
+) -> dict[str, Any]:
     from redco.analysis.stage_d_v13_source_phase_a_bindings import (
         PHASE_A_STATUS_SIGNATURE,
-        PHASE_B_AUTHORIZATION_DOMAIN,
+        PHASE_C3_AUTHORIZATION_DOMAIN,
     )
 
-    parsed = _parse_canonical_object(c_raw, "Phase-B authorization C")
-    forbidden = {"authorization_commit", "git_blob_sha1"}
-    if forbidden.intersection(parsed):
-        raise PhaseBResumeAuthorizationError(
-            "future C must not self-authenticate its commit or blob"
-        )
+    parsed = _parse_canonical_object(c3_raw, "Authorization C3")
     expected_keys = {
         "schema_version",
         "domain",
@@ -828,6 +942,7 @@ def _validate_head_authorization_c(repo_root: Path) -> dict[str, Any]:
         "foundation_commit",
         "foundation_tree_sha1",
         "binding_commit",
+        "repair_commit",
         "binding_artifact",
         "source",
         "bindings",
@@ -835,11 +950,11 @@ def _validate_head_authorization_c(repo_root: Path) -> dict[str, Any]:
         "resume_authorization",
     }
     if set(parsed) != expected_keys:
-        raise PhaseBResumeAuthorizationError("Phase-B authorization C schema has unexpected fields")
+        raise PhaseBResumeAuthorizationError("Authorization C3 schema has unexpected fields")
     if (
         parsed["schema_version"] != 1
-        or parsed["domain"] != PHASE_B_AUTHORIZATION_DOMAIN
-        or parsed["state"] != "C"
+        or parsed["domain"] != PHASE_C3_AUTHORIZATION_DOMAIN
+        or parsed["state"] != "C3"
         or parsed["draft_unfrozen"] is not False
         or parsed["foundation_only"] is not False
         or parsed["non_authorizing"] is not False
@@ -849,115 +964,253 @@ def _validate_head_authorization_c(repo_root: Path) -> dict[str, Any]:
         or parsed["provider_calls_authorized"] is not False
         or parsed["model_calls_authorized"] is not False
         or parsed["prime_gpu_scientific_launch_authorized"] is not False
+        or parsed["status_signature"] != PHASE_A_STATUS_SIGNATURE
         or parsed["foundation_commit"] != foundation_commit
         or parsed["binding_commit"] != binding_commit
-        or parsed["status_signature"] != PHASE_A_STATUS_SIGNATURE
+        or parsed["repair_commit"] != repair_commit
         or parsed["foundation_tree_sha1"] != b["foundation_tree_sha1"]
     ):
-        raise PhaseBResumeAuthorizationError("Phase-B authorization state or ancestry differs")
-    _require_null_candidate(parsed, "Phase-B authorization C")
+        raise PhaseBResumeAuthorizationError("Authorization C3 state or chain identity differs")
+    _require_null_candidate(parsed, "Authorization C3")
+    if production and (head == BINDING_B_COMMIT or repair_commit == BINDING_B_COMMIT):
+        raise PhaseBResumeAuthorizationError("Authorization C3 cannot use legacy direct B to C")
+
     binding_artifact = parsed["binding_artifact"]
     if (
         not isinstance(binding_artifact, dict)
-        or set(binding_artifact)
-        != {"path", "sha256", "git_blob_sha1", "status_signature"}
-        or binding_artifact.get("path") != PHASE_B_BINDING_RELATIVE
-        or binding_artifact.get("sha256") != sha256_bytes(b_raw)
-        or binding_artifact.get("git_blob_sha1") != git_blob_sha1(b_raw)
-        or binding_artifact.get("status_signature") != PHASE_A_STATUS_SIGNATURE
+        or set(binding_artifact) != {"path", "sha256", "git_blob_sha1", "status_signature"}
+        or binding_artifact["path"] != PHASE_B_BINDING_RELATIVE
+        or binding_artifact["sha256"] != sha256_bytes(b_raw)
+        or binding_artifact["git_blob_sha1"] != git_blob_sha1(b_raw)
+        or binding_artifact["status_signature"] != PHASE_A_STATUS_SIGNATURE
     ):
-        raise PhaseBResumeAuthorizationError("Phase-B binding artifact identity differs")
+        raise PhaseBResumeAuthorizationError("Authorization C3 binding artifact identity differs")
+    if production and (
+        binding_artifact["sha256"] != BINDING_B_SHA256
+        or binding_artifact["git_blob_sha1"] != BINDING_B_GIT_BLOB_SHA1
+    ):
+        raise PhaseBResumeAuthorizationError("Authorization C3 B artifact is not approved")
+
+    source = parsed["source"]
+    expected_source = {
+        "path": source_contract["path"],
+        "revision": source_contract["revision"],
+        "sha256": source_contract["sha256"],
+        "schema_sha256": source_contract["schema_sha256"],
+        "row_count": source_contract["row_count"],
+    }
+    if source != expected_source:
+        raise PhaseBResumeAuthorizationError("Authorization C3 source binding differs")
+    bindings = parsed["bindings"]
+    b_bindings = b.get("bindings")
+    if not isinstance(bindings, dict) or not isinstance(b_bindings, dict):
+        raise PhaseBResumeAuthorizationError("Authorization C3 input bindings are missing")
     user_authorization = parsed["user_authorization"]
+    expected_user_keys = {
+        "reviewed",
+        "scope",
+        "launch_authorized",
+        "provider_calls_authorized",
+        "model_calls_authorized",
+    }
     if (
         not isinstance(user_authorization, dict)
-        or user_authorization.get("reviewed") is not True
-        or user_authorization.get("scope") != "local_phase_b_source_selection_only"
-        or user_authorization.get("launch_authorized") is not False
-        or user_authorization.get("provider_calls_authorized") is not False
-        or user_authorization.get("model_calls_authorized") is not False
-    ):
-        raise PhaseBResumeAuthorizationError("Phase-B user authorization scope differs")
-    bindings = parsed["bindings"]
-    if (
-        not isinstance(bindings, dict)
-        or set(bindings) != set(b["bindings"]) | {"user_authorization_sha256"}
-        or any(bindings[key] != b["bindings"][key] for key in b["bindings"])
-    ):
-        raise PhaseBResumeAuthorizationError("Phase-B bindings differ from non-authorizing B")
-    source_binding = bindings["source_artifact"]
-    source_raw = base_inputs["source"]
-    source = parsed["source"]
-    if not isinstance(source, dict) or not isinstance(source_binding, dict):
-        raise PhaseBResumeAuthorizationError("Phase-B authorization source binding is missing")
-    if (
-        source != {
-            "path": SOURCE_PATH,
-            "revision": SOURCE_REVISION,
-            "sha256": sha256_bytes(source_raw),
-            "schema_sha256": source_binding.get("schema_sha256"),
-            "row_count": source_binding.get("row_count"),
+        or set(user_authorization) != expected_user_keys
+        or user_authorization
+        != {
+            "reviewed": True,
+            "scope": "local_phase_b_source_selection_only",
+            "launch_authorized": False,
+            "provider_calls_authorized": False,
+            "model_calls_authorized": False,
         }
-        or source_binding.get("schema_sha256") is None
-        or source_binding.get("row_count") is None
     ):
-        raise PhaseBResumeAuthorizationError("Phase-B authorization source binding differs")
-    if repo_root.resolve() == _DEFAULT_PROJECT_ROOT and source != {
+        raise PhaseBResumeAuthorizationError("Authorization C3 user scope differs")
+    expected_bindings = dict(b_bindings)
+    expected_bindings["user_authorization_sha256"] = sha256_bytes(
+        canonical_json_bytes(user_authorization)
+    )
+    if bindings != expected_bindings:
+        raise PhaseBResumeAuthorizationError("Authorization C3 bindings differ from B")
+
+    resume = parsed["resume_authorization"]
+    expected_resume = {
+        "state": "reviewed_preselection_checkpoint",
+        "phase_b_authorized": True,
+        "preselection_checkpoint_sha256": (
+            BINDING_B_SHA256 if production else sha256_bytes(b_raw)
+        ),
+        "source_sha256": source_contract["sha256"],
+        "schema_sha256": source_contract["schema_sha256"],
+        "decoder_contract_v2_sha256": _resume_contract_hash(),
+        "decoder_contract_v3_sha256": _resume_contract_v3_hash(),
+        "start_ordinal": PHASE_B_RESUME_START_ORDINAL,
+        "batch_size": PHASE_B_RESUME_BATCH_SIZE,
+        "row_groups": [0],
+        "use_threads": False,
+        "source_order": "physical_ordinal",
+    }
+    if resume != expected_resume:
+        raise PhaseBResumeAuthorizationError(
+            "Authorization C3 nested resume contract is not exact"
+        )
+    return parsed
+
+
+def _validate_head_authorization_c3(repo_root: Path) -> dict[str, Any]:
+    """Validate only the production F -> B -> R -> C3 chain from HEAD."""
+
+    production = repo_root.resolve() == _DEFAULT_PROJECT_ROOT
+    legacy_path = repo_root / PHASE_B_AUTHORIZATION_RELATIVE
+    c3_path = repo_root / PHASE_C3_AUTHORIZATION_RELATIVE
+    if legacy_path.is_file():
+        raise PhaseBResumeAuthorizationError(
+            "legacy direct B-to-C authorization path is forbidden after Repair R"
+        )
+    head = _git_text(repo_root, "rev-parse", "--verify", "HEAD^{commit}")
+    if not _FULL_COMMIT_SHA.fullmatch(head):
+        raise PhaseBResumeAuthorizationError("current HEAD is not a full Git commit SHA")
+    if _git_path_exists_at_commit(repo_root, head, PHASE_B_AUTHORIZATION_RELATIVE):
+        raise PhaseBResumeAuthorizationError("legacy direct B-to-C artifact is in the HEAD tree")
+    if not c3_path.is_file() or not _git_path_exists_at_commit(
+        repo_root, head, PHASE_C3_AUTHORIZATION_RELATIVE
+    ):
+        raise PhaseBResumeAuthorizationError("Authorization C3 is absent from exact HEAD")
+    c3_parents = _commit_parents(repo_root, head)
+    if len(c3_parents) != 1:
+        raise PhaseBResumeAuthorizationError("C3 must have exactly one direct parent R")
+    repair_commit = c3_parents[0]
+    repair_parents = _commit_parents(repo_root, repair_commit)
+    if len(repair_parents) != 1:
+        raise PhaseBResumeAuthorizationError("Repair R must have exactly one direct parent B")
+    binding_commit = repair_parents[0]
+    binding_parents = _commit_parents(repo_root, binding_commit)
+    if len(binding_parents) != 1:
+        raise PhaseBResumeAuthorizationError("Binding B must have exactly one direct parent F")
+    foundation_commit = binding_parents[0]
+    foundation_parents = _commit_parents(repo_root, foundation_commit)
+    if len(foundation_parents) != 1:
+        raise PhaseBResumeAuthorizationError("Foundation F must have exactly one direct parent")
+    if production and (
+        foundation_commit != FOUNDATION_F_COMMIT
+        or binding_commit != BINDING_B_COMMIT
+        or foundation_parents[0] != FOUNDATION_F_PARENT_COMMIT
+    ):
+        raise PhaseBResumeAuthorizationError("future C3 chain does not match approved F and B")
+    expected_f_to_b = [f"A\t{PHASE_B_BINDING_RELATIVE}"]
+    expected_b_to_r = sorted(f"M\t{path}" for path in REPAIR_DIFF_ALLOWLIST)
+    expected_r_to_c3 = [f"A\t{PHASE_C3_AUTHORIZATION_RELATIVE}"]
+    if sorted(_diff_paths(repo_root, foundation_commit, binding_commit)) != expected_f_to_b:
+        raise PhaseBResumeAuthorizationError("F to B differs outside the Binding B artifact")
+    if sorted(_diff_paths(repo_root, binding_commit, repair_commit)) != expected_b_to_r:
+        raise PhaseBResumeAuthorizationError("B to R differs outside the exact repair allowlist")
+    if sorted(_diff_paths(repo_root, repair_commit, head)) != expected_r_to_c3:
+        raise PhaseBResumeAuthorizationError("R to C3 differs outside the C3 artifact")
+    worktree_b = repo_root / PHASE_B_BINDING_RELATIVE
+    b_raw = _git_blob_at_commit(repo_root, binding_commit, PHASE_B_BINDING_RELATIVE)
+    c3_raw = _git_blob_at_commit(repo_root, head, PHASE_C3_AUTHORIZATION_RELATIVE)
+    if not worktree_b.is_file() or worktree_b.read_bytes() != b_raw:
+        raise PhaseBResumeAuthorizationError("Binding B worktree bytes differ from Git")
+    if c3_path.read_bytes() != c3_raw:
+        raise PhaseBResumeAuthorizationError("Authorization C3 worktree bytes differ from Git")
+    b, base_inputs = _validate_b_checkpoint(
+        repo_root,
+        foundation_commit,
+        binding_commit,
+        b_raw,
+        production=production,
+    )
+    return _validate_c3_artifact(
+        repo_root,
+        c3_raw,
+        head=head,
+        repair_commit=repair_commit,
+        binding_commit=binding_commit,
+        foundation_commit=foundation_commit,
+        b_raw=b_raw,
+        b=b,
+        source_contract=cast(dict[str, Any], base_inputs["source_contract"]),
+        production=production,
+    )
+
+
+def _require_runtime_versions_only() -> tuple[Any, str]:
+    """Check exact runtime versions without touching the production source."""
+
+    try:
+        import pyarrow
+
+        import datasets
+    except ImportError as error:
+        raise RuntimeError("Repair R requires the pinned PyArrow/datasets environment") from error
+    datasets_version = str(getattr(datasets, "__version__", ""))
+    _require_supported_versions(pyarrow, datasets_version)
+    return pyarrow, datasets_version
+
+
+def _validate_production_source_metadata(
+    root: Path,
+    source: Mapping[str, Any],
+    pyarrow: Any,
+) -> Any:
+    """Touch the fixed source only after C3, schema, and runtime authentication."""
+
+    expected = {
         "path": SOURCE_PATH,
         "revision": SOURCE_REVISION,
         "sha256": SOURCE_SHA256,
         "schema_sha256": SOURCE_SCHEMA_SHA256,
         "row_count": SOURCE_ROW_COUNT,
-    }:
+    }
+    if dict(source) != expected:
+        raise PhaseBResumeAuthorizationError("production source contract is not pinned")
+    path = root / SOURCE_ARTIFACT_RELATIVE
+    if not path.is_file():
+        raise PhaseBResumeAuthorizationError("authenticated production source is absent")
+    if path.stat().st_size != SOURCE_BYTES or sha256_file(path) != SOURCE_SHA256:
+        raise PhaseBResumeAuthorizationError("production source bytes are not authenticated")
+    try:
+        import pyarrow.parquet as parquet
+    except ImportError as error:
+        raise RuntimeError("Repair R requires the pinned PyArrow Parquet reader") from error
+    parquet_file = parquet.ParquetFile(path)
+    metadata = parquet_file.metadata
+    if metadata is None or metadata.num_rows != SOURCE_ROW_COUNT:
+        raise PhaseBResumeAuthorizationError("production source row count differs")
+    if metadata.num_row_groups != SOURCE_ROW_GROUPS:
+        raise PhaseBResumeAuthorizationError("production source row groups differ")
+    if source_schema_sha256(path) != SOURCE_SCHEMA_SHA256:
+        raise PhaseBResumeAuthorizationError("production source schema differs")
+    return parquet_file
+
+
+def _authenticate_c3_and_source() -> tuple[dict[str, Any], Any]:
+    """Authenticate C3, the exact runtime, and source metadata exactly once."""
+
+    root = _repository_root()
+    if (root / PHASE_B_AUTHORIZATION_RELATIVE).is_file():
         raise PhaseBResumeAuthorizationError(
-            "Phase-B authorization source is not the pinned QASPER object"
+            "legacy direct B-to-C artifact cannot authorize after Repair R"
         )
-    if bindings["phase_a_config"] != b["bindings"]["phase_a_config"]:
-        raise PhaseBResumeAuthorizationError("Phase-B config binding differs from B")
-    if bindings["user_authorization_sha256"] != sha256_bytes(
-        canonical_json_bytes(user_authorization)
-    ):
-        raise PhaseBResumeAuthorizationError("Phase-B user authorization binding differs")
-    resume_authorization = parsed["resume_authorization"]
-    if (
-        not isinstance(resume_authorization, dict)
-        or resume_authorization.get("state") != "reviewed_preselection_checkpoint"
-        or resume_authorization.get("phase_b_authorized") is not True
-        or not isinstance(resume_authorization.get("preselection_checkpoint_sha256"), str)
-        or len(resume_authorization["preselection_checkpoint_sha256"]) != 64
-        or resume_authorization.get("source_sha256") != source["sha256"]
-        or resume_authorization.get("schema_sha256") != source["schema_sha256"]
-        or resume_authorization.get("start_ordinal") != PHASE_B_RESUME_START_ORDINAL
-        or resume_authorization.get("batch_size") != PHASE_B_RESUME_BATCH_SIZE
-        or resume_authorization.get("row_groups") != [0]
-        or resume_authorization.get("use_threads") is not False
-        or resume_authorization.get("source_order") != "physical_ordinal"
-        or resume_authorization.get("decoder_contract_sha256") != _resume_contract_hash()
-    ):
-        raise PhaseBResumeAuthorizationError("Phase-B resume decoder binding is missing or differs")
-    return parsed
-
-
-def _validate_committed_c_in_repo(repo_root: Path) -> dict[str, Any]:
-    """Compatibility wrapper for tests; identities still derive from HEAD."""
-
-    return _validate_head_authorization_c(repo_root)
-
-
-def _validate_synthetic_head_authorization_c(repo_root: Path) -> dict[str, Any]:
-    """Test-only spelling for the HEAD-derived synthetic authorization seam."""
-
-    return _validate_committed_c_in_repo(repo_root)
+    if not (root / PHASE_C3_AUTHORIZATION_RELATIVE).is_file():
+        raise PhaseBResumeUnavailable(
+            "Authorization C3 is absent; Repair R cannot resume Phase B"
+        )
+    artifact = _validate_head_authorization_c3(root)
+    pyarrow, _datasets_version = _require_runtime_versions_only()
+    parquet_file = _validate_production_source_metadata(
+        root,
+        cast(Mapping[str, Any], artifact["source"]),
+        pyarrow,
+    )
+    return artifact, parquet_file
 
 
 def validate_future_phase_b_authorization_artifact() -> dict[str, Any]:
-    """Validate an artifact-only C at the exact current production HEAD."""
+    """Validate the non-caller-controlled F -> B -> R -> C3 activation path."""
 
-    root = _repository_root()
-    if not (root / PHASE_B_AUTHORIZATION_RELATIVE).is_file():
-        raise PhaseBResumeUnavailable(
-            "Phase-B authorization artifact C is absent; Foundation F cannot resume"
-        )
-    return _validate_head_authorization_c(root)
+    artifact, _parquet_file = _authenticate_c3_and_source()
+    return artifact
 
 
 def _repository_root() -> Path:
@@ -972,19 +1225,7 @@ def resume_source_rows() -> Iterator[tuple[int, dict[str, Any]]]:
     absent C artifact fails before the Parquet path is even inspected.
     """
 
-    authorization_path = _repository_root() / PHASE_B_AUTHORIZATION_RELATIVE
-    if not authorization_path.is_file():
-        raise PhaseBResumeUnavailable(
-            "Phase-B authorization artifact C is absent; Foundation F cannot resume"
-        )
-    artifact = validate_future_phase_b_authorization_artifact()
-    authorization = artifact["resume_authorization"]
-    if not isinstance(authorization, dict):
-        raise PhaseBResumeAuthorizationError("Phase-B authorization decoder binding is invalid")
-    source_path = _repository_root() / SOURCE_ARTIFACT_RELATIVE
-    _parquet, parquet_file = _validate_synthetic_resume_authorization(
-        source_path, authorization
-    )
+    _artifact, parquet_file = _authenticate_c3_and_source()
     global _RESUME_DECODER_INVOCATIONS
     _RESUME_DECODER_INVOCATIONS += 1
     return _resume_rows(parquet_file, ResumeDecoderInstrumentation())
@@ -1038,13 +1279,24 @@ def _resume_rows(
 
 
 __all__ = [
+    "BINDING_B_COMMIT",
+    "BINDING_B_GIT_BLOB_SHA1",
+    "BINDING_B_SHA256",
+    "B_PRESELECTION_CHECKPOINT_SHA256",
+    "FOUNDATION_F_COMMIT",
+    "FOUNDATION_F_PARENT_COMMIT",
+    "FOUNDATION_F_TREE_SHA1",
+    "FOUNDATION_MANIFEST_GIT_BLOB_SHA1",
+    "FOUNDATION_MANIFEST_SHA256",
     "PHASE_A_BATCH_SIZE",
+    "PHASE_A_CONFIG_SHA256",
     "PHASE_A_CUTOFF",
     "PHASE_A_VERSION",
     "PHASE_B_AUTHORIZATION_RELATIVE",
     "PHASE_B_BINDING_RELATIVE",
     "PHASE_B_RESUME_BATCH_SIZE",
     "PHASE_B_RESUME_START_ORDINAL",
+    "PHASE_C3_AUTHORIZATION_RELATIVE",
     "PROJECT_ROOT",
     "SOURCE_ARTIFACT_RELATIVE",
     "SOURCE_BYTES",
