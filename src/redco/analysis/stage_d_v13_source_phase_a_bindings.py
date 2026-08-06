@@ -355,12 +355,16 @@ SELECTION_RECEIPT_RELATIVE = (
 )
 SELECTION_GATE_APPROVAL_THREAD_ID = "019f9ab9-ec45-7ac3-82b1-09757b92a7c3"
 SELECTION_GATE_APPROVAL_TEXT = (
-    "Stage D Selection Gate G CPU-only checkpoint: replace the repeatable raw "
-    "production iterator with a one-attempt first-disposition source-selection "
-    "actuator; do not authorize launch, provider, model, Prime, GPU, wallet, or science."
+    "I authorize Redco C3-v2 under Selection Gate G 42813cfc64c454fa10579df68f7e9fd8449d6c49 "
+    "and scan contract aeb47f23445a0aeddef5a4d66dbec2788b58401367478ed81b3d935a0a16f09f "
+    "to commit one candidate-null authorization artifact and perform exactly one local "
+    "CPU-only QASPER source-order selection attempt from ordinal 180, stopping at the "
+    "first frozen-selector eligible, terminal-collision, or exhausted result. No retry, "
+    "provider/model/GPU/Prime/scientific/launch activity is authorized; stop after the "
+    "canonical receipt."
 )
 SELECTION_GATE_APPROVAL_TEXT_SHA256 = (
-    "b09b13cea7e01dafadd092e0cb3b4b9e85b8f89e1688c69ad185fe597a3b5996"
+    "791360ec6dbef7e533729b023f4bb005b898c466b9a176f30f298a467391a768"
 )
 
 PHASE_B_SOURCE_SELECTION_CONTRACT_V4: dict[str, object] = {
@@ -478,7 +482,7 @@ PHASE_B_SOURCE_SELECTION_CONTRACT_V4: dict[str, object] = {
 # This literal is the reviewed digest of the canonical object above.  It is
 # intentionally not derived from a future C3-v2 artifact.
 PHASE_B_SOURCE_SELECTION_CONTRACT_V4_SHA256 = (
-    "aeb47f23445a0aeddef5a4d66dbec2788b58401367478ed81b3d935a0a16f09f"
+    "7cdf21a40c7cc5aa442d92983cb9b5d5dc6e30ea5740efe1f9284d9594662766"
 )
 
 

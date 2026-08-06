@@ -1446,8 +1446,12 @@ def _synthetic_gate_chain(
     mutation: str | None = None,
     extra_g: bool = False,
     legacy_c: bool = False,
+    skip_a: bool = False,
+    missing_a: str | None = None,
+    extra_a: bool = False,
+    approval_message: str = "approval-repair-A",
 ) -> tuple[Path, str | None]:
-    """Create only synthetic F -> B -> R -> G -> C3-v2 history."""
+    """Create only synthetic F -> B -> R -> G -> A -> C3-v2 history."""
 
     from redco.analysis.stage_d_v13_source_phase_a_bindings import (
         PHASE_A_AUDIT_RELATIVE,
@@ -1470,6 +1474,7 @@ def _synthetic_gate_chain(
         git_blob_sha1,
     )
     from redco.analysis.stage_d_v13_source_selection import (
+        APPROVAL_REPAIR_DIFF_ALLOWLIST,
         LEGACY_C_AUTHORIZATION_RELATIVE,
         compute_scan_id,
     )
@@ -1600,17 +1605,32 @@ def _synthetic_gate_chain(
         legacy_path = repo / LEGACY_C_AUTHORIZATION_RELATIVE
         legacy_path.parent.mkdir(parents=True, exist_ok=True)
         legacy_path.write_bytes(b"{}")
-        _git_test(repo, "add", LEGACY_C_AUTHORIZATION_RELATIVE)
-        _git_test(repo, "commit", "--quiet", "-m", "legacy-C")
-        gate_commit = _git_test(repo, "rev-parse", "HEAD")
     if terminal == "g":
         return repo, gate_commit
+
+    if skip_a:
+        approval_commit = gate_commit
+    else:
+        approval_paths = [
+            relative
+            for relative in APPROVAL_REPAIR_DIFF_ALLOWLIST
+            if relative != missing_a
+        ]
+        for relative in approval_paths:
+            path = repo / relative
+            path.write_bytes(path.read_bytes() + b"\napproval-repair")
+        if extra_a:
+            (repo / "unapproved-a.txt").write_text("unapproved", encoding="utf-8")
+            approval_paths.append("unapproved-a.txt")
+        _git_test(repo, "add", *approval_paths)
+        _git_test(repo, "commit", "--quiet", "-m", approval_message)
+        approval_commit = _git_test(repo, "rev-parse", "HEAD")
 
     c3_path = repo / PHASE_C3_V2_AUTHORIZATION_RELATIVE
     c3_path.parent.mkdir(parents=True, exist_ok=True)
     audit_raw = audit_path.read_bytes()
-    binding_commit = _git_test(repo, "rev-parse", "HEAD~2")
-    repair_commit = _git_test(repo, "rev-parse", "HEAD~1")
+    binding_commit = _git_test(repo, "rev-parse", f"{approval_commit}~3")
+    repair_commit = _git_test(repo, "rev-parse", f"{approval_commit}~2")
     c3_payload: dict[str, Any] = {
         "schema_version": 2,
         "domain": PHASE_C3_V2_AUTHORIZATION_DOMAIN,
@@ -1632,7 +1652,7 @@ def _synthetic_gate_chain(
         "foundation_tree_sha1": foundation_tree,
         "binding_commit": binding_commit,
         "repair_commit": repair_commit,
-        "gate_commit": gate_commit,
+        "gate_commit": approval_commit,
         "binding_artifact": {
             "path": PHASE_B_BINDING_RELATIVE,
             "sha256": sha256_bytes(b_raw),
@@ -1655,7 +1675,7 @@ def _synthetic_gate_chain(
             "text_sha256": SELECTION_GATE_APPROVAL_TEXT_SHA256,
         },
         "scan": {
-            "scan_id": compute_scan_id(gate_commit),
+            "scan_id": compute_scan_id(approval_commit),
             "attempt_limit": 1,
             "retry": False,
             "start_ordinal": 180,
@@ -1675,6 +1695,29 @@ def _synthetic_gate_chain(
         cast(dict[str, Any], c3_payload["contracts"])["v4_sha256"] = "0" * 64
     elif mutation == "approval":
         cast(dict[str, Any], c3_payload["approval"])["text_sha256"] = "0" * 64
+    elif mutation == "old_approval":
+        cast(dict[str, Any], c3_payload["approval"])["text_sha256"] = (
+            "b09b13cea7e01dafadd092e0cb3b4b9e85b8f89e1688c69ad185fe597a3b5996"
+        )
+    elif mutation == "old_v4":
+        cast(dict[str, Any], c3_payload["contracts"])["v4_sha256"] = (
+            "aeb47f23445a0aeddef5a4d66dbec2788b58401367478ed81b3d935a0a16f09f"
+        )
+    elif mutation in {"old_scan_1", "old_scan_2", "old_scan_3"}:
+        stale_scan_ids = {
+            "old_scan_1": (
+                "stage-d-source-selection-76d2747e250d0f4a06154eab8358d035218a0a9fbaeba17736e43487ab4ba308"
+            ),
+            "old_scan_2": (
+                "stage-d-source-selection-86bf537b95ddc0dc5789ba62d1ff1050d2582650be7268434bd08b5a0797d651"
+            ),
+            "old_scan_3": (
+                "stage-d-source-selection-7e186d567d439b148624bef511723e74e4bc0f63a4e9003b8b93eed211e23914"
+            ),
+        }
+        cast(dict[str, Any], c3_payload["scan"])["scan_id"] = stale_scan_ids[mutation]
+    elif mutation == "gate":
+        c3_payload["gate_commit"] = gate_commit
     elif mutation == "source":
         cast(dict[str, Any], c3_payload["source"])["sha256"] = "0" * 64
     elif mutation == "candidate":
@@ -1688,7 +1731,7 @@ def _synthetic_gate_chain(
     c3_path.write_bytes(canonical_json_bytes(c3_payload))
     _git_test(repo, "add", PHASE_C3_V2_AUTHORIZATION_RELATIVE)
     _git_test(repo, "commit", "--quiet", "-m", "C3-v2")
-    return repo, gate_commit
+    return repo, approval_commit
 
 
 @pytest.mark.parametrize(  # type: ignore[untyped-decorator]
@@ -1710,6 +1753,97 @@ def test_gate_g_validates_exact_future_chain_without_source_access(tmp_path: Pat
     assert gate_commit == gate
     assert inputs["source_contract"]["row_count"] == 888
     assert inputs["audit_raw"]
+
+
+def test_gate_g_approval_and_v4_bindings_are_exact() -> None:
+    from redco.analysis.stage_d_v13_source_phase_a_bindings import (
+        PHASE_B_RESUME_CONTRACT_V2_SHA256,
+        PHASE_B_SOURCE_SELECTION_CONTRACT_V4,
+        PHASE_B_SOURCE_SELECTION_CONTRACT_V4_SHA256,
+        SELECTION_GATE_APPROVAL_TEXT,
+        SELECTION_GATE_APPROVAL_TEXT_SHA256,
+    )
+
+    assert len(SELECTION_GATE_APPROVAL_TEXT.encode("utf-8")) == 517
+    assert sha256_bytes(SELECTION_GATE_APPROVAL_TEXT.encode("utf-8")) == (
+        "791360ec6dbef7e533729b023f4bb005b898c466b9a176f30f298a467391a768"
+    )
+    assert SELECTION_GATE_APPROVAL_TEXT_SHA256 == (
+        "791360ec6dbef7e533729b023f4bb005b898c466b9a176f30f298a467391a768"
+    )
+    assert sha256_json(PHASE_B_SOURCE_SELECTION_CONTRACT_V4) == (
+        "7cdf21a40c7cc5aa442d92983cb9b5d5dc6e30ea5740efe1f9284d9594662766"
+    )
+    assert PHASE_B_SOURCE_SELECTION_CONTRACT_V4_SHA256 == (
+        "7cdf21a40c7cc5aa442d92983cb9b5d5dc6e30ea5740efe1f9284d9594662766"
+    )
+    assert PHASE_B_RESUME_CONTRACT_V2_SHA256 == (
+        "cade25b90061b817423307b5e63fb6c76756ac3f5b365671572a6d16eb2e8e08"
+    )
+
+
+@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
+    ("mutation", "error_match"),
+    (
+        ("old_approval", "external approval"),
+        ("old_v4", "contract digests"),
+        ("old_scan_1", "scan bounds or identity"),
+        ("stale_scan_pair", "scan bounds or identity"),
+        ("gate", "state or identity"),
+    ),
+)
+def test_gate_g_rejects_stale_approval_and_scan_bindings(
+    tmp_path: Path, mutation: str, error_match: str
+) -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    mutations = (
+        ("old_scan_2", "old_scan_3")
+        if mutation == "stale_scan_pair"
+        else (mutation,)
+    )
+    for index, actual_mutation in enumerate(mutations):
+        repo, _approval = _synthetic_gate_chain(
+            tmp_path / str(index), mutation=actual_mutation
+        )
+        with pytest.raises(selection.SelectionGateError, match=error_match):
+            selection._validate_c3_v2(repo)
+
+
+def test_gate_g_uses_future_a_for_scan_identity(tmp_path: Path) -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    first_repo, first_a = _synthetic_gate_chain(
+        tmp_path / "first", approval_message="approval-repair-A-first"
+    )
+    second_repo, second_a = _synthetic_gate_chain(
+        tmp_path / "second", approval_message="approval-repair-A-second"
+    )
+    assert first_a is not None and second_a is not None
+    assert first_a != second_a
+    assert selection.compute_scan_id(first_a) != selection.compute_scan_id(second_a)
+    assert _git_test(first_repo, "diff", "--name-status", f"{first_a}^", first_a) == _git_test(
+        second_repo, "diff", "--name-status", f"{second_a}^", second_a
+    )
+    assert selection._validate_c3_v2(first_repo)[1] == first_a
+    assert selection._validate_c3_v2(second_repo)[1] == second_a
+
+
+def test_gate_g_rejects_stale_direct_g_and_wrong_a_diff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    selection = importlib.import_module("redco.analysis.stage_d_v13_source_selection")
+    direct_repo, gate = _synthetic_gate_chain(tmp_path / "direct", skip_a=True)
+    assert gate is not None
+    monkeypatch.setattr(selection, "GATE_G_COMMIT", gate)
+    with pytest.raises(selection.SelectionGateError, match="direct G"):
+        selection._validate_c3_v2(direct_repo)
+    missing_repo, _a = _synthetic_gate_chain(
+        tmp_path / "missing", missing_a="tests/test_stage_d_v13_source_phase_a.py"
+    )
+    with pytest.raises(selection.SelectionGateError, match="G to A"):
+        selection._validate_c3_v2(missing_repo)
+    extra_repo, _a = _synthetic_gate_chain(tmp_path / "extra-a", extra_a=True)
+    with pytest.raises(selection.SelectionGateError, match="G to A"):
+        selection._validate_c3_v2(extra_repo)
 
 
 def test_gate_g_rejects_legacy_c_and_extra_gate_paths(tmp_path: Path) -> None:

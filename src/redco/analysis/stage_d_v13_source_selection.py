@@ -88,9 +88,15 @@ LEGACY_C_AUTHORIZATION_RELATIVE = (
 )
 
 G_SOURCE_SELECTION_RELATIVE = "src/redco/analysis/stage_d_v13_source_selection.py"
+GATE_G_COMMIT = "42813cfc64c454fa10579df68f7e9fd8449d6c49"
 G_DIFF_ALLOWLIST = (
     *decoder.REPAIR_DIFF_ALLOWLIST,
     G_SOURCE_SELECTION_RELATIVE,
+)
+APPROVAL_REPAIR_DIFF_ALLOWLIST = (
+    "src/redco/analysis/stage_d_v13_source_phase_a_bindings.py",
+    G_SOURCE_SELECTION_RELATIVE,
+    "tests/test_stage_d_v13_source_phase_a.py",
 )
 _TRANSCRIPT_VERSION = "stage-d-v13-source-selection-transcript-v4"
 _FULL_COMMIT = decoder._FULL_COMMIT_SHA
@@ -109,7 +115,7 @@ def _advance_transcript(
     return hashlib.sha256(state + b"\x00" + event).digest()
 
 
-class SelectionGateError(decoder.PhaseBResumeAuthorizationError):
+class SelectionGateError(decoder.PhaseBResumeAuthorizationError):  # type: ignore[misc]
     """A fail-closed Gate-G validation or execution error."""
 
 
@@ -147,10 +153,10 @@ class SelectionScanInstrumentation:
 
 
 def compute_scan_id(gate_commit: str) -> str:
-    """Derive the outcome-independent scan identity from the frozen inputs."""
+    """Derive the outcome-independent scan identity from the C3 gate identity."""
 
     if _FULL_COMMIT.fullmatch(gate_commit) is None:
-        raise SelectionGateError("Gate G commit is not a full Git SHA")
+        raise SelectionGateError("C3 gate commit is not a full Git SHA")
     payload = {
         "domain": PHASE_C3_V2_AUTHORIZATION_DOMAIN,
         "gate_commit": gate_commit,
@@ -201,7 +207,7 @@ def _expected_source(base_inputs: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _validate_c3_v2(repo_root: Path) -> tuple[dict[str, Any], str, dict[str, Any]]:
-    """Authenticate future F->B->R->G->C3-v2 without source access."""
+    """Authenticate future F->B->R->G->A->C3-v2 without source access."""
 
     production = repo_root.resolve() == decoder._DEFAULT_PROJECT_ROOT
     head = decoder._git_text(repo_root, "rev-parse", "--verify", "HEAD^{commit}")
@@ -223,8 +229,14 @@ def _validate_c3_v2(repo_root: Path) -> tuple[dict[str, Any], str, dict[str, Any
         raise SelectionGateError("Authorization C3-v2 is absent from exact HEAD")
     c3_parents = decoder._commit_parents(repo_root, head)
     if len(c3_parents) != 1:
-        raise SelectionGateError("C3-v2 must have exactly one direct parent G")
-    gate_commit = c3_parents[0]
+        raise SelectionGateError("C3-v2 must have exactly one direct parent A")
+    approval_commit = c3_parents[0]
+    if approval_commit == GATE_G_COMMIT:
+        raise SelectionGateError("direct G to C3-v2 authorization is retired")
+    approval_parents = decoder._commit_parents(repo_root, approval_commit)
+    if len(approval_parents) != 1:
+        raise SelectionGateError("Approval repair A must have exactly one direct parent G")
+    gate_commit = approval_parents[0]
     gate_parents = decoder._commit_parents(repo_root, gate_commit)
     if len(gate_parents) != 1:
         raise SelectionGateError("Gate G must have exactly one direct parent R")
@@ -241,7 +253,8 @@ def _validate_c3_v2(repo_root: Path) -> tuple[dict[str, Any], str, dict[str, Any
     if len(foundation_parents) != 1:
         raise SelectionGateError("Foundation F must have exactly one direct parent")
     if production and (
-        repair_commit != REPAIR_R_COMMIT
+        gate_commit != GATE_G_COMMIT
+        or repair_commit != REPAIR_R_COMMIT
         or binding_commit != decoder.BINDING_B_COMMIT
         or foundation_commit != decoder.FOUNDATION_F_COMMIT
         or foundation_parents[0] != decoder.FOUNDATION_F_PARENT_COMMIT
@@ -254,7 +267,10 @@ def _validate_c3_v2(repo_root: Path) -> tuple[dict[str, Any], str, dict[str, Any
         [f"M\t{path}" for path in decoder.REPAIR_DIFF_ALLOWLIST]
         + [f"A\t{G_SOURCE_SELECTION_RELATIVE}"]
     )
-    expected_g_to_c3 = [f"A\t{PHASE_C3_V2_AUTHORIZATION_RELATIVE}"]
+    expected_g_to_a = sorted(
+        f"M\t{path}" for path in APPROVAL_REPAIR_DIFF_ALLOWLIST
+    )
+    expected_a_to_c3 = [f"A\t{PHASE_C3_V2_AUTHORIZATION_RELATIVE}"]
     if sorted(decoder._diff_paths(repo_root, foundation_commit, binding_commit)) != (
         expected_f_to_b
     ):
@@ -267,8 +283,14 @@ def _validate_c3_v2(repo_root: Path) -> tuple[dict[str, Any], str, dict[str, Any
         expected_r_to_g
     ):
         raise SelectionGateError("R to G differs outside the four-file Gate G allowlist")
-    if sorted(decoder._diff_paths(repo_root, gate_commit, head)) != expected_g_to_c3:
-        raise SelectionGateError("G to C3-v2 differs outside the one authorization artifact")
+    if sorted(decoder._diff_paths(repo_root, gate_commit, approval_commit)) != (
+        expected_g_to_a
+    ):
+        raise SelectionGateError(
+            "G to A differs outside the three-file approval repair allowlist"
+        )
+    if sorted(decoder._diff_paths(repo_root, approval_commit, head)) != expected_a_to_c3:
+        raise SelectionGateError("A to C3-v2 differs outside the one authorization artifact")
 
     b_raw = decoder._git_blob_at_commit(repo_root, binding_commit, PHASE_B_BINDING_RELATIVE)
     b, base_inputs = decoder._validate_b_checkpoint(
@@ -332,7 +354,7 @@ def _validate_c3_v2(repo_root: Path) -> tuple[dict[str, Any], str, dict[str, Any
         or parsed["foundation_commit"] != foundation_commit
         or parsed["binding_commit"] != binding_commit
         or parsed["repair_commit"] != repair_commit
-        or parsed["gate_commit"] != gate_commit
+        or parsed["gate_commit"] != approval_commit
         or parsed["foundation_tree_sha1"]
         != decoder._git_tree_at_commit(repo_root, foundation_commit)
         or parsed["candidate"] is not None
@@ -416,7 +438,7 @@ def _validate_c3_v2(repo_root: Path) -> tuple[dict[str, Any], str, dict[str, Any
         "C3-v2 scan",
     )
     if scan != {
-        "scan_id": compute_scan_id(gate_commit),
+        "scan_id": compute_scan_id(approval_commit),
         "attempt_limit": 1,
         "retry": False,
         "start_ordinal": 180,
@@ -435,7 +457,7 @@ def _validate_c3_v2(repo_root: Path) -> tuple[dict[str, Any], str, dict[str, Any
         {"artifact_path", "artifact_sha256", "witness_sha256"},
         "C3-v2 forbidden universe",
     )
-    audit_raw = decoder._git_blob_at_commit(repo_root, gate_commit, PHASE_A_AUDIT_RELATIVE)
+    audit_raw = decoder._git_blob_at_commit(repo_root, approval_commit, PHASE_A_AUDIT_RELATIVE)
     audit_sha = sha256_bytes(audit_raw)
     if forbidden != {
         "artifact_path": PHASE_A_AUDIT_RELATIVE,
@@ -448,7 +470,11 @@ def _validate_c3_v2(repo_root: Path) -> tuple[dict[str, Any], str, dict[str, Any
         or forbidden["witness_sha256"] != PHASE_A_WITNESS_SHA256
     ):
         raise SelectionGateError("C3-v2 forbidden-universe artifact is not approved")
-    return parsed, gate_commit, {"source_contract": expected_source, "audit_raw": audit_raw, "b": b}
+    return parsed, approval_commit, {
+        "source_contract": expected_source,
+        "audit_raw": audit_raw,
+        "b": b,
+    }
 
 
 def _witness_hash_from_audit(audit_raw: bytes) -> str:
@@ -470,7 +496,7 @@ def _authenticated_git_input(
     expected_sha256: str,
     expected_git_blob_sha1: str,
 ) -> bytes:
-    raw = decoder._git_blob_at_commit(repo_root, gate_commit, relative)
+    raw = cast(bytes, decoder._git_blob_at_commit(repo_root, gate_commit, relative))
     if sha256_bytes(raw) != expected_sha256:
         raise SelectionGateError(f"authenticated input hash differs: {relative}")
     if decoder.git_blob_sha1(raw) != expected_git_blob_sha1:
@@ -1178,6 +1204,8 @@ def activate_selection_gate() -> dict[str, Any]:
 
 
 __all__ = [
+    "APPROVAL_REPAIR_DIFF_ALLOWLIST",
+    "GATE_G_COMMIT",
     "G_DIFF_ALLOWLIST",
     "G_SOURCE_SELECTION_RELATIVE",
     "LEGACY_C3_AUTHORIZATION_RELATIVE",
