@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from redco.analysis.stage_d_action_closure import ActionClosureWatchdog
 from redco.analysis.stage_d_source_contracts import SourceRollout
 from redco.contracts import canonical_json
 
@@ -130,12 +132,15 @@ class StageDCollectionPlan:
         return cls(slots, _sha256(canonical_json(payload)))
 
     def to_bytes(self) -> bytes:
-        return canonical_json(
-            {
-                "schema_version": 1,
-                "domain": "redco-stage-d-source-collection-plan-v1",
-                "slots": [slot.to_payload() for slot in self.slots],
-            }
+        return cast(
+            bytes,
+            canonical_json(
+                {
+                    "schema_version": 1,
+                    "domain": "redco-stage-d-source-collection-plan-v1",
+                    "slots": [slot.to_payload() for slot in self.slots],
+                }
+            ),
         )
 
     @classmethod
@@ -222,9 +227,7 @@ def verify_direct_collection_config(
     if mismatches:
         raise ValueError(f"source collection lifecycle is not exact: {mismatches}")
     output_dir = getattr(config, "output_dir", None)
-    if not isinstance(output_dir, Path) or (
-        require_new_output and output_dir.exists()
-    ):
+    if not isinstance(output_dir, Path) or (require_new_output and output_dir.exists()):
         raise ValueError("source collection requires a new explicit output directory")
     env = getattr(config, "env", None)
     if env is None or getattr(env, "max_concurrent", None) != 1:
@@ -243,22 +246,55 @@ async def run_exact_source_collection(
     load_environment: Callable[[Any], Any],
     load_verified_sources: Callable[[], Sequence[SourceRollout]],
     persist_plan: Callable[[bytes], None],
+    watchdog: ActionClosureWatchdog | None = None,
 ) -> tuple[StageDCollectionPlan, tuple[Any, ...], bytes]:
     """Execute exactly one direct, serial, no-resume source collection campaign."""
-    env = load_environment(config.env)
-    tasks = env.taskset.select(config.num_tasks, config.shuffle)
-    plan = StageDCollectionPlan.build(
-        [task.data.model_dump(mode="json") for task in tasks],
-        master_seed=config.env.master_seed,
-    )
-    verify_direct_collection_config(config, planned_slot_count=len(plan.slots))
-    if plan.plan_sha256 != preregistered_plan_sha256:
-        raise ValueError("materialized source collection plan differs from preregistration")
-    persist_plan(plan.to_bytes())
-    episodes = tuple(await run_eval(env, config))
-    sources = tuple(load_verified_sources())
-    receipt = verify_collection_outcomes(plan, episodes, sources)
-    return plan, episodes, receipt
+
+    async def execute() -> tuple[StageDCollectionPlan, tuple[Any, ...], bytes]:
+        env = load_environment(config.env)
+        episode_owner_bound = False
+        if watchdog is not None:
+            bind_watchdog = getattr(env, "bind_stage_d_watchdog", None)
+            if callable(bind_watchdog):
+                bind_watchdog(watchdog)
+                episode_owner_bound = True
+        tasks = env.taskset.select(config.num_tasks, config.shuffle)
+        plan = StageDCollectionPlan.build(
+            [task.data.model_dump(mode="json") for task in tasks],
+            master_seed=config.env.master_seed,
+        )
+        verify_direct_collection_config(config, planned_slot_count=len(plan.slots))
+        if plan.plan_sha256 != preregistered_plan_sha256:
+            raise ValueError("materialized source collection plan differs from preregistration")
+        persist_plan(plan.to_bytes())
+        if watchdog is None or episode_owner_bound:
+            episodes = tuple(await run_eval(env, config))
+        else:
+            # Compatibility for small test doubles that have no environment
+            # owner.  The production StageDSourceEnv binds above, so its
+            # individual run_episode calls—not this campaign wrapper—own the
+            # episode deadline.
+            async def run_episode() -> tuple[Any, ...]:
+                return tuple(await run_eval(env, config))
+
+            episodes = await watchdog.run_episode(run_episode())
+        if watchdog is None:
+            sources = tuple(load_verified_sources())
+            receipt = verify_collection_outcomes(plan, episodes, sources)
+        else:
+            sources = tuple(
+                await watchdog.run_finalizer(asyncio.to_thread(load_verified_sources))
+            )
+            receipt = await watchdog.run_finalizer(
+                asyncio.to_thread(verify_collection_outcomes, plan, episodes, sources),
+            )
+        return plan, episodes, receipt
+
+    if watchdog is None:
+        return await execute()
+    # The launcher publishes receipt and branch roster before committing the
+    # sole successful campaign terminal record.
+    return await watchdog.run_campaign(execute())
 
 
 def verify_collection_outcomes(
@@ -293,8 +329,7 @@ def verify_collection_outcomes(
             not isinstance(observed_group, str)
             or not isinstance(observed_example, str)
             or type(observed_slot) is not int
-            or _source_slot_id(observed_group, observed_example, observed_slot)
-            != slot.slot_id
+            or _source_slot_id(observed_group, observed_example, observed_slot) != slot.slot_id
             or observed_group != slot.scientific_group_id
             or observed_example != slot.example_id
             or observed_slot != slot.rollout_slot
@@ -322,15 +357,18 @@ def verify_collection_outcomes(
         )
     if used_rollouts != set(by_rollout):
         raise ValueError("unplanned source artifacts were present")
-    return canonical_json(
-        {
-            "schema_version": 1,
-            "domain": "redco-stage-d-source-collection-receipt-v1",
-            "plan_sha256": plan.plan_sha256,
-            "planned_slot_count": len(plan.slots),
-            "terminal_slot_count": len(dispositions),
-            "dispositions": dispositions,
-        }
+    return cast(
+        bytes,
+        canonical_json(
+            {
+                "schema_version": 1,
+                "domain": "redco-stage-d-source-collection-receipt-v1",
+                "plan_sha256": plan.plan_sha256,
+                "planned_slot_count": len(plan.slots),
+                "terminal_slot_count": len(dispositions),
+                "dispositions": dispositions,
+            }
+        ),
     )
 
 

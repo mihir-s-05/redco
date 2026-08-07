@@ -5,6 +5,7 @@ import hashlib
 import inspect
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -192,6 +193,7 @@ def _child_rlm(
     parent_turn: int = 0,
     parent_call_ordinal: int | None = None,
     episode_spawn: int | None = None,
+    parent_tool_call_id: str | None = None,
 ) -> dict[str, object]:
     parent_call_ordinal = parent_turn if parent_call_ordinal is None else parent_call_ordinal
     lineage = derive_child_lineage(
@@ -209,7 +211,11 @@ def _child_rlm(
         "session_call_ordinal": turn,
         "parent_session_id": "root-session",
         "parent_turn": parent_turn,
-        "parent_tool_call_id": f"transport-call-{parent_turn}-{spawn}",
+        "parent_tool_call_id": (
+            f"transport-call-{parent_turn}-{spawn}"
+            if parent_tool_call_id is None
+            else parent_tool_call_id
+        ),
         "invocation_id": invocation,
         "parent_lineage": "root",
         "parent_call_ordinal": parent_call_ordinal,
@@ -500,6 +506,7 @@ def test_actual_interception_train_renderer_path_observes_bytes_once(
     sampling = vf.Sampling(
         temperature=0.7,
         top_p=1.0,
+        reasoning_effort=None,
         top_k=None,
         min_p=0.0,
         repetition_penalty=1.0,
@@ -593,7 +600,6 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
     env_root = Path(__file__).parents[1] / "environments" / "redco_evidence_selection_v2"
     sys.path.insert(0, str(env_root))
     from redco_evidence_selection_v2.source_env import _canonical_source_episode
-    from test_stage_d_source_producer import _two_turn_child_episode
     from verifiers.v1.clients import ModelContext
     from verifiers.v1.clients.train import TrainClient
     from verifiers.v1.dialects.chat import ChatDialect
@@ -603,8 +609,6 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
     if "observer" not in inspect.signature(RolloutSession).parameters:
         pytest.skip("prepared-observer patch is not applied to the verifier stack")
 
-    episode = json.loads(_two_turn_child_episode())
-    trace_payload = episode["traces"][0]
     compact_tool = {
         "name": "ipython",
         "description": "Execute code.",
@@ -615,55 +619,23 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
         },
     }
     wrapped_tool = {"type": "function", "function": compact_tool}
-    trace_payload["tools"] = [compact_tool]
-    nodes = trace_payload["nodes"]
-    calls = trace_payload["calls"]
-    calls[1]["finish_reason"] = "length"
-    nodes[3]["token_ids"] = [20, 21]
 
-    child_tool = nodes[8]
-    child_continuation = nodes[9]
-    root_tool = json.loads(json.dumps(child_tool))
-    root_return = nodes[7]
-    child_tool["parent"] = 5
-    child_continuation["parent"] = 6
-    root_tool["parent"] = 1
-    root_return["parent"] = 8
-    trace_payload["nodes"] = [
-        *nodes[:6],
-        child_tool,
-        child_continuation,
-        root_tool,
-        root_return,
-        *nodes[10:],
-    ]
-    calls[3]["node"] = 7
-    calls[4]["node"] = 9
-    calls[4]["usage"]["prompt_tokens"] = 5
-    for call in calls:
-        call["sampling"]["seed"] = 81
-    for node in trace_payload["nodes"]:
-        message = node["message"]
+    def actual_tool_call_id(message: Any) -> str:
+        if not isinstance(message, dict):
+            raise AssertionError("renderer response is not a message object")
         tool_calls = message.get("tool_calls")
-        if not tool_calls:
-            continue
-        message["tool_calls"] = [
-            {
-                "id": item["id"],
-                "name": item["function"]["name"],
-                "arguments": item["function"]["arguments"],
-            }
-            for item in tool_calls
-        ]
-    episode_bytes = _canonical_source_episode(vf.WireEpisode.model_validate(episode))
-    serialized_tools = json.loads(episode_bytes)["traces"][0]["tools"]
-    assert serialized_tools[0]["strict"] is None
+        if not isinstance(tool_calls, list) or not tool_calls:
+            raise AssertionError("renderer response has no tool call")
+        tool_call = tool_calls[0]
+        if not isinstance(tool_call, dict):
+            raise AssertionError("renderer response has no tool-call ID")
+        call_id = tool_call.get("id")
+        if not isinstance(call_id, str):
+            raise AssertionError("renderer response has no tool-call ID")
+        return call_id
 
     class Renderer:
         supports_tools = True
-
-        def __init__(self) -> None:
-            self.parse_index = 0
 
         @staticmethod
         def _rendered(token_ids: list[int]) -> RenderedTokens:
@@ -695,46 +667,65 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
 
         def parse_response(self, completion_ids: Any, *, tools: Any = None) -> Any:
             del tools
-            assert completion_ids in ([20, 2], [20, 21])
-            call_index = self.parse_index
-            self.parse_index += 1
-            tool_calls = []
-            if call_index in {0, 2, 4}:
-                tool_calls = [
-                    ParsedToolCall(
-                        raw='{"name":"ipython","arguments":{}}',
-                        name="ipython",
-                        arguments={},
-                        status=ToolCallParseStatus.OK,
-                        id="call_0",
-                    )
-                ]
+            assert completion_ids == [20, 2] or (
+                isinstance(completion_ids, list)
+                and len(completion_ids) == 768
+                and all(token_id == 20 for token_id in completion_ids)
+            )
+            tool_calls = [] if len(completion_ids) == 768 else [
+                ParsedToolCall(
+                    raw='{"name":"ipython","arguments":{}}',
+                    name="ipython",
+                    arguments={},
+                    status=ToolCallParseStatus.OK,
+                    id="call_0",
+                )
+            ]
             return ParsedResponse(
                 content="" if tool_calls else "duplicate",
                 tool_calls=tool_calls,
             )
 
     post_index = 0
+    child_arrivals = 0
+    child_active = 0
+    maximum_child_active = 0
+    child_gate = asyncio.Event()
 
     async def post(*_args: Any, **_kwargs: Any) -> Any:
-        nonlocal post_index
+        nonlocal child_active, child_arrivals, maximum_child_active, post_index
         call_index = post_index
         request_id = f"fixture-{call_index}"
         post_index += 1
-        max_tokens = call_index == 1
+        if call_index in {1, 2}:
+            child_arrivals += 1
+            child_active += 1
+            maximum_child_active = max(maximum_child_active, child_active)
+            if child_arrivals == 2:
+                child_gate.set()
+            await child_gate.wait()
+            child_active -= 1
+        body = _kwargs.get("body")
+        if not isinstance(body, dict):
+            raise AssertionError("provider request body was not captured")
+        sampling_params = body.get("sampling_params")
+        if not isinstance(sampling_params, dict):
+            raise AssertionError("provider request omitted sampling parameters")
+        max_tokens = sampling_params.get("max_tokens") == 768
+        token_ids = [20] * 768 if max_tokens else [20, 2]
+        response_logprobs = (
+            [{"logprob": -0.1}] * 768
+            if max_tokens
+            else [{"logprob": -0.2}, {"logprob": -0.1}]
+        )
         return SimpleNamespace(
             content=canonical_json(
                 {
                     "request_id": request_id,
                     "choices": [
                         {
-                            "token_ids": [20, 21] if max_tokens else [20, 2],
-                            "logprobs": {
-                                "content": [
-                                    {"logprob": -0.2},
-                                    {"logprob": -0.1},
-                                ]
-                            },
+                            "token_ids": token_ids,
+                            "logprobs": {"content": response_logprobs},
                             "finish_reason": "length" if max_tokens else "stop",
                         }
                     ],
@@ -768,25 +759,34 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
         repetition_penalty=1.0,
         frequency_penalty=0.0,
         presence_penalty=0.0,
-        logit_bias={},
         seed=81,
         max_tokens=2,
         stop=None,
         n=1,
-        best_of=None,
-        use_beam_search=False,
-        logprobs=True,
-        top_logprobs=0,
         ignore_eos=False,
         min_tokens=0,
         tool_choice="auto",
         parallel_tool_calls=False,
         extra_body={"cache_salt": "integration"},
     )
+
+    class SamplingDirector:
+        def direct_sampling(self, context: Mapping[str, Any], base: Any) -> Any:
+            rlm = context.get("rlm")
+            if (
+                isinstance(rlm, dict)
+                and rlm.get("depth") == 1
+                and rlm.get("turn") == 0
+                and rlm.get("invocation_id") == "midpoint-shard-0"
+            ):
+                return base.model_copy(update={"max_tokens": 768}, deep=True)
+            return base
+
     session = RolloutSession(
         ModelContext("model@commit", client, sampling),
         trace,
         observer=StageDForwardDirectiveObserver(observer),
+        sampling_director=SamplingDirector(),
     )
     server = InterceptionServer()
     server.sessions["secret"] = session
@@ -821,10 +821,10 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
             )
         return multidict.CIMultiDict(headers)
 
-    async def invoke(call_index: int, messages: list[dict[str, object]]) -> Any:
+    async def invoke(rlm: dict[str, object], messages: list[dict[str, object]]) -> Any:
         body = canonical_json({"model": "ignored", "messages": messages, "tools": [wrapped_tool]})
         request = SimpleNamespace(
-            headers=rlm_headers(calls[call_index]["rlm"]),
+            headers=rlm_headers(rlm),
             path="/v1/chat/completions",
             read=AsyncMock(return_value=body),
             _read_bytes=body,
@@ -833,34 +833,87 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
         assert response.status == 200, response.body.decode()
         return json.loads(response.body)["choices"][0]["message"]
 
+    actual_parent_ids: dict[str, str] = {}
+
     async def scenario() -> None:
-        root_tool_message = await invoke(0, [{"role": "user", "content": "q"}])
-        _, child_tool_message = await asyncio.gather(
-            invoke(1, [{"role": "user", "content": "q"}]),
-            invoke(2, [{"role": "user", "content": "q"}]),
+        root_tool_message = await invoke(_root_rlm(0), [{"role": "user", "content": "q"}])
+        actual_parent_ids["root_turn_0"] = actual_tool_call_id(root_tool_message)
+        child_zero_rlm = _child_rlm(
+            0,
+            "midpoint-shard-0",
+            parent_tool_call_id=actual_parent_ids["root_turn_0"],
         )
+        child_one_rlm = _child_rlm(
+            1,
+            "midpoint-shard-1",
+            parent_tool_call_id=actual_parent_ids["root_turn_0"],
+        )
+        child_messages = await asyncio.gather(
+            invoke(child_zero_rlm, [{"role": "user", "content": "q"}]),
+            invoke(child_one_rlm, [{"role": "user", "content": "q"}]),
+        )
+        normal_child_rlm: dict[str, object] | None = None
+        child_tool_message: Any = None
+        for candidate_rlm, message in zip(
+            (child_zero_rlm, child_one_rlm), child_messages, strict=True
+        ):
+            if message.get("tool_calls"):
+                normal_child_rlm = candidate_rlm
+                child_tool_message = message
+                break
+        if normal_child_rlm is None:
+            raise AssertionError("normal child provenance was not identified")
+        if child_tool_message is None:
+            raise AssertionError("normal child did not return a tool call")
+        actual_parent_ids["child_turn_0"] = actual_tool_call_id(child_tool_message)
+        normal_child_continuation_rlm = dict(normal_child_rlm)
+        normal_child_continuation_rlm["turn"] = 1
+        normal_child_continuation_rlm["session_call_ordinal"] = 1
+        normal_child_continuation_rlm["parent_tool_call_id"] = actual_parent_ids[
+            "child_turn_0"
+        ]
         await invoke(
-            3,
+            normal_child_continuation_rlm,
             [
                 {"role": "user", "content": "q"},
                 child_tool_message,
-                {"role": "tool", "tool_call_id": "call_0", "content": "computed"},
+                {
+                    "role": "tool",
+                    "tool_call_id": actual_parent_ids["child_turn_0"],
+                    "content": "computed",
+                },
             ],
         )
-        await invoke(
-            4,
+        root_return_message = await invoke(
+            _root_rlm(1),
             [
                 {"role": "user", "content": "q"},
                 root_tool_message,
-                {"role": "tool", "tool_call_id": "call_0", "content": "computed"},
+                {
+                    "role": "tool",
+                    "tool_call_id": actual_parent_ids["root_turn_0"],
+                    "content": "computed",
+                },
             ],
         )
-        await invoke(5, [{"role": "user", "content": "q"}])
+        actual_parent_ids["root_turn_1"] = actual_tool_call_id(root_return_message)
+        await invoke(
+            _child_rlm(
+                0,
+                "late-shard",
+                parent_turn=1,
+                episode_spawn=2,
+                parent_tool_call_id=actual_parent_ids["root_turn_1"],
+            ),
+            [{"role": "user", "content": "q"}],
+        )
         await client.close()
 
     asyncio.run(scenario())
 
     assert openai.post.await_count == 6
+    assert child_arrivals == 2
+    assert maximum_child_active == 2
     assert len(producer._completed) == 6
     max_token_decisions = [
         decision
@@ -869,7 +922,8 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
     ]
     assert len(max_token_decisions) == 1
     assert max_token_decisions[0].action.termination_kind == "max_tokens"
-    assert max_token_decisions[0].action.action_token_ids == (20, 21)
+    assert max_token_decisions[0].action.action_token_ids == (20,) * 768
+    assert len(max_token_decisions[0].action.behavior_logprobs) == 768
     child_return_request = openai.post.await_args_list[3].kwargs["body"]
     assert child_return_request["sampling_params"]["routed_experts_prompt_start"] == 3
     root_return_decision = next(
@@ -880,6 +934,68 @@ def test_actual_two_turn_child_finalizes_as_excluded_without_replay(
     assert root_return_decision.action.key.prompt_token_ids == (10, 11, 20, 2, 30)
     assert root_return_decision.action.action_token_ids == (20, 2)
     assert root_return_decision.action.behavior_logprobs == (-0.2, -0.1)
+    trace.rewards = {"evidence": 1.0}
+    trace.info = {"checkpoint_id": "model@commit"}
+    trace.agent = vf.AgentInfo(
+        model="model@commit",
+        sampling=sampling,
+    )
+    trace.is_completed = True
+    trace.ok = True
+    trace.stop_condition = "max_total_tokens"
+    trace.errors = []
+    episode = vf.Episode(
+        id="two-turn-child-real-trace",
+        env="redco_evidence_selection_v2",
+        ok=True,
+        errors=[],
+        traces=[trace],
+    )
+    episode_bytes = _canonical_source_episode(episode)
+    persisted_trace = json.loads(episode_bytes)["traces"][0]
+    assert len(persisted_trace["calls"]) == 6
+    assert all(
+        set(call["sampling"])
+        == {
+            "temperature",
+            "top_p",
+            "reasoning_effort",
+            "min_p",
+            "repetition_penalty",
+            "frequency_penalty",
+            "presence_penalty",
+            "seed",
+            "max_tokens",
+            "n",
+            "tool_choice",
+            "parallel_tool_calls",
+        }
+        for call in persisted_trace["calls"]
+    )
+    capped_calls = [
+        call
+        for call in persisted_trace["calls"]
+        if call["sampling"]["max_tokens"] == 768
+    ]
+    assert len(capped_calls) == 1
+    assert capped_calls[0]["rlm"]["invocation_id"] == "midpoint-shard-0"
+    assert {call["rlm"]["depth"] for call in persisted_trace["calls"]} == {0, 1}
+    assert len({call["node"] for call in persisted_trace["calls"]}) == 6
+    assert len(persisted_trace["nodes"]) >= 6
+    deployed_parent_ids = {
+        call["rlm"]["parent_tool_call_id"]
+        for call in persisted_trace["calls"]
+        if call["rlm"]["depth"] == 1
+    }
+    assert deployed_parent_ids == {
+        actual_parent_ids["root_turn_0"],
+        actual_parent_ids["child_turn_0"],
+        actual_parent_ids["root_turn_1"],
+    }
+    assert all(
+        not str(parent_id).startswith("transport-call-")
+        for parent_id in deployed_parent_ids
+    )
     source = producer.finalize_episode(episode_bytes)
     assert source.branch_eligible is False
     assert len(source.child_target_roster) == 3

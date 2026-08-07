@@ -5,10 +5,11 @@ import io
 import json
 import shutil
 import zipfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from test_stage_d_evaluation_ledger import _finish_task as _finish_evaluation_task
@@ -90,8 +91,13 @@ from redco.analysis.stage_d_source_artifacts import (
     StageDSourceArtifactStore,
 )
 from redco.analysis.stage_d_source_producer import (
+    SAMPLING_CONTRACT,
+    SAMPLING_CONTRACT_BYTES,
+    SAMPLING_CONTRACT_SHA256,
+    SAMPLING_CONTRACT_VERSION,
     StageDSourceRolloutProducer,
     _normalize_openai_tools,
+    _verify_trace_sampling,
     _verify_two_slot_scaffold,
     derive_source_trace,
     structural_child_target_id,
@@ -177,7 +183,7 @@ def test_two_slot_scaffold_allows_extra_contiguous_returning_root_turns() -> Non
         )
         for slot in range(2)
     )
-    nodes = (
+    nodes: tuple[dict[str, object], ...] = (
         {
             "message": {
                 "tool_calls": [
@@ -253,7 +259,9 @@ def _collection_plan(count: int) -> StageDCollectionPlan:
     return StageDCollectionPlan.build(data, master_seed=MASTER_SEED)
 
 
-def _collection_evidence(sources):
+def _collection_evidence(
+    sources: Sequence[SourceRollout],
+) -> tuple[StageDCollectionPlan, bytes]:
     plan = _collection_plan(len(sources))
     data = [slot.to_payload() for slot in plan.slots]
     episodes = [
@@ -269,6 +277,15 @@ def _collection_evidence(sources):
         for source, payload in zip(sources, data, strict=True)
     ]
     return plan, verify_collection_outcomes(plan, episodes, sources)
+
+
+def _forward_action(
+    value: BehaviorAction,
+) -> Callable[[ExactActionKey], BehaviorAction]:
+    def forward(_key: ExactActionKey) -> BehaviorAction:
+        return value
+
+    return forward
 
 
 def _sha256(value: bytes) -> str:
@@ -431,10 +448,15 @@ def _call(
             "temperature": 0.7,
             "top_p": 1.0,
             "reasoning_effort": None,
-            "max_tokens": 2,
-            "parallel_tool_calls": False,
+            "min_p": 0.0,
+            "repetition_penalty": 1.0,
+            "frequency_penalty": 0.0,
+            "presence_penalty": 0.0,
             "seed": seed,
+            "max_tokens": 2,
+            "n": 1,
             "tool_choice": "auto",
+            "parallel_tool_calls": False,
         },
         "time": {"start": 1.0, "end": 2.0},
         "usage": {
@@ -445,6 +467,153 @@ def _call(
             "cost": None,
         },
     }
+
+
+SAMPLING_CONTRACT_FIELDS = tuple(
+    field["name"]
+    for field in cast(list[dict[str, str]], SAMPLING_CONTRACT["fields"])
+)
+
+
+def _sampling_for_action(action: BehaviorAction) -> dict[str, object]:
+    sampler = action.key.sampler
+    request = json.loads(action.key.request)
+    return {
+        "temperature": sampler.temperature,
+        "top_p": sampler.top_p,
+        "reasoning_effort": None,
+        "min_p": sampler.min_p,
+        "repetition_penalty": sampler.repetition_penalty,
+        "frequency_penalty": sampler.frequency_penalty,
+        "presence_penalty": sampler.presence_penalty,
+        "seed": sampler.seed,
+        "max_tokens": sampler.max_tokens,
+        "n": sampler.n,
+        "tool_choice": sampler.tool_choice,
+        "parallel_tool_calls": request["parallel_tool_calls"],
+    }
+
+
+def test_pinned_sampling_contract_is_lossless_and_canonical() -> None:
+    assert SAMPLING_CONTRACT_VERSION == "redco-stage-d-per-call-sampling-v2"
+    assert SAMPLING_CONTRACT_SHA256 == (
+        "819222244a81565a67331826be3dd362e14e1481043d60fccb569551a4471f6d"
+    )
+    assert SAMPLING_CONTRACT_SHA256 != (
+        "d49944ca82e89d83f8a2f001a25d508b7477eb8e88ce83a1f2ed0d6907cc26f3"
+    )
+    assert SAMPLING_CONTRACT_FIELDS == (
+        "temperature",
+        "top_p",
+        "reasoning_effort",
+        "min_p",
+        "repetition_penalty",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed",
+        "max_tokens",
+        "n",
+        "tool_choice",
+        "parallel_tool_calls",
+    )
+    assert canonical_json(SAMPLING_CONTRACT) == SAMPLING_CONTRACT_BYTES
+    assert _sha256(SAMPLING_CONTRACT_BYTES) == SAMPLING_CONTRACT_SHA256
+
+
+@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
+    "mutation",
+    [
+        *(f"missing:{name}" for name in SAMPLING_CONTRACT_FIELDS),
+        *(f"wrong-type:{name}" for name in SAMPLING_CONTRACT_FIELDS),
+        *(f"wrong-value:{name}" for name in SAMPLING_CONTRACT_FIELDS),
+        "extra:top_k",
+        "extra:stop",
+        "extra:ignore_eos",
+        "extra:min_tokens",
+        "retired-15",
+        "old-seven",
+        "unknown-null",
+        "reasoning-absent",
+        "reasoning-non-null",
+        "reasoning-wrong-type",
+        "alias:temperature",
+        "alias:top_p",
+        "alias:min_p",
+        "alias:repetition_penalty",
+        "alias:frequency_penalty",
+        "alias:presence_penalty",
+        "alias:seed",
+        "alias:max_tokens",
+        "alias:n",
+        "alias:parallel_tool_calls",
+    ],
+)
+def test_sampling_mutations_fail_at_production_owner(mutation: str) -> None:
+    action = _action(71)
+    request = json.loads(action.key.request)
+    sampling = _sampling_for_action(action)
+    prefix, _, field = mutation.partition(":")
+    if prefix == "missing":
+        del sampling[field]
+    elif prefix == "wrong-type":
+        sampling[field] = {
+            "reasoning_effort": "low",
+            "seed": True,
+            "max_tokens": True,
+            "n": True,
+            "parallel_tool_calls": 1,
+        }.get(field, "wrong-type")
+    elif prefix == "wrong-value":
+        sampling[field] = {
+            "temperature": 0.8,
+            "top_p": 0.9,
+            "reasoning_effort": "low",
+            "min_p": 0.1,
+            "repetition_penalty": 1.1,
+            "frequency_penalty": 0.1,
+            "presence_penalty": 0.1,
+            "seed": 72,
+            "max_tokens": 3,
+            "n": 2,
+            "tool_choice": "required",
+            "parallel_tool_calls": True,
+        }[field]
+    elif prefix == "extra":
+        sampling[field] = None
+    elif mutation == "retired-15":
+        del sampling["reasoning_effort"]
+        sampling.update(
+            {"top_k": None, "stop": None, "ignore_eos": False, "min_tokens": 0}
+        )
+    elif mutation == "old-seven":
+        sampling = {
+            "temperature": sampling["temperature"],
+            "top_p": sampling["top_p"],
+            "min_p": sampling["min_p"],
+            "seed": sampling["seed"],
+            "max_tokens": sampling["max_tokens"],
+            "parallel_tool_calls": sampling["parallel_tool_calls"],
+            "tool_choice": sampling["tool_choice"],
+        }
+    elif mutation == "unknown-null":
+        sampling["unknown"] = None
+    elif mutation == "reasoning-absent":
+        del sampling["reasoning_effort"]
+    elif mutation == "reasoning-non-null":
+        sampling["reasoning_effort"] = "low"
+    elif mutation == "reasoning-wrong-type":
+        sampling["reasoning_effort"] = 0
+    elif prefix == "alias":
+        sampling[field] = {
+            "parallel_tool_calls": 1,
+            "seed": True,
+            "max_tokens": True,
+            "n": True,
+        }.get(field, True)
+    else:
+        raise AssertionError(f"unhandled mutation {mutation}")
+    with pytest.raises(ValueError, match="captured sampler"):
+        _verify_trace_sampling(sampling, action=action, request=request)
 
 
 def _node(
@@ -490,12 +659,14 @@ def test_tool_definitions_normalize_without_weakening_the_contract() -> None:
         {"type": "function", "function": {**compact, "strict": True}}
     ]
 
-    for malformed in (
+    malformed_cases: tuple[list[dict[str, object]], ...] = (
         [{**compact, "strict": "yes"}],
         [{"type": "custom", "function": compact}],
         [{"type": "function", "function": {**compact, "name": "shell"}}],
-    ):
-        if malformed[-1].get("function", {}).get("name") == "shell":
+    )
+    for malformed in malformed_cases:
+        function = cast(dict[str, object], malformed[-1]["function"])
+        if function.get("name") == "shell":
             assert _normalize_openai_tools(malformed) != expected
         else:
             with pytest.raises(ValueError, match=r"schema|boolean or null"):
@@ -599,19 +770,22 @@ def _episode(
         "errors": [],
         "timing": {},
     }
-    return canonical_json(
-        {
-            "id": "episode-1",
-            "env": "redco-evidence-selection-v2",
-            "ok": True,
-            "errors": [],
-            "traces": [trace],
-        }
+    return cast(
+        bytes,
+        canonical_json(
+            {
+                "id": "episode-1",
+                "env": "redco-evidence-selection-v2",
+                "ok": True,
+                "errors": [],
+                "traces": [trace],
+            }
+        ),
     )
 
 
 def _tool_action(seed: int) -> BehaviorAction:
-    message = {
+    message: dict[str, object] = {
         "role": "assistant",
         "content": None,
         "tool_calls": [
@@ -812,14 +986,17 @@ def _strict_episode() -> bytes:
         parent_tool_call_slot=0,
         spawn_ordinal=1,
     )
-    return canonical_json(
-        {
-            "id": "episode-strict",
-            "env": "redco-evidence-selection-v2",
-            "ok": True,
-            "errors": [],
-            "traces": [trace],
-        }
+    return cast(
+        bytes,
+        canonical_json(
+            {
+                "id": "episode-strict",
+                "env": "redco-evidence-selection-v2",
+                "ok": True,
+                "errors": [],
+                "traces": [trace],
+            }
+        ),
     )
 
 
@@ -837,7 +1014,7 @@ def _one_child_episode() -> bytes:
     kept_calls[-1]["rlm"]["completed_episode_spawn_ordinals"] = [0]
     trace["nodes"] = kept_nodes
     trace["calls"] = kept_calls
-    return canonical_json(episode)
+    return cast(bytes, canonical_json(episode))
 
 
 def _two_turn_child_episode() -> bytes:
@@ -934,7 +1111,7 @@ def _two_turn_child_episode() -> bytes:
             },
         )
     )
-    return canonical_json(episode)
+    return cast(bytes, canonical_json(episode))
 
 
 def _later_child_only_episode() -> bytes:
@@ -954,7 +1131,7 @@ def _later_child_only_episode() -> bytes:
     later_rlm["completed_episode_spawn_ordinals"] = []
     trace["nodes"] = kept_nodes
     trace["calls"] = kept_calls
-    return canonical_json(episode)
+    return cast(bytes, canonical_json(episode))
 
 
 def _produce(root: Path) -> tuple[SourceRollout, StageDReceiptLedger]:
@@ -1192,7 +1369,7 @@ def _run_live_artifact(
         )
         if writer.branch_target_roster_sha256 is not None:
             writer.seal_reconstruction_qa_barrier()
-        return receipt
+        return cast(bytes, receipt)
 
     def sample(
         *,
@@ -1274,18 +1451,21 @@ def _run_live_artifact(
             response_sha256=response,
         )
         score = writer.put_evidence(f"score:{arm_id}".encode())
-        return writer.finish_execution(
-            attempt,
-            outcome_kind=OutcomeKind.SUCCESS,
-            scored_reward=1.0 if arm_id == "arm-0" else 0.0,
-            scorer_evidence_sha256=score,
-            latency_seconds=0.01,
-            dollars=0.0,
-            judge_calls=0,
-            cpu_seconds=0.01,
-            gpu_seconds=0.0,
-            wall_seconds=0.01,
-            storage_bytes=0,
+        return cast(
+            bytes,
+            writer.finish_execution(
+                attempt,
+                outcome_kind=OutcomeKind.SUCCESS,
+                scored_reward=1.0 if arm_id == "arm-0" else 0.0,
+                scorer_evidence_sha256=score,
+                latency_seconds=0.01,
+                dollars=0.0,
+                judge_calls=0,
+                cpu_seconds=0.01,
+                gpu_seconds=0.0,
+                wall_seconds=0.01,
+                storage_bytes=0,
+            ),
         )
 
     artifact = run_scientific_branch_group(
@@ -1295,7 +1475,7 @@ def _run_live_artifact(
         run_reconstruction_qa=qa,
         execute_arm=execute,
     )
-    value = artifact.to_bytes()
+    value = cast(bytes, artifact.to_bytes())
     digest = writer.put_evidence(value)
     writer.record_branch_group_artifact_completed(
         group_id=spec.commitment.group_id,
@@ -1393,7 +1573,7 @@ def test_live_source_is_derived_from_intercepted_calls_and_trace(tmp_path: Path)
     assert restored == source
 
 
-@pytest.mark.parametrize(
+@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
     "mutation",
     ["reward", "prompt", "mask", "call-node", "node-transport"],
 )
@@ -1573,7 +1753,7 @@ def test_ineligible_max_token_source_strictly_reloads_after_restart(
         branch_selected=False,
         forward_once=lambda _key: root,
     )
-    child_message = {"role": "assistant", "content": "truncated"}
+    child_message: dict[str, object] = {"role": "assistant", "content": "truncated"}
     for ordinal, seed in ((0, 82), (1, 83)):
         child = _prepared_action(
             seed,
@@ -1601,7 +1781,7 @@ def test_ineligible_max_token_source_strictly_reloads_after_restart(
             node_kind="child",
             target_id=target_id,
             branch_selected=False,
-            forward_once=lambda _key, value=child: value,
+            forward_once=_forward_action(child),
         )
     returning_root = _prepared_action(84)
     producer.intercept_policy_call(
@@ -1943,7 +2123,7 @@ def test_later_parent_child_without_frozen_children_finalizes_ineligible(
             node_kind="root",
             target_id=None,
             branch_selected=False,
-            forward_once=lambda _key, value=action: value,
+            forward_once=_forward_action(action),
         )
     later_parent = PolicyEventAddress(0, "root", 1, 1)
     later_target = structural_child_target_id(
@@ -2246,7 +2426,9 @@ def test_trainer_gate_accepts_only_the_exact_ledger_authorized_batch(
         )
 
 
-@pytest.mark.parametrize("crash_after", [None, "stock", "branch-global", "local"])
+@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
+    "crash_after", [None, "stock", "branch-global", "local"]
+)
 def test_campaign_transaction_reconstructs_after_single_terminal_seal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -8,10 +8,12 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import tarfile
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 from redco.contracts import canonical_json
 
@@ -53,6 +55,80 @@ _PROGRAMS = (
     "reporter",
 )
 
+# The prepared-observer patches remain the historical request/trace seam.  The
+# await ownership hooks are deliberately applied last, after every downstream
+# renderer/verifier patch that touches the same call sites.
+_LIVE_OWNER_COMPONENTS = (
+    (
+        "renderers",
+        "bdb96b0c84a307e2b71c6a366c9d718c3ac7fe78",
+        (
+            "renderers-stage-d-prepared-observer-v1.patch",
+            "renderers-stage-d-replay-directives-v1.patch",
+            "renderers-stage-d-watchdog-owner-v1.patch",
+        ),
+        "bd43d515c12dcaa1e1c0279941a1397d4ffba31a1557d6d7342a1322b195fcc4",
+    ),
+    (
+        "verifiers",
+        "b13ba60da63cea91389e7575766b7270d0d11fc5",
+        (
+            "verifiers-stage-d-provenance-baseline-v1.patch",
+            "verifiers-stage-d-prepared-observer-v1.patch",
+            "verifiers-stage-d-replay-directives-v1.patch",
+            "verifiers-stage-d-sampling-director-v1.patch",
+            "verifiers-stage-d-isolated-docker-v1.patch",
+            "verifiers-stage-d-pre-generation-preflight-v1.patch",
+            "verifiers-stage-d-patched-rlm-archive-v1.patch",
+            "verifiers-stage-d-frozen-rlm-install-v1.patch",
+            "verifiers-stage-d-observer-failfast-v1.patch",
+            "verifiers-stage-d-watchdog-owner-v1.patch",
+        ),
+        "9dcf9e98dea73c2487d2165cd6cae35dc61fb66e00d377d85d5466886b3ea4e0",
+    ),
+)
+_LIVE_OWNER_PATCH_SHA256S = {
+    "renderers-stage-d-prepared-observer-v1.patch": (
+        "1f10cff27b6097a70474926f916129948d1c176c1c8f12692c6e5498eb06163c"
+    ),
+    "renderers-stage-d-replay-directives-v1.patch": (
+        "ce0c2fa4112a3fd8aafb7c3bf4aa18807e1f558d08a4b8a814272e2f100e73b6"
+    ),
+    "renderers-stage-d-watchdog-owner-v1.patch": (
+        "3f3f3a30462a1cd81195a4dac60ffd5c845865b58e960028d32fa00ac59cea38"
+    ),
+    "verifiers-stage-d-provenance-baseline-v1.patch": (
+        "2b9eeb758f7bdf3726763b9923eb6b3a83d89be9caa9804119a7c31465cb6c64"
+    ),
+    "verifiers-stage-d-prepared-observer-v1.patch": (
+        "10292432e3324f8b086e352e56f516223e2cb733bcddafc4b43d385d33d0517f"
+    ),
+    "verifiers-stage-d-replay-directives-v1.patch": (
+        "8b76b8638cb3d4435b240de67eccda8bce17c33a8f312b258623d5359985a714"
+    ),
+    "verifiers-stage-d-sampling-director-v1.patch": (
+        "6a21db821d1f52647e284813ff71d4177be79ac5538b9ed3ce31d47b2af87ddb"
+    ),
+    "verifiers-stage-d-isolated-docker-v1.patch": (
+        "c69961c89bd50b6597515ede4e28d68a5331574a477057328fa5c7455b231d83"
+    ),
+    "verifiers-stage-d-pre-generation-preflight-v1.patch": (
+        "767708a04b360f4ec34377c195d029a3e4461e118898aa6e09487e80db931017"
+    ),
+    "verifiers-stage-d-patched-rlm-archive-v1.patch": (
+        "c76f332c48e4a65a0524f15174c89825cfb636527e1f179be31fadc9e0997535"
+    ),
+    "verifiers-stage-d-frozen-rlm-install-v1.patch": (
+        "136cc89de669acf50145cbe486520f0290da084516deca6a43c2dfbaeb679fa3"
+    ),
+    "verifiers-stage-d-observer-failfast-v1.patch": (
+        "63c19112c1cdaf142339b95d8891fd384867cbc7dd7a23d9f7cd7c9055d4acb4"
+    ),
+    "verifiers-stage-d-watchdog-owner-v1.patch": (
+        "3c7977d0d0f2781fc96bfec0154e4c86a40df64b163d2e63fbed5d4381ae1c19"
+    ),
+}
+
 # These are the only Verifiers component bindings already frozen before the
 # fail-fast patch existed. Binding the exception to their complete canonical
 # payload prevents a newly authored manifest from silently selecting the old
@@ -79,6 +155,127 @@ def _require_sha256(value: object, name: str) -> str:
     return value
 
 
+def _git_run(repository: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repository), *args],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+
+
+def _reconstruct_live_owner_tree_sha256(
+    root: Path,
+    *,
+    name: str,
+    base_commit: str,
+    patch_names: tuple[str, ...],
+) -> str:
+    """Rebuild one clean pinned dependency stack and hash its canonical tree."""
+
+    root = root.resolve()
+    source = root / "external" / "prime-rl" / "deps" / name
+    if not (source / ".git").exists():
+        raise ValueError(f"pinned dependency checkout is absent: {source}")
+    with tempfile.TemporaryDirectory(prefix=f"redco-{name}-stack-") as temporary:
+        target = Path(temporary) / name
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--no-hardlinks",
+                "--no-checkout",
+                str(source),
+                str(target),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        _git_run(target, "checkout", "--detach", base_commit)
+        for patch_name in patch_names:
+            patch = root / "patches" / patch_name
+            subprocess.run(
+                ["git", "apply", "--check", str(patch)],
+                cwd=target,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                ["git", "apply", str(patch)],
+                cwd=target,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+        return _sha256(canonical_tree_manifest_bytes(target))
+
+
+def _git_tracked_modes(root: Path) -> dict[str, str]:
+    """Read executable bits from Git so manifests do not depend on host modes."""
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--stage", "-z"],
+            check=True,
+            capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return {}
+    modes: dict[str, str] = {}
+    for record in result.stdout.split(b"\0"):
+        if not record:
+            continue
+        metadata, relative_bytes = record.split(b"\t", 1)
+        mode = metadata.split(b" ", 1)[0]
+        relative = relative_bytes.decode("utf-8")
+        if mode == b"100755":
+            modes[relative] = "0755"
+        elif mode == b"100644":
+            modes[relative] = "0644"
+    return modes
+
+
+def live_owner_dependency_payload(root: Path) -> dict[str, Any]:
+    """Authenticate the final composable renderer/verifier owner patches."""
+
+    root = root.resolve()
+    components: list[dict[str, Any]] = []
+    for name, base_commit, patch_names, post_tree_sha256 in _LIVE_OWNER_COMPONENTS:
+        patches: list[dict[str, str]] = []
+        for patch_name in patch_names:
+            path = root / "patches" / patch_name
+            if not path.is_file() or path.is_symlink():
+                raise ValueError(f"missing live owner patch: {patch_name}")
+            actual = _sha256(path.read_bytes())
+            expected = _LIVE_OWNER_PATCH_SHA256S[patch_name]
+            if actual != expected:
+                raise ValueError(f"live owner patch changed: {patch_name}")
+            patches.append({"name": patch_name, "sha256": actual})
+        reconstructed = _reconstruct_live_owner_tree_sha256(
+            root,
+            name=name,
+            base_commit=base_commit,
+            patch_names=patch_names,
+        )
+        if reconstructed != post_tree_sha256:
+            raise ValueError(f"live owner post-tree hash changed: {name}")
+        components.append(
+            {
+                "base_commit": base_commit,
+                "name": name,
+                "patches": patches,
+                "post_tree_sha256": post_tree_sha256,
+            }
+        )
+    return {
+        "schema_version": 1,
+        "domain": "redco-stage-d-live-owner-stack-v1",
+        "components": components,
+    }
+
+
 def _require_git_commit(value: object, name: str) -> str:
     if (
         not isinstance(value, str)
@@ -98,20 +295,21 @@ def canonical_tree_manifest_bytes(
     if not root.is_dir() or root.is_symlink():
         raise ValueError("dependency tree root must be a regular directory")
     normalized_exclusions: list[str] = []
-    for value in excluded_roots:
-        path = PurePosixPath(value)
+    for exclusion in excluded_roots:
+        excluded_path = PurePosixPath(exclusion)
         if (
-            not value
-            or path.is_absolute()
-            or "." in path.parts
-            or ".." in path.parts
-            or "\\" in value
-            or path.as_posix() != value
+            not exclusion
+            or excluded_path.is_absolute()
+            or "." in excluded_path.parts
+            or ".." in excluded_path.parts
+            or "\\" in exclusion
+            or excluded_path.as_posix() != exclusion
         ):
             raise ValueError("dependency exclusion root is unsafe")
-        normalized_exclusions.append(value)
+        normalized_exclusions.append(exclusion)
     if len(normalized_exclusions) != len(set(normalized_exclusions)):
         raise ValueError("dependency exclusion roots must be unique")
+    tracked_modes = _git_tracked_modes(root)
     entries: list[dict[str, object]] = []
     for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
         relative = path.relative_to(root).as_posix()
@@ -144,24 +342,30 @@ def canonical_tree_manifest_bytes(
             raise ValueError("dependency tree contains a special member")
         if path.is_dir():
             continue
-        value = path.read_bytes()
+        raw = path.read_bytes()
         entries.append(
             {
                 "path": relative,
                 "type": "file",
-                "mode": "0755" if path.stat().st_mode & 0o111 else "0644",
-                "size": len(value),
-                "sha256": _sha256(value),
+                "mode": tracked_modes.get(
+                    relative,
+                    "0755" if path.stat().st_mode & 0o111 else "0644",
+                ),
+                "size": len(raw),
+                "sha256": _sha256(raw),
             }
         )
     if not entries:
         raise ValueError("dependency tree contains no regular files")
-    return canonical_json(
-        {
-            "schema_version": 1,
-            "domain": "redco-stage-d-canonical-tree-v1",
-            "entries": entries,
-        }
+    return cast(
+        bytes,
+        canonical_json(
+            {
+                "schema_version": 1,
+                "domain": "redco-stage-d-canonical-tree-v1",
+                "entries": entries,
+            }
+        ),
     )
 
 
@@ -363,23 +567,25 @@ class StageDDependencyStackManifest:
         return _sha256(self.to_bytes())
 
     def to_bytes(self) -> bytes:
-        return canonical_json(
-            {
-                "schema_version": 1,
-                "domain": _DOMAIN,
-                "redco_commit": self.redco_commit,
-                "redco_tree_sha256": self.redco_tree_sha256,
-                "components": [component.to_payload() for component in self.components],
-                "rlm_archive_sha256": self.rlm_archive_sha256,
-                "rlm_uv_binary_sha256": self.rlm_uv_binary_sha256,
-                "rlm_uv_cache_archive_sha256": self.rlm_uv_cache_archive_sha256,
-                "rlm_executable_sha256": self.rlm_executable_sha256,
-                "uv_lock_sha256": self.uv_lock_sha256,
-                "container_image": self.container_image,
-                "runtime_manifest_sha256": self.runtime_manifest_sha256,
-                "imported_modules": [item.to_payload() for item in self.imported_modules],
-                "program_sha256s": dict(self.program_sha256s),
-            }
+        return cast(
+            bytes,
+            canonical_json(
+                {
+                    "schema_version": 1,
+                    "domain": _DOMAIN,
+                    "redco_commit": self.redco_commit,
+                    "redco_tree_sha256": self.redco_tree_sha256,
+                    "components": [component.to_payload() for component in self.components],
+                    "rlm_archive_sha256": self.rlm_archive_sha256,
+                    "rlm_uv_binary_sha256": self.rlm_uv_binary_sha256,
+                    "rlm_executable_sha256": self.rlm_executable_sha256,
+                    "uv_lock_sha256": self.uv_lock_sha256,
+                    "container_image": self.container_image,
+                    "runtime_manifest_sha256": self.runtime_manifest_sha256,
+                    "imported_modules": [item.to_payload() for item in self.imported_modules],
+                    "program_sha256s": dict(self.program_sha256s),
+                }
+            ),
         )
 
     @classmethod
@@ -445,6 +651,7 @@ __all__ = [
     "PatchBinding",
     "StageDDependencyStackManifest",
     "canonical_tree_manifest_bytes",
+    "live_owner_dependency_payload",
     "write_canonical_tree_tar",
     "write_canonical_tree_tar_gzip",
 ]

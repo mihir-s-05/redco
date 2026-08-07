@@ -79,6 +79,109 @@ def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+SAMPLING_CONTRACT_VERSION = "redco-stage-d-per-call-sampling-v2"
+_SAMPLING_CONTRACT_FIELDS = (
+    "temperature",
+    "top_p",
+    "reasoning_effort",
+    "min_p",
+    "repetition_penalty",
+    "frequency_penalty",
+    "presence_penalty",
+    "seed",
+    "max_tokens",
+    "n",
+    "tool_choice",
+    "parallel_tool_calls",
+)
+_SAMPLING_CONTRACT_TYPES: dict[str, str] = {
+    "temperature": "float",
+    "top_p": "float",
+    "reasoning_effort": "null",
+    "min_p": "float",
+    "repetition_penalty": "float",
+    "frequency_penalty": "float",
+    "presence_penalty": "float",
+    "seed": "integer",
+    "max_tokens": "integer",
+    "n": "integer",
+    "tool_choice": "string",
+    "parallel_tool_calls": "boolean",
+}
+_SAMPLING_CONTRACT_SOURCES: dict[str, str] = {
+    **{
+        name: f"action.key.sampler.{name}"
+        for name in _SAMPLING_CONTRACT_FIELDS
+        if name not in {"reasoning_effort", "parallel_tool_calls"}
+    },
+    "reasoning_effort": "serializer.default(None)",
+    "parallel_tool_calls": "exact_transport_request.parallel_tool_calls",
+}
+SAMPLING_CONTRACT = {
+    "schema_version": 2,
+    "domain": SAMPLING_CONTRACT_VERSION,
+    "fields": [
+        {
+            "name": name,
+            "json_type": _SAMPLING_CONTRACT_TYPES[name],
+            "required": True,
+            "expected_value_source": _SAMPLING_CONTRACT_SOURCES[name],
+        }
+        for name in _SAMPLING_CONTRACT_FIELDS
+    ],
+}
+SAMPLING_CONTRACT_BYTES = canonical_json(SAMPLING_CONTRACT)
+SAMPLING_CONTRACT_SHA256 = _sha256(SAMPLING_CONTRACT_BYTES)
+
+
+def _verify_trace_sampling(
+    sampling: object,
+    *,
+    action: BehaviorAction,
+    request: Mapping[str, Any],
+) -> None:
+    """Authenticate the exact lossless 12-field persisted Sampling projection."""
+    if type(sampling) is not dict or set(sampling) != set(_SAMPLING_CONTRACT_FIELDS):
+        raise ValueError("captured sampler differs from the pinned 12-field schema")
+    sampler = action.key.sampler
+    expected: dict[str, object] = {
+        "temperature": sampler.temperature,
+        "top_p": sampler.top_p,
+        "reasoning_effort": None,
+        "min_p": sampler.min_p,
+        "repetition_penalty": sampler.repetition_penalty,
+        "frequency_penalty": sampler.frequency_penalty,
+        "presence_penalty": sampler.presence_penalty,
+        "seed": sampler.seed,
+        "max_tokens": sampler.max_tokens,
+        "n": sampler.n,
+        "tool_choice": sampler.tool_choice,
+        "parallel_tool_calls": request["parallel_tool_calls"],
+    }
+    exact_types: dict[str, type[object]] = {
+        "temperature": float,
+        "top_p": float,
+        "reasoning_effort": type(None),
+        "min_p": float,
+        "repetition_penalty": float,
+        "frequency_penalty": float,
+        "presence_penalty": float,
+        "seed": int,
+        "max_tokens": int,
+        "n": int,
+        "tool_choice": str,
+        "parallel_tool_calls": bool,
+    }
+    if sampling["reasoning_effort"] is not None:
+        raise ValueError("captured sampler reasoning_effort must be the serializer default")
+    for name in _SAMPLING_CONTRACT_FIELDS:
+        actual = sampling[name]
+        if type(actual) is not exact_types[name]:
+            raise ValueError(f"captured sampler field {name} has the wrong JSON type")
+        if actual != expected[name]:
+            raise ValueError(f"captured sampler field {name} differs from the exact request")
+
+
 def structural_child_target_id(
     parent_event: PolicyEventAddress,
     *,
@@ -1046,20 +1149,7 @@ def _verify_trace_call(
     if checkpoint_claims and checkpoint_claims != {action.key.checkpoint_id}:
         raise ValueError("trace checkpoint claims differ from the exact action key")
     sampling = call.get("sampling")
-    if not isinstance(sampling, dict):
-        raise ValueError("source trace call lacks sampling configuration")
-    sampler = action.key.sampler
-    expected_sampling = {
-        "temperature": sampler.temperature,
-        "top_p": sampler.top_p,
-        "reasoning_effort": None,
-        "max_tokens": sampler.max_tokens,
-        "parallel_tool_calls": False,
-        "seed": sampler.seed,
-        "tool_choice": sampler.tool_choice,
-    }
-    if sampling != expected_sampling:
-        raise ValueError("captured sampler differs from the Verifiers call")
+    _verify_trace_sampling(sampling, action=action, request=request)
     usage = call.get("usage")
     if not isinstance(usage, dict) or usage != {
         "prompt_tokens": action.prompt_tokens,

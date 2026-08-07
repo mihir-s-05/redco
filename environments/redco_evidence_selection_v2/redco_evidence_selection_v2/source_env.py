@@ -8,11 +8,12 @@ import json
 import os
 import traceback
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import verifiers.v1 as vf
 from pydantic import model_validator
 
+from redco.analysis.stage_d_action_closure import ActionClosureWatchdog
 from redco.analysis.stage_d_collection import (
     derive_scientific_group_id,
     derive_source_episode_seed_and_salt,
@@ -72,19 +73,28 @@ def _canonical_source_episode(episode: vf.Episode) -> bytes:
         payload_trace["nodes"] = [
             node.model_dump(mode="json", exclude_none=True) for node in trace.nodes
         ]
-    return canonical_json(payload)
+    return cast(bytes, canonical_json(payload))
 
 
-class StageDSourceData(EvidenceSelectionData):
+class StageDSourceData(EvidenceSelectionData):  # type: ignore[misc]
     scientific_group_id: str
     rollout_slot: int
 
 
-class StageDSourceTask(vf.Task[StageDSourceData]):
+class StageDSourceTask(vf.Task[StageDSourceData]):  # type: ignore[misc]
     NEEDS_CONTAINER = False
+
+    def __init__(self, data: StageDSourceData, config: Any = None) -> None:
+        super().__init__(data, config)
+        self._stage_d_watchdog: ActionClosureWatchdog | None = None
+
+    def bind_stage_d_watchdog(self, watchdog: ActionClosureWatchdog) -> None:
+        self._stage_d_watchdog = watchdog
 
     async def setup(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
         del trace
+        if self._stage_d_watchdog is not None:
+            self._stage_d_watchdog.bind_runtime(runtime)
         if self.data.network_allow == []:
             await prepare_isolated_workspace(runtime, self.data.paper.encode("utf-8"))
         else:
@@ -100,67 +110,80 @@ class StageDSourceTask(vf.Task[StageDSourceData]):
         trace.info["stage_d_isolated_runtime_preflight"] = json.loads(report)
 
     def _score(self, trace: vf.Trace) -> dict[str, float]:
-        return score_evidence_reply(
-            self.data.paper,
-            trace.last_reply,
-            self.data.reference_evidence,
+        return cast(
+            dict[str, float],
+            score_evidence_reply(
+                self.data.paper,
+                trace.last_reply,
+                self.data.reference_evidence,
+            ),
         )
 
-    @vf.reward
+    @vf.reward  # type: ignore[untyped-decorator]
     async def exact_span_f1(self, trace: vf.Trace) -> float:
         return self._score(trace)["f1"]
 
-    @vf.metric
+    @vf.metric  # type: ignore[untyped-decorator]
     async def evidence_precision(self, trace: vf.Trace) -> float:
         return self._score(trace)["precision"]
 
-    @vf.metric
+    @vf.metric  # type: ignore[untyped-decorator]
     async def evidence_recall(self, trace: vf.Trace) -> float:
         return self._score(trace)["recall"]
 
-    @vf.metric
+    @vf.metric  # type: ignore[untyped-decorator]
     async def evidence_parseable(self, trace: vf.Trace) -> float:
         return self._score(trace)["parseable"]
 
-    @vf.metric
+    @vf.metric  # type: ignore[untyped-decorator]
     async def all_predicted_spans_verbatim(self, trace: vf.Trace) -> float:
         return self._score(trace)["all_predicted_spans_verbatim"]
 
-    @vf.metric
+    @vf.metric  # type: ignore[untyped-decorator]
     async def predicted_characters(self, trace: vf.Trace) -> float:
         return self._score(trace)["predicted_characters"]
 
-    @vf.metric
+    @vf.metric  # type: ignore[untyped-decorator]
     async def predicted_span_count(self, trace: vf.Trace) -> float:
         return self._score(trace)["predicted_span_count"]
 
     async def finalize(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
-        del runtime
-        score = self._score(trace)
-        trace.info["evidence_selection"] = {
-            "example_id": self.data.example_id,
-            "paper_id": self.data.paper_id,
-            "split": self.data.split,
-            "answer_type": self.data.answer_type,
-            "snapshot_sha256": self.data.snapshot_sha256,
-            "score": score,
-        }
-        trace.info["checkpoint_id"] = self.data.policy_checkpoint_id
+        try:
+            score = self._score(trace)
+            trace.info["evidence_selection"] = {
+                "example_id": self.data.example_id,
+                "paper_id": self.data.paper_id,
+                "split": self.data.split,
+                "answer_type": self.data.answer_type,
+                "snapshot_sha256": self.data.snapshot_sha256,
+                "score": score,
+            }
+            trace.info["checkpoint_id"] = self.data.policy_checkpoint_id
+        finally:
+            if self._stage_d_watchdog is not None:
+                self._stage_d_watchdog.release_runtime(runtime)
 
 
-class StageDSourceTasksetConfig(EvidenceSelectionConfig):
+class StageDSourceTasksetConfig(EvidenceSelectionConfig):  # type: ignore[misc]
     scientific_group_namespace: str
     rollouts_per_task: int
 
-    @model_validator(mode="after")
+    @model_validator(mode="after")  # type: ignore[untyped-decorator]
     def validate_source_roster(self) -> StageDSourceTasksetConfig:
         if self.rollouts_per_task < 1:
             raise ValueError("Stage-D source groups require at least one frozen rollout")
         return self
 
 
-class StageDSourceTaskset(vf.Taskset[StageDSourceTask, StageDSourceTasksetConfig]):
+class StageDSourceTaskset(vf.Taskset[StageDSourceTask, StageDSourceTasksetConfig]):  # type: ignore[misc]
     """Wrap the frozen evidence taskset with campaign-scoped group identities."""
+
+    def __init__(self, config: StageDSourceTasksetConfig) -> None:
+        super().__init__(config)
+        self._stage_d_watchdog: ActionClosureWatchdog | None = None
+
+    def bind_stage_d_watchdog(self, watchdog: ActionClosureWatchdog) -> None:
+        self._stage_d_watchdog = watchdog
 
     def load(self) -> list[StageDSourceTask]:
         if not self.config.scientific_group_namespace:
@@ -180,11 +203,14 @@ class StageDSourceTaskset(vf.Taskset[StageDSourceTask, StageDSourceTasksetConfig
                         "rollout_slot": rollout_slot,
                     }
                 )
-                tasks.append(StageDSourceTask(data, self.config.task))
+                task = StageDSourceTask(data, self.config.task)
+                if self._stage_d_watchdog is not None:
+                    task.bind_stage_d_watchdog(self._stage_d_watchdog)
+                tasks.append(task)
         return tasks
 
 
-class StageDSourceEnvConfig(vf.SingleAgentEnvConfig):
+class StageDSourceEnvConfig(vf.SingleAgentEnvConfig):  # type: ignore[misc]
     """Frozen paths and identities required for exact source collection."""
 
     taskset: StageDSourceTasksetConfig
@@ -224,13 +250,13 @@ class StageDSourceEnvConfig(vf.SingleAgentEnvConfig):
     parent_tool_call_slot: int = 0
     max_concurrent: int | None = 1
 
-    @model_validator(mode="before")
+    @model_validator(mode="before")  # type: ignore[untyped-decorator]
     @classmethod
     def _resolve_taskset(cls, data: Any) -> Any:
         """Keep the source-specific taskset type inside this explicit env profile."""
         return data
 
-    @model_validator(mode="after")
+    @model_validator(mode="after")  # type: ignore[untyped-decorator]
     def validate_source_collection(self) -> StageDSourceEnvConfig:
         if self.max_concurrent != 1:
             raise ValueError("Stage-D source collection requires max_concurrent=1")
@@ -292,7 +318,7 @@ class StageDSourceEnvConfig(vf.SingleAgentEnvConfig):
         return self
 
 
-class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
+class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):  # type: ignore[misc]
     """Collect one exact source per successful episode without training it."""
 
     def __init__(self, config: StageDSourceEnvConfig) -> None:
@@ -306,6 +332,7 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
         self._terminal_traces: set[str] = set()
         self._completed_sources: dict[str, SourceRollout] = {}
         self._failed = False
+        self._watchdog: ActionClosureWatchdog | None = None
         self._identity: StageDObserverIdentity | None = None
         self._worker_lease_fd: int | None = None
         self._worker_lease_path = self.config.ledger_path.with_name(
@@ -408,6 +435,16 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
                 self._ledger = None
             self._release_worker_lease()
 
+    def bind_stage_d_watchdog(self, watchdog: ActionClosureWatchdog) -> None:
+        """Bind the collection watchdog to this environment's real owners."""
+
+        if not isinstance(watchdog, ActionClosureWatchdog):
+            raise TypeError("Stage-D environment requires its ActionClosureWatchdog")
+        if self._watchdog is not None and self._watchdog is not watchdog:
+            raise RuntimeError("Stage-D environment watchdog was rebound")
+        self._watchdog = watchdog
+        self.taskset.bind_stage_d_watchdog(watchdog)
+
     async def run_episode(
         self,
         task: vf.Task,
@@ -433,7 +470,14 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
                         rollout_slot=task.data.rollout_slot,
                     ),
                 )
-                episode = await super().run_episode(task, episode_ctx, **kwargs)
+                episode_operation = super().run_episode(task, episode_ctx, **kwargs)
+                if self._watchdog is None:
+                    episode = cast(vf.Episode, await episode_operation)
+                else:
+                    episode = cast(
+                        vf.Episode,
+                        await self._watchdog.run_episode(episode_operation),
+                    )
                 if not episode.ok or len(episode.traces) != 1:
                     raise RuntimeError("source collection episode did not complete exactly once")
                 trace = episode.traces[0]
@@ -443,16 +487,25 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
                 raw_episode = _canonical_source_episode(episode)
                 if self._artifacts is None:
                     raise RuntimeError("source artifact store is not started")
+                artifact_store = self._artifacts
 
                 def prepare(value: bytes) -> None:
-                    assert self._artifacts is not None
-                    self._artifacts.prepare(value)
+                    artifact_store.prepare(value)
 
-                source = producer.finalize_episode(
-                    raw_episode,
-                    prepare_source_rollout=prepare,
-                )
-                self._artifacts.commit(source)
+                def finalize_source() -> SourceRollout:
+                    source_value = producer.finalize_episode(
+                        raw_episode,
+                        prepare_source_rollout=prepare,
+                    )
+                    artifact_store.commit(source_value)
+                    return source_value
+
+                if self._watchdog is None:
+                    source = finalize_source()
+                else:
+                    source = await self._watchdog.run_finalizer(
+                        asyncio.to_thread(finalize_source)
+                    )
                 self._terminal_traces.add(trace.id)
                 self._completed_sources[trace.id] = source
                 return episode
@@ -587,6 +640,7 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
                     parent_tool_call_slot=self.config.parent_tool_call_slot,
                 ),
                 runtime_snapshot=self._runtime_snapshot(task, agent_config),
+                watchdog=self._watchdog,
                 validate_action=lambda request, message, action_token_ids: (
                     client.validate_assistant_action(
                         request,
@@ -611,12 +665,15 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
     def _runtime_snapshot(self, task: vf.Task, agent_config: Any) -> bytes:
         image = self.config.taskset.isolated_runtime_image
         if image is None:
-            return canonical_json(
-                {
-                    "schema_version": 1,
-                    "domain": "redco-stage-d-legacy-runtime-binding-v1",
-                    "runtime_sha256": self.config.runtime_sha256,
-                }
+            return cast(
+                bytes,
+                canonical_json(
+                    {
+                        "schema_version": 1,
+                        "domain": "redco-stage-d-legacy-runtime-binding-v1",
+                        "runtime_sha256": self.config.runtime_sha256,
+                    }
+                ),
             )
         if not isinstance(task.data, StageDSourceData):
             raise TypeError("isolated runtime snapshot requires source task data")
@@ -635,13 +692,16 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):
             mode="json",
             exclude_none=False,
         )
-        return build_pre_action_runtime_snapshot(
-            contract=StageDIsolatedRuntimeContract(image),
-            runtime_config=runtime,
-            task_data=task.data.model_dump(mode="json", exclude_none=False),
-            task_config=task.config.model_dump(mode="json", exclude_none=False),
-            paper=task.data.paper.encode("utf-8"),
-            frozen_workspace_manifest=manifest,
+        return cast(
+            bytes,
+            build_pre_action_runtime_snapshot(
+                contract=StageDIsolatedRuntimeContract(image),
+                runtime_config=runtime,
+                task_data=task.data.model_dump(mode="json", exclude_none=False),
+                task_config=task.config.model_dump(mode="json", exclude_none=False),
+                paper=task.data.paper.encode("utf-8"),
+                frozen_workspace_manifest=manifest,
+            ),
         )
 
     def verified_completed_sources(self) -> tuple[SourceRollout, ...]:

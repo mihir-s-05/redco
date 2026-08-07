@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
+from redco.analysis.stage_d_action_closure import ActionClosureWatchdog
 from redco.analysis.stage_d_exact_action import (
     BehaviorAction,
     ExactActionKey,
@@ -132,6 +133,7 @@ class StageDPreparedCallObserver:
             [Mapping[str, Any], Mapping[str, Any], Sequence[int]],
             None,
         ],
+        watchdog: ActionClosureWatchdog | None = None,
     ) -> None:
         if not trace_id:
             raise ValueError("observer trace ID must be nonempty")
@@ -144,12 +146,17 @@ class StageDPreparedCallObserver:
             "frozen runtime snapshot",
         )
         self._validate_action = validate_action
+        self._watchdog = watchdog
         self._root_turns: set[int] = set()
         self._root_policy_events: dict[int, PolicyEventAddress] = {}
         self._child_turns: dict[str, int] = {}
         self._child_spawn_signatures: dict[str, tuple[object, ...]] = {}
 
     async def before_forward(self, prepared: PreparedRequestLike) -> object:
+        if getattr(self._producer, "_aborted", False):
+            raise ValueError(
+                "cannot reserve a source policy call after an observed call abort"
+            )
         request = _canonical_object(prepared.application_request, "application request")
         engine = _canonical_object(prepared.engine_request, "engine request")
         headers = _canonical_object(prepared.engine_headers, "engine headers")
@@ -246,6 +253,20 @@ class StageDPreparedCallObserver:
                 _child_spawn_signature(provenance),
             )
         return StageDPreparedTicket(pending, action_key)
+
+    async def run_provider_call(self, operation: Awaitable[Any]) -> Any:
+        """Run the actual renderer/provider await under its provider deadline."""
+
+        if self._watchdog is None:
+            return await operation
+        return await self._watchdog.run_provider_call(operation)
+
+    async def run_concurrent_children(self, operation: Awaitable[Any]) -> Any:
+        """Run the real child gather under its dedicated deadline."""
+
+        if self._watchdog is None:
+            return await operation
+        return await self._watchdog.run_concurrent_children(operation)
 
     async def after_response(self, ticket: object, response: object) -> None:
         if type(ticket) is not StageDPreparedTicket:
@@ -431,12 +452,18 @@ class StageDForwardDirectiveObserver:
         self._pre_forward_guard = pre_forward_guard
 
     async def before_forward(self, prepared: PreparedRequestLike) -> object:
-        from renderers.client import PreparedGenerateForward  # type: ignore[import-not-found]
+        from renderers.client import PreparedGenerateForward
 
         if self._pre_forward_guard is not None:
             self._pre_forward_guard()
         ticket = await self._delegate.before_forward(prepared)
         return PreparedGenerateForward(ticket)
+
+    async def run_provider_call(self, operation: Awaitable[Any]) -> Any:
+        return await self._delegate.run_provider_call(operation)
+
+    async def run_concurrent_children(self, operation: Awaitable[Any]) -> Any:
+        return await self._delegate.run_concurrent_children(operation)
 
     async def after_response(self, ticket: object, response: object) -> None:
         await self._delegate.after_response(ticket, response)

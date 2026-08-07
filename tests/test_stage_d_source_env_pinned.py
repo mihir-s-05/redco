@@ -9,10 +9,11 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
+from test_stage_d_scientific_branch_group import _action
 from test_stage_d_source_producer import (
-    _action,
     _child_address,
     _episode,
     _target_id,
@@ -225,10 +226,15 @@ def test_pinned_successful_model_call_dump_matches_source_schema() -> None:
             temperature=0.7,
             top_p=1.0,
             reasoning_effort=None,
-            max_tokens=2,
-            parallel_tool_calls=False,
+            min_p=0.0,
+            repetition_penalty=1.0,
+            frequency_penalty=0.0,
+            presence_penalty=0.0,
             seed=71,
+            max_tokens=2,
+            n=1,
             tool_choice="auto",
+            parallel_tool_calls=False,
         ),
         endpoint="/chat/completions",
         finish_reason="stop",
@@ -241,10 +247,15 @@ def test_pinned_successful_model_call_dump_matches_source_schema() -> None:
         "temperature": 0.7,
         "top_p": 1.0,
         "reasoning_effort": None,
-        "max_tokens": 2,
-        "parallel_tool_calls": False,
+        "min_p": 0.0,
+        "repetition_penalty": 1.0,
+        "frequency_penalty": 0.0,
+        "presence_penalty": 0.0,
         "seed": 71,
+        "max_tokens": 2,
+        "n": 1,
         "tool_choice": "auto",
+        "parallel_tool_calls": False,
     }
     assert call["usage"] == {
         "prompt_tokens": 2,
@@ -271,7 +282,20 @@ def test_typed_episode_serializes_only_node_nulls_like_persisted_trace() -> None
     )
     assert set(trace["calls"][0]) == _CALL_FIELDS
     assert trace["calls"][0]["error"] is None
-    assert trace["calls"][0]["sampling"]["reasoning_effort"] is None
+    assert set(trace["calls"][0]["sampling"]) == {
+        "temperature",
+        "top_p",
+        "reasoning_effort",
+        "min_p",
+        "repetition_penalty",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed",
+        "max_tokens",
+        "n",
+        "tool_choice",
+        "parallel_tool_calls",
+    }
     assert trace["calls"][0]["usage"] == {
         "prompt_tokens": 2,
         "completion_tokens": 2,
@@ -287,7 +311,12 @@ def test_typed_episode_runs_through_real_source_finalization(
 ) -> None:
     env = StageDSourceEnv(StageDSourceEnvConfig.model_validate(_config_payload(tmp_path)))
 
-    async def completed_super(self, task, ctx, **kwargs):
+    async def completed_super(
+        self: Any,
+        task: Any,
+        ctx: Any,
+        **kwargs: Any,
+    ) -> vf.Episode:
         del task, ctx, kwargs
         episode = vf.WireEpisode.model_validate(json.loads(_episode()))
         trace = episode.traces[0]
@@ -366,7 +395,7 @@ def test_scientific_group_id_is_stable_and_namespace_bound(tmp_path: Path) -> No
                 rollouts_per_task=2,
             )
         ).load()[0]
-        return task.data.scientific_group_id
+        return cast(str, task.data.scientific_group_id)
 
     assert load("campaign-a") == load("campaign-a")
     assert load("campaign-a") != load("campaign-b")
@@ -486,13 +515,15 @@ def test_source_collection_restart_fails_before_calls_after_any_prior_attempt(
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("subdirectory", ["pending", "sources"])
+@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
+    "subdirectory", ["pending", "sources"]
+)
 def test_source_collection_rejects_stale_artifacts_before_calls(
     tmp_path: Path,
     subdirectory: str,
 ) -> None:
     payload = _config_payload(tmp_path)
-    artifact_path = Path(payload["artifact_path"])
+    artifact_path = Path(cast(str, payload["artifact_path"]))
     stale_directory = artifact_path / subdirectory
     stale_directory.mkdir(parents=True)
     (stale_directory / "stale.json").write_text("{}", encoding="utf-8")
@@ -536,7 +567,12 @@ def test_cancellation_after_observation_invokes_terminal_finalization_guard(
         def abort_finalization(self, error: BaseException) -> None:
             observed.append(error)
 
-    async def cancelled_super(self, task, ctx, **kwargs):
+    async def cancelled_super(
+        self: Any,
+        task: Any,
+        ctx: Any,
+        **kwargs: Any,
+    ) -> None:
         del task, ctx, kwargs
         self._producers["cancelled-trace"] = Producer()
         entered.set()
@@ -648,7 +684,7 @@ def test_source_observer_binds_actual_resolved_train_client_once(
 
 def env_group_id(payload: dict[str, object]) -> str:
     config = StageDSourceEnvConfig.model_validate(payload)
-    return StageDSourceTaskset(config.taskset).load()[0].data.scientific_group_id
+    return cast(str, StageDSourceTaskset(config.taskset).load()[0].data.scientific_group_id)
 
 
 def test_episode_addressed_sampling_is_distinct_and_reproducible() -> None:
@@ -708,15 +744,18 @@ def test_resolved_train_client_hash_binds_nonsecret_routing_identity() -> None:
     from verifiers.v1.clients.train import TrainClient
 
     def identity(route: str, api_key_var: str) -> str:
-        return _resolved_train_client_sha256(
-            TrainClient(
-                SimpleNamespace(
-                    max_retries=0,
-                    base_url="http://127.0.0.1:8000/v1",
-                ),
-                default_headers={"X-Stage-D-Route": route},
-                api_key_var=api_key_var,
-            )
+        return cast(
+            str,
+            _resolved_train_client_sha256(
+                TrainClient(
+                    SimpleNamespace(
+                        max_retries=0,
+                        base_url="http://127.0.0.1:8000/v1",
+                    ),
+                    default_headers={"X-Stage-D-Route": route},
+                    api_key_var=api_key_var,
+                )
+            ),
         )
 
     baseline = identity("route-a", "STAGE_D_API_KEY")

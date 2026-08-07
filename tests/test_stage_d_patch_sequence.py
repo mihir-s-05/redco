@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from redco.analysis.stage_d_dependency_stack import canonical_tree_manifest_bytes
 
 ROOT = Path(__file__).parents[1]
 
@@ -95,6 +98,7 @@ def test_renderer_and_verifier_patch_stacks_apply_in_deployment_order(
         patch_names=(
             "renderers-stage-d-prepared-observer-v1.patch",
             "renderers-stage-d-replay-directives-v1.patch",
+            "renderers-stage-d-watchdog-owner-v1.patch",
         ),
     )
     assert "PreparedGenerateObserver" in (
@@ -103,6 +107,11 @@ def test_renderer_and_verifier_patch_stacks_apply_in_deployment_order(
     assert "PreparedGenerateReturn" in (
         renderer / "renderers/client.py"
     ).read_text()
+    renderer_client = (renderer / "renderers/client.py").read_text()
+    assert "await observer.run_provider_call(" in renderer_client
+    assert hashlib.sha256(canonical_tree_manifest_bytes(renderer)).hexdigest() == (
+        "bd43d515c12dcaa1e1c0279941a1397d4ffba31a1557d6d7342a1322b195fcc4"
+    )
 
     verifier = _apply_stack(
         tmp_path,
@@ -118,6 +127,7 @@ def test_renderer_and_verifier_patch_stacks_apply_in_deployment_order(
             "verifiers-stage-d-patched-rlm-archive-v1.patch",
             "verifiers-stage-d-frozen-rlm-install-v1.patch",
             "verifiers-stage-d-observer-failfast-v1.patch",
+            "verifiers-stage-d-watchdog-owner-v1.patch",
         ),
     )
     train = (verifier / "verifiers/v1/clients/train.py").read_text()
@@ -136,10 +146,14 @@ def test_renderer_and_verifier_patch_stacks_apply_in_deployment_order(
     assert "async def fail_closed(self, operation: bytes) -> None:" in session
     server = (verifier / "verifiers/v1/interception/server.py").read_text()
     assert 'status=409 if session.observer is not None else 502' in server
+    assert "await session.observer.run_concurrent_children(" in server
     rollout = (verifier / "verifiers/v1/rollout.py").read_text()
     assert "await invoke(" in rollout
     assert "self.task.pre_generation" in rollout
     assert "renderer.parse_response(action, tools=wire_tools)" in train
+    assert hashlib.sha256(canonical_tree_manifest_bytes(verifier)).hexdigest() == (
+        "9dcf9e98dea73c2487d2165cd6cae35dc61fb66e00d377d85d5466886b3ea4e0"
+    )
     pytest.importorskip("anthropic", reason="full Verifiers runtime is validated in pinned WSL")
     environment = os.environ.copy()
     environment["PYTHONPATH"] = os.pathsep.join(

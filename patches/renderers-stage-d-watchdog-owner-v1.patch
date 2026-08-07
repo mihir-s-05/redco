@@ -1,0 +1,84 @@
+diff --git a/renderers/client.py b/renderers/client.py
+index aaea526..7b793a4 100644
+--- a/renderers/client.py
++++ b/renderers/client.py
+@@ -15,7 +15,7 @@ import asyncio
+ import json
+ import logging
+ import math
+-from collections.abc import Mapping
++from collections.abc import Awaitable, Mapping
+ from dataclasses import dataclass
+ from typing import Any, Literal, Protocol, cast
+ 
+@@ -142,6 +142,10 @@ class PreparedGenerateObserver(Protocol):
+         error: BaseException,
+     ) -> None: ...
+ 
++    async def run_provider_call(self, operation: Awaitable[Any]) -> Any: ...
++
++    async def run_concurrent_children(self, operation: Awaitable[Any]) -> Any: ...
++
+ 
+ def _canonical_json(value: object) -> bytes:
+     return json.dumps(
+@@ -451,7 +455,12 @@ async def generate(
+             raise TypeError("prepared observer returned an unsupported directive")
+     try:
+         if return_directive is None:
+-            raw_response = await client.post(endpoint, **post_kwargs)
++            if observer is None:
++                raw_response = await client.post(endpoint, **post_kwargs)
++            else:
++                raw_response = await observer.run_provider_call(
++                    client.post(endpoint, **post_kwargs)
++                )
+             response_content = raw_response.content
+         else:
+             response_content = return_directive.response_content
+diff --git a/tests/test_client.py b/tests/test_client.py
+index f05ebd5..e18b229 100644
+--- a/tests/test_client.py
++++ b/tests/test_client.py
+@@ -125,6 +125,14 @@ class _PreparedObserver:
+     async def abort(self, ticket, phase, error):
+         self.events.append(("abort", ticket, phase, type(error).__name__))
+ 
++    async def run_provider_call(self, operation):
++        self.events.append(("provider",))
++        return await operation
++
++    async def run_concurrent_children(self, operation):
++        self.events.append(("children",))
++        return await operation
++
+ 
+ def _frozen_response_content(*, finish_reason="stop"):
+     return json.dumps(
+@@ -165,7 +173,7 @@ def test_prepared_observer_records_exactly_one_raw_response():
+     result = asyncio.run(_observed_generate(client, observer))
+ 
+     assert len(client.calls) == 1
+-    assert [event[0] for event in observer.events] == ["before", "raw"]
++    assert [event[0] for event in observer.events] == ["before", "provider", "raw"]
+     prepared = observer.events[0][1]
+     assert observer.events[1][1] == "ticket"
+     assert json.loads(observer.events[1][2])["request_id"] == "gen-test"
+@@ -186,7 +194,7 @@ def test_prepared_observer_aborts_unknown_post_outcome():
+     observer = _PreparedObserver()
+     with pytest.raises(ConnectionError, match="unknown delivery"):
+         asyncio.run(_observed_generate(FailingClient(), observer))
+-    assert [event[0] for event in observer.events] == ["before", "abort"]
++    assert [event[0] for event in observer.events] == ["before", "provider", "abort"]
+     assert observer.events[-1][2:] == ("post_unknown", "ConnectionError")
+ 
+ 
+@@ -276,7 +284,7 @@ def test_prepared_observer_durably_aborts_cancelled_post():
+         return observer
+ 
+     observer = asyncio.run(exercise())
+-    assert [event[0] for event in observer.events] == ["before", "abort"]
++    assert [event[0] for event in observer.events] == ["before", "provider", "abort"]
+     assert observer.events[-1][2:] == ("post_unknown", "CancelledError")
+ 
+ 

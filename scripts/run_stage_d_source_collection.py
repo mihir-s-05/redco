@@ -16,6 +16,12 @@ from verifiers.v1.cli.eval.runner import run_eval
 from verifiers.v1.configs.eval import EvalConfig
 from verifiers.v1.runtimes import make_runtime
 
+from redco.analysis.stage_d_action_closure import (
+    ActionClosureWatchdog,
+    WatchdogDeadlines,
+    atomic_terminal_record_writer,
+    stop_owned_runtime,
+)
 from redco.analysis.stage_d_branch_artifacts import (
     StageDBranchArtifactStore,
     StageDBranchTargetRoster,
@@ -189,19 +195,25 @@ def _verify_unforced_root_tool_choice(config: EvalConfig) -> None:
 async def _preflight_rlm_install(config: EvalConfig) -> None:
     harness = vf.load_harness(config.env.agent.harness)
     runtime = make_runtime(harness.config.runtime)
-    await runtime.start()
-    try:
-        await runtime.prepare_setup()
-        await harness.setup(runtime)
-        result = await runtime.run(
-            ["/tmp/vf-rlm/bin/rlm", "--help"],
-            harness.config.resolved_env,
-        )
-        if result.exit_code != 0:
-            detail = (result.stderr or result.stdout).strip()[-500:]
-            raise RuntimeError(f"installed RLM executable failed: {detail}")
-    finally:
-        await runtime.stop()
+
+    async def lifecycle() -> None:
+        await runtime.start()
+        try:
+            await runtime.prepare_setup()
+            await harness.setup(runtime)
+            result = await runtime.run(
+                ["/tmp/vf-rlm/bin/rlm", "--help"],
+                harness.config.resolved_env,
+            )
+            if result.exit_code != 0:
+                detail = (result.stderr or result.stdout).strip()[-500:]
+                raise RuntimeError(f"installed RLM executable failed: {detail}")
+        finally:
+            await stop_owned_runtime(runtime)
+
+    watchdog = ActionClosureWatchdog(deadlines=WatchdogDeadlines())
+    await watchdog.run_pod_lifetime(lifecycle())
+    watchdog.complete()
 
 
 async def _recover_verified_sources(
@@ -418,34 +430,46 @@ async def _run(args: argparse.Namespace) -> None:
             raise TypeError("source environment returned unverified source contracts")
         return sources
 
-    plan, episodes, receipt = await run_exact_source_collection(
-        config,
-        preregistered_plan_sha256=args.plan_sha256,
-        run_eval=run_eval,
-        load_environment=load_environment,
-        load_verified_sources=load_verified_sources,
-        persist_plan=lambda value: write_once(
-            args.plan_output,
-            value,
+    terminal_record_path = config.output_dir / "stage-d-terminal-record-v1.json"
+    watchdog = ActionClosureWatchdog(
+        deadlines=WatchdogDeadlines(),
+        terminal_record_callback=atomic_terminal_record_writer(terminal_record_path),
+    )
+    try:
+        plan, episodes, receipt = await run_exact_source_collection(
+            config,
+            preregistered_plan_sha256=args.plan_sha256,
+            run_eval=run_eval,
+            load_environment=load_environment,
+            load_verified_sources=load_verified_sources,
+            persist_plan=lambda value: write_once(
+                args.plan_output,
+                value,
+                allow_existing_same=False,
+                error_type=RuntimeError,
+            ),
+            watchdog=watchdog,
+        )
+        write_once(
+            args.receipt_output,
+            receipt,
             allow_existing_same=False,
             error_type=RuntimeError,
-        ),
-    )
-    write_once(
-        args.receipt_output,
-        receipt,
-        allow_existing_same=False,
-        error_type=RuntimeError,
-    )
-    sources = load_verified_sources()
-    if len(sources) != rules.required_papers:
-        raise ValueError("source count differs from support rules")
-    roster = _freeze_branch_targets(
-        config,
-        sources,
-        branch_artifacts=args.branch_artifacts,
-        minimum_eligible_sources=rules.required_successes,
-    )
+        )
+        sources = load_verified_sources()
+        if len(sources) != rules.required_papers:
+            raise ValueError("source count differs from support rules")
+        roster = _freeze_branch_targets(
+            config,
+            sources,
+            branch_artifacts=args.branch_artifacts,
+            minimum_eligible_sources=rules.required_successes,
+        )
+        watchdog.complete()
+    except BaseException:
+        if not watchdog.terminal:
+            watchdog.fail("campaign_publication", "error")
+        raise
     print(
         f"slots={len(plan.slots)} episodes={len(episodes)} "
         f"plan_sha256={plan.plan_sha256} receipt_sha256={_sha256(receipt)} "
