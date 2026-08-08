@@ -10,10 +10,11 @@ import json
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from redco.analysis.stage_d_branch_artifacts import StageDBranchTargetRoster
+from redco.analysis.stage_d_exact_action import BehaviorAction
 from redco.analysis.stage_d_protocol_manifest import StageDProtocolManifest
 from redco.analysis.stage_d_receipt_ledger import (
     GenesisBinding,
@@ -32,7 +33,10 @@ from redco.analysis.stage_d_scientific_branch_group import (
 from redco.analysis.stage_d_scientific_campaign import (
     runtime_snapshot_from_pre_action_evidence,
 )
-from redco.analysis.stage_d_source_contracts import SourceRollout
+from redco.analysis.stage_d_source_contracts import (
+    SourceRollout,
+    SourceRolloutVerificationContext,
+)
 from redco.analysis.stage_d_support_gate import (
     evaluate_support_gate,
     load_support_rules,
@@ -47,6 +51,47 @@ from redco.integrations.write_once import write_once
 
 def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+class CorrespondenceProtocolError(ValueError):
+    """A source/ledger correspondence set cannot authorize branch execution."""
+
+
+def _require_correspondence_keysets(
+    *,
+    eligible_keys: set[tuple[str, str]],
+    selected_keys: set[tuple[str, str]],
+    commitment_keys: set[tuple[str, str]],
+    recorded_action_keys: set[tuple[str, str]],
+    correspondence_keys: set[tuple[str, str]],
+) -> None:
+    """Validate all source-finalization maps before constructing a branch group."""
+    checks = (
+        (commitment_keys, selected_keys, "pre-action commitments"),
+        (recorded_action_keys, selected_keys, "completed recorded actions"),
+        (correspondence_keys, eligible_keys, "correspondence receipts"),
+    )
+    for actual, expected, owner in checks:
+        if actual != expected:
+            raise CorrespondenceProtocolError(
+                f"{owner} do not exactly match the authenticated source roster"
+            )
+
+
+def _receipt_map(scan: Any, kind: str) -> dict[tuple[str, str], bytes]:
+    result: dict[tuple[str, str], bytes] = {}
+    for (receipt_kind, _), receipt in scan.receipts.items():
+        if receipt_kind != kind:
+            continue
+        group_id = receipt.get("group_id")
+        target_id = receipt.get("target_id")
+        if not isinstance(group_id, str) or not isinstance(target_id, str):
+            raise CorrespondenceProtocolError(f"{kind} receipt lacks its target identity")
+        key = (group_id, target_id)
+        if key in result:
+            raise CorrespondenceProtocolError(f"{kind} receipt identity is duplicated")
+        result[key] = canonical_json(receipt)
+    return result
 
 
 def _run_branch_groups(
@@ -283,9 +328,9 @@ def _run(args: argparse.Namespace) -> None:
             )
 
         def validate_action(
-            request: Mapping[str, object],
-            message: Mapping[str, object],
-            action_token_ids: tuple[int, ...],
+            request: Mapping[str, Any],
+            message: Mapping[str, Any],
+            action_token_ids: Sequence[int],
         ) -> None:
             client.validate_assistant_action(
                 request,
@@ -294,15 +339,25 @@ def _run(args: argparse.Namespace) -> None:
                 action_token_ids=action_token_ids,
             )
 
-        def decode_action(value: bytes):
-            from redco.analysis.stage_d_exact_action import BehaviorAction
-
+        def decode_action(value: bytes) -> BehaviorAction:
             return BehaviorAction.from_bytes(
                 value,
                 validate_action=validate_action,
                 render_prompt=render_prompt,
             )
 
+        source_context = SourceRolloutVerificationContext.from_stage_d_values(
+            child_parent_lineage=config.env.child_parent_lineage,
+            child_parent_session_call_ordinal=(
+                config.env.child_parent_session_call_ordinal
+            ),
+            child_parent_turn=config.env.child_parent_turn,
+            parent_tool_call_slot=config.env.parent_tool_call_slot,
+            root_policy_turn_count=config.env.root_policy_turn_count,
+            maximum_observed_root_policy_turn_count=(
+                config.env.maximum_observed_root_policy_turn_count
+            ),
+        )
         sources = tuple(
             SourceRollout.verify_bytes(
                 path.read_bytes(),
@@ -310,6 +365,8 @@ def _run(args: argparse.Namespace) -> None:
                 evidence_loader=lambda digest: _evidence_loader(args.ledger, digest),
                 validate_action=validate_action,
                 render_prompt=render_prompt,
+                context=source_context,
+                require_context=True,
             )
             for path in sorted((args.source_artifacts / "sources").glob("*.json"))
         )
@@ -320,19 +377,45 @@ def _run(args: argparse.Namespace) -> None:
         scan = inspect_ledger(args.ledger)
         if scan.status != "active-clean":
             raise RuntimeError("scientific runner requires an active-clean ledger")
-        commitments = {
-            (receipt["group_id"], receipt["target_id"]): canonical_json(receipt)
-            for (kind, _), receipt in scan.receipts.items()
-            if kind == "pre_action_group_commitment"
-        }
-        correspondences = {
-            (receipt["group_id"], receipt["target_id"]): canonical_json(receipt)
-            for (kind, _), receipt in scan.receipts.items()
-            if kind == "seed_correspondence_map"
-        }
+        commitments = _receipt_map(scan, "pre_action_group_commitment")
+        correspondences = _receipt_map(scan, "seed_correspondence_map")
         source_by_rollout = {source.rollout_id: source for source in sources}
         if len(source_by_rollout) != len(sources):
             raise ValueError("scientific source roster contains duplicate rollout IDs")
+        roster = StageDBranchTargetRoster.from_sources(
+            sources,
+            planned_source_count=support_rules.required_papers,
+            minimum_eligible_sources=support_rules.required_successes,
+        )
+        eligible_keys = {
+            (target.group_id, target.target_id) for target in roster.targets
+        }
+        selected_keys = eligible_keys | {
+            (item.target.group_id, item.target.target_id)
+            for item in roster.excluded_targets
+        }
+        recorded_actions: dict[tuple[str, str], BehaviorAction] = {}
+        for source in sources:
+            for decision in source.decisions:
+                if (
+                    decision.node_kind != "child"
+                    or not decision.provenance.branch_selected
+                    or decision.target_id is None
+                ):
+                    continue
+                key = (source.group_id, decision.target_id)
+                if key in recorded_actions:
+                    raise CorrespondenceProtocolError(
+                        "completed recorded action identity is duplicated"
+                    )
+                recorded_actions[key] = decision.action
+        _require_correspondence_keysets(
+            eligible_keys=eligible_keys,
+            selected_keys=selected_keys,
+            commitment_keys=set(commitments),
+            recorded_action_keys=set(recorded_actions),
+            correspondence_keys=set(correspondences),
+        )
         trace_by_rollout: dict[str, dict[str, object]] = {}
         paper_ids: dict[str, str] = {}
         for source in sources:
@@ -366,10 +449,13 @@ def _run(args: argparse.Namespace) -> None:
                 },
                 deep=True,
             )
-            return await run_bound_scientific_episode(
-                binding=binding,
-                env_config=config.env,
-                eval_config=episode_config,
+            return cast(
+                bytes,
+                await run_bound_scientific_episode(
+                    binding=binding,
+                    env_config=config.env,
+                    eval_config=episode_config,
+                ),
             )
 
         eos_token_id = json.loads(config.env.tokenizer_manifest_path.read_bytes()).get(
@@ -381,25 +467,39 @@ def _run(args: argparse.Namespace) -> None:
         )
         groups = []
         for group_id, target_id in ledger.branch_target_keys:
-            commitment_bytes = commitments[(group_id, target_id)]
+            key = (group_id, target_id)
+            commitment_bytes = commitments.get(key)
+            correspondence_bytes = correspondences.get(key)
+            recorded = recorded_actions.get(key)
+            if (
+                commitment_bytes is None
+                or correspondence_bytes is None
+                or not isinstance(recorded, BehaviorAction)
+            ):
+                raise CorrespondenceProtocolError(
+                    "eligible target lacks an authenticated correspondence handoff"
+                )
             commitment = PreActionTargetCommitment.from_receipt(
                 commitment_bytes,
                 verifier=ledger,
             )
-            source = source_by_rollout[commitment.rollout_id]
-            recorded = next(
-                decision.action
-                for decision in source.decisions
-                if decision.event_address == commitment.target_address
-            )
+            source = source_by_rollout.get(commitment.rollout_id)
+            if source is None:
+                raise CorrespondenceProtocolError(
+                    "commitment names a source outside the authenticated roster"
+                )
             correspondence = SeedCorrespondenceMap.from_receipt(
-                correspondences[(group_id, target_id)],
+                correspondence_bytes,
                 verifier=ledger,
                 commitment=commitment,
                 recorded_action=recorded,
             )
             spec = BranchGroupSpec(commitment, recorded, correspondence, args.master_seed)
-            trace = trace_by_rollout[source.rollout_id]
+            trace = trace_by_rollout.get(source.rollout_id)
+            if trace is None:
+                raise CorrespondenceProtocolError(
+                    "eligible target source trace is absent from the authenticated roster"
+                )
             task = source_task_from_trace(trace, config.env.taskset.task)
             runtime_snapshot = runtime_snapshot_from_pre_action_evidence(
                 _evidence_loader(
@@ -433,11 +533,6 @@ def _run(args: argparse.Namespace) -> None:
         scan = inspect_ledger(args.ledger)
         if scan.status != "active-clean":
             raise RuntimeError("scientific campaign did not leave an active-clean ledger")
-        roster = StageDBranchTargetRoster.from_sources(
-            sources,
-            planned_source_count=support_rules.required_papers,
-            minimum_eligible_sources=support_rules.required_successes,
-        )
         if roster.roster_sha256 != ledger.branch_target_roster_sha256:
             raise ValueError("support target roster differs from the durable ledger")
         report = evaluate_support_gate(

@@ -7,7 +7,7 @@ import asyncio
 import hashlib
 import os
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -33,13 +33,16 @@ from redco.analysis.stage_d_collection import (
     verify_direct_collection_config,
 )
 from redco.analysis.stage_d_protocol_manifest import StageDProtocolManifest
-from redco.analysis.stage_d_receipt_ledger import StageDReceiptLedger
+from redco.analysis.stage_d_receipt_ledger import StageDReceiptLedger, inspect_ledger
 from redco.analysis.stage_d_rlm_runtime import (
     load_stage_d_rlm_runtime,
     verify_stage_d_env_rlm_harnesses,
 )
 from redco.analysis.stage_d_source_artifacts import StageDSourceArtifactStore
-from redco.analysis.stage_d_source_contracts import SourceRollout
+from redco.analysis.stage_d_source_contracts import (
+    SourceRollout,
+    SourceRolloutVerificationContext,
+)
 from redco.analysis.stage_d_support_gate import load_support_rules
 from redco.integrations.write_once import write_once
 
@@ -227,6 +230,16 @@ async def _recover_verified_sources(
         config.env.ledger_path,
         master_seed=config.env.master_seed,
     )
+    source_context = SourceRolloutVerificationContext.from_stage_d_values(
+        child_parent_lineage=config.env.child_parent_lineage,
+        child_parent_session_call_ordinal=config.env.child_parent_session_call_ordinal,
+        child_parent_turn=config.env.child_parent_turn,
+        parent_tool_call_slot=config.env.parent_tool_call_slot,
+        root_policy_turn_count=config.env.root_policy_turn_count,
+        maximum_observed_root_policy_turn_count=(
+            config.env.maximum_observed_root_policy_turn_count
+        ),
+    )
     client = resolve_client(config.client)
     try:
         if not isinstance(client, TrainClient):
@@ -253,7 +266,7 @@ async def _recover_verified_sources(
         def validate_action(
             request: Mapping[str, Any],
             message: Mapping[str, Any],
-            action_token_ids: tuple[int, ...],
+            action_token_ids: Sequence[int],
         ) -> None:
             client.validate_assistant_action(
                 request,
@@ -279,6 +292,8 @@ async def _recover_verified_sources(
                 evidence_loader=evidence_loader,
                 validate_action=validate_action,
                 render_prompt=render_prompt,
+                context=source_context,
+                require_context=True,
             )
             for path in store.source_paths()
         )
@@ -331,6 +346,7 @@ def _freeze_branch_targets(
         planned_source_count=len(sources),
         minimum_eligible_sources=minimum_eligible_sources,
     )
+    _validate_finalization_keysets(config, roster)
     store = StageDBranchArtifactStore(branch_artifacts)
     store.assert_pristine()
     store.persist_target_roster(roster)
@@ -346,6 +362,71 @@ def _freeze_branch_targets(
     finally:
         ledger.close()
     return roster
+
+
+def _validate_finalization_keysets(
+    config: EvalConfig,
+    roster: StageDBranchTargetRoster,
+) -> None:
+    """Require source finalization evidence before publishing the target roster."""
+    eligible_keys = {
+        (target.group_id, target.target_id) for target in roster.targets
+    }
+    excluded_keys = {
+        (item.target.group_id, item.target.target_id)
+        for item in roster.excluded_targets
+    }
+    selected_keys = eligible_keys | excluded_keys
+    scan = inspect_ledger(config.env.ledger_path)
+    if scan.status != "active-clean":
+        raise RuntimeError(
+            "source finalization key-set validation requires an active-clean ledger"
+        )
+
+    def receipt_keys(kind: str) -> set[tuple[str, str]]:
+        keys: list[tuple[str, str]] = []
+        for (receipt_kind, _), receipt in scan.receipts.items():
+            if receipt_kind != kind:
+                continue
+            group_id = receipt.get("group_id")
+            target_id = receipt.get("target_id")
+            if not isinstance(group_id, str) or not isinstance(target_id, str):
+                raise RuntimeError(f"{kind} receipt lacks a group/target identity")
+            keys.append((group_id, target_id))
+        if len(keys) != len(set(keys)):
+            raise RuntimeError(f"{kind} receipts contain duplicate identities")
+        return set(keys)
+
+    recorded_keys: list[tuple[str, str]] = []
+    for record in scan.records:
+        if record.get("record_kind") != "recorded_action_materialized":
+            continue
+        body = record.get("body")
+        event = body.get("event") if isinstance(body, dict) else None
+        if not isinstance(event, dict):
+            raise RuntimeError("recorded action materialization lacks its event")
+        group_id = event.get("group_id")
+        target_id = event.get("target_id")
+        if not isinstance(group_id, str) or not isinstance(target_id, str):
+            raise RuntimeError("recorded action materialization lacks a group/target")
+        recorded_keys.append((group_id, target_id))
+    if len(recorded_keys) != len(set(recorded_keys)):
+        raise RuntimeError("recorded action materializations contain duplicate identities")
+
+    commitment_keys = receipt_keys("pre_action_group_commitment")
+    correspondence_keys = receipt_keys("seed_correspondence_map")
+    if commitment_keys != selected_keys:
+        raise RuntimeError(
+            "pre-action commitments do not exactly match the selected source roster"
+        )
+    if set(recorded_keys) != selected_keys:
+        raise RuntimeError(
+            "completed recorded actions do not exactly match the selected source roster"
+        )
+    if correspondence_keys != eligible_keys:
+        raise RuntimeError(
+            "correspondence receipts do not exactly match eligible source targets"
+        )
 
 
 async def _run(args: argparse.Namespace) -> None:

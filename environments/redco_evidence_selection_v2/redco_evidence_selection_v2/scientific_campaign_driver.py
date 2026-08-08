@@ -9,7 +9,7 @@ import secrets
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from redco.analysis.stage_d_dynamic_taint import build_source_causal_graph
 from redco.analysis.stage_d_exact_action import BehaviorAction, ExactActionKey
@@ -27,6 +27,9 @@ from redco.analysis.stage_d_scientific_campaign import (
     run_scientific_campaign,
 )
 from redco.analysis.stage_d_source_contracts import SourceRollout
+from redco.analysis.stage_d_v13_launch_lifecycle import (
+    dispatch_callback_from_environment,
+)
 from redco.contracts import canonical_json
 from redco.integrations.verifiers_trace_v2 import extract_v2_rlm_provenance
 from redco_evidence_selection_v2.scientific_env import (
@@ -86,6 +89,7 @@ def run_live_scientific_campaign(
     *,
     ledger: StageDReceiptLedger,
     event_loop: asyncio.AbstractEventLoop,
+    before_provider_post: Callable[[bytes], None] | None = None,
 ) -> ScientificCampaignResult:
     """Assemble real QA, candidate, arm, artifact, and campaign transactions."""
     if event_loop.is_closed() or event_loop.is_running():
@@ -94,9 +98,15 @@ def run_live_scientific_campaign(
     live_groups = tuple(groups)
     if not live_groups:
         raise ValueError("live scientific campaign requires target groups")
+    dispatch = before_provider_post or dispatch_callback_from_environment()
     _verify_artifact_roster_before_calls(live_groups, ledger)
     scientific_runs = tuple(
-        _group_run(group, ledger=ledger, event_loop=event_loop)
+        _group_run(
+            group,
+            ledger=ledger,
+            event_loop=event_loop,
+            before_provider_post=dispatch,
+        )
         for group in live_groups
     )
     return run_scientific_campaign(
@@ -141,6 +151,7 @@ def _group_run(
     *,
     ledger: StageDReceiptLedger,
     event_loop: asyncio.AbstractEventLoop,
+    before_provider_post: Callable[[bytes], None] | None,
 ) -> ScientificGroupRun:
     records = extract_v2_rlm_provenance(dict(group.source_trace))
     graph = build_source_causal_graph(records)
@@ -190,6 +201,8 @@ def _group_run(
             nonlocal started
             if started:
                 raise RuntimeError("candidate engine attempted more than one POST")
+            if before_provider_post is not None:
+                before_provider_post(request)
             request_sha256 = ledger.put_evidence(request)
             ledger.mark_candidate_model_call_started(
                 attempt,
@@ -276,7 +289,7 @@ def _group_run(
             continuation_replicate=continuation_replicate,
         )
         if recovered is not None:
-            return recovered
+            return cast(bytes, recovered)
         attempt = ledger.begin_execution(
             group_id=group.spec.commitment.group_id,
             target_id=group.spec.commitment.target_id,

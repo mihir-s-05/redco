@@ -8,7 +8,7 @@ import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from fractions import Fraction
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from redco.analysis.stage_d_exact_action import BehaviorAction
 from redco.analysis.stage_d_scientific_branch_group import ReceiptVerifier
@@ -50,6 +50,70 @@ def _fraction_from_payload(value: object, name: str) -> Fraction:
     if type(numerator) is not int or type(denominator) is not int or denominator <= 0:
         raise ValueError(f"{name} must be an exact fraction")
     return Fraction(numerator, denominator)
+
+
+@dataclass(frozen=True, slots=True)
+class SourceRolloutVerificationContext:
+    """Authenticated producer context required to reload live source bytes.
+
+    The source producer predeclares the child slots before an episode runs.  A
+    live reload must use those same structural coordinates; deriving a roster
+    from observed child messages is not an equivalent verification.
+    """
+
+    child_parent_event: PolicyEventAddress
+    child_parent_tool_call_slot: int
+    root_policy_turn_count: int
+    maximum_eligible_root_policy_turn_count: int
+
+    def __post_init__(self) -> None:
+        if type(self.child_parent_event) is not PolicyEventAddress:
+            raise ValueError("source verification parent event is invalid")
+        if type(self.child_parent_tool_call_slot) is not int or (
+            self.child_parent_tool_call_slot < 0
+        ):
+            raise ValueError("source verification parent slot is invalid")
+        if type(self.root_policy_turn_count) is not int or (
+            self.root_policy_turn_count < 1
+        ):
+            raise ValueError("source verification root turn count is invalid")
+        if type(self.maximum_eligible_root_policy_turn_count) is not int or (
+            self.maximum_eligible_root_policy_turn_count
+            < self.root_policy_turn_count
+        ):
+            raise ValueError("source verification maximum root turn count is invalid")
+
+    @classmethod
+    def from_stage_d_values(
+        cls,
+        *,
+        child_parent_lineage: str,
+        child_parent_session_call_ordinal: int,
+        child_parent_turn: int,
+        parent_tool_call_slot: int,
+        root_policy_turn_count: int,
+        maximum_observed_root_policy_turn_count: int,
+    ) -> SourceRolloutVerificationContext:
+        """Build context from the authenticated Stage-D environment fields."""
+        if type(child_parent_lineage) is not str or not child_parent_lineage:
+            raise ValueError("source verification parent lineage is invalid")
+        if type(child_parent_session_call_ordinal) is not int or (
+            child_parent_session_call_ordinal < 0
+        ):
+            raise ValueError("source verification parent call ordinal is invalid")
+        if type(child_parent_turn) is not int or child_parent_turn < 0:
+            raise ValueError("source verification parent turn is invalid")
+        return cls(
+            PolicyEventAddress(
+                depth=0,
+                lineage=child_parent_lineage,
+                session_call_ordinal=child_parent_session_call_ordinal,
+                turn=child_parent_turn,
+            ),
+            parent_tool_call_slot,
+            root_policy_turn_count,
+            maximum_observed_root_policy_turn_count,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -425,6 +489,8 @@ class SourceRollout:
         verifier: ReceiptVerifier,
         evidence_loader: Callable[[str], bytes],
         render_prompt: Callable[[Mapping[str, Any]], tuple[int, ...]],
+        context: SourceRolloutVerificationContext | None = None,
+        require_context: bool = False,
         encode_action: Callable[[Mapping[str, Any], Mapping[str, Any]], Sequence[int]]
         | None = None,
         validate_action: Callable[
@@ -433,6 +499,12 @@ class SourceRollout:
         | None = None,
     ) -> SourceRollout:
         """Reconstruct one live source only from canonical, anchored evidence."""
+        if type(require_context) is not bool:
+            raise ValueError("source verification context requirement is invalid")
+        if require_context and context is None:
+            raise ValueError("live source reload requires authenticated producer context")
+        if context is not None and type(context) is not SourceRolloutVerificationContext:
+            raise ValueError("source verification context is invalid")
         if type(value) is not bytes:
             raise ValueError("source rollout must be immutable bytes")
         try:
@@ -472,7 +544,7 @@ class SourceRollout:
             raise ValueError("verified source rollout must carry live evidence")
         if envelope["source_sha256"] != source.source_sha256:
             raise ValueError("source rollout digest mismatch")
-        _verify_source_evidence(source, evidence_loader)
+        _verify_source_evidence(source, evidence_loader, context=context)
         _verify_source_producer_receipt(source, verifier)
         if source.to_bytes() != value:
             raise ValueError("source rollout derived fields disagree")
@@ -676,16 +748,21 @@ class SourceRollout:
 
     def to_bytes(self) -> bytes:
         payload = self.to_payload()
-        return canonical_json(
-            {
-                "schema_version": SCHEMA_VERSION,
-                "domain": "redco-stage-d-source-rollout-v1",
-                "source": payload,
-                "source_sha256": self.source_sha256,
-                "producer_receipt": (
-                    None if self.producer_receipt is None else json.loads(self.producer_receipt)
-                ),
-            }
+        return cast(
+            bytes,
+            canonical_json(
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "domain": "redco-stage-d-source-rollout-v1",
+                    "source": payload,
+                    "source_sha256": self.source_sha256,
+                    "producer_receipt": (
+                        None
+                        if self.producer_receipt is None
+                        else json.loads(self.producer_receipt)
+                    ),
+                }
+            ),
         )
 
 
@@ -914,6 +991,8 @@ def _rollout_decision_from_payload(
 def _verify_source_evidence(
     source: SourceRollout,
     evidence_loader: Callable[[str], bytes],
+    *,
+    context: SourceRolloutVerificationContext | None = None,
 ) -> None:
     evidence: dict[str, bytes] = {}
     for digest in (
@@ -946,6 +1025,19 @@ def _verify_source_evidence(
     verify_source_trace_semantics(
         source,
         raw_episode=evidence[source.trace_sha256],
+        strict_two_slot=(source.branch_eligible if context is not None else False),
+        child_parent_event=(context.child_parent_event if context is not None else None),
+        child_parent_tool_call_slot=(
+            context.child_parent_tool_call_slot if context is not None else 0
+        ),
+        root_policy_turn_count=(
+            context.root_policy_turn_count if context is not None else None
+        ),
+        maximum_eligible_root_policy_turn_count=(
+            context.maximum_eligible_root_policy_turn_count
+            if context is not None
+            else 4
+        ),
     )
 
 

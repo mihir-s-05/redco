@@ -134,6 +134,7 @@ class StageDPreparedCallObserver:
             None,
         ],
         watchdog: ActionClosureWatchdog | None = None,
+        before_provider_post: Callable[[bytes], None] | None = None,
     ) -> None:
         if not trace_id:
             raise ValueError("observer trace ID must be nonempty")
@@ -147,6 +148,7 @@ class StageDPreparedCallObserver:
         )
         self._validate_action = validate_action
         self._watchdog = watchdog
+        self._before_provider_post = before_provider_post
         self._root_turns: set[int] = set()
         self._root_policy_events: dict[int, PolicyEventAddress] = {}
         self._child_turns: dict[str, int] = {}
@@ -238,6 +240,8 @@ class StageDPreparedCallObserver:
                 branch_selected=False,
                 raw_response_required=True,
             )
+        if self._before_provider_post is not None:
+            self._before_provider_post(action_key.request)
         if node_kind == "root":
             self._root_turns.add(provenance.session_call_ordinal)
             if provenance.call_kind == "policy":

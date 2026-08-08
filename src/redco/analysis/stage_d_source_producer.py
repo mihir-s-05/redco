@@ -241,6 +241,10 @@ class SourceTopologyIneligible(ValueError):
     """A completed natural rollout that misses the branchable scaffold contract."""
 
 
+class LiveCorrespondenceContractPending(SourceTopologyIneligible):
+    """Live eligible correspondence is dormant until the reviewed Phase 2 law is active."""
+
+
 class StageDSourceRolloutProducer:
     """Capture requests before forwarding, then derive all trainer bytes from the trace."""
 
@@ -695,9 +699,10 @@ class StageDSourceRolloutProducer:
             raise ValueError("captured source rollout ID differs from the Verifiers trace")
         branch_eligible = True
         ineligibility_reason: str | None = None
+        strict_derived: DerivedTraceSource | None = None
         if self._strict_two_slot:
             try:
-                derive_source_trace(
+                strict_derived = derive_source_trace(
                     raw_episode,
                     decisions=captured_decisions,
                     strict_two_slot=True,
@@ -721,6 +726,18 @@ class StageDSourceRolloutProducer:
                 }
             ),
         )
+        if (
+            branch_eligible
+            and strict_derived is not None
+            and any(
+                decision.node_kind == "child"
+                and decision.provenance.branch_selected
+                for decision in decisions
+            )
+        ):
+            raise LiveCorrespondenceContractPending(
+                "live returning-root correspondence is dormant pending Phase 2"
+            )
         reward_evidence = canonical_json(
             {
                 "schema_version": 1,
@@ -862,6 +879,12 @@ def derive_source_trace(
             root_lineage=child_parent_event.lineage,
             parent_tool_call_slot=child_parent_tool_call_slot,
         )
+        if sum(
+            record.scientific_address == child_parent_event for record in provenance
+        ) != 1:
+            raise SourceTopologyIneligible(
+                "source trace lacks the authenticated parent event"
+            )
     addresses = tuple(record.scientific_address for record in provenance)
     if strict_two_slot:
         _verify_two_slot_scaffold(
@@ -1016,14 +1039,34 @@ def verify_source_trace_semantics(
             maximum_eligible_root_policy_turn_count
         ),
     )
-    if (
-        derived.trace_id != source.rollout_id
-        or derived.reward != source.reward
-        or derived.stock_sequences != source.stock_sequences
-        or derived.stock_sequence_decision_ids != source.stock_sequence_decision_ids
-        or derived.child_target_roster != source.child_target_roster
-    ):
-        raise ValueError("source rollout fields differ from semantic trace derivation")
+    mismatches = tuple(
+        name
+        for name, matches in (
+            ("trace_id", derived.trace_id == source.rollout_id),
+            ("reward", derived.reward == source.reward),
+            ("stock_sequences", derived.stock_sequences == source.stock_sequences),
+            (
+                "stock_sequence_decision_ids",
+                derived.stock_sequence_decision_ids == source.stock_sequence_decision_ids,
+            ),
+            ("child_target_roster", derived.child_target_roster == source.child_target_roster),
+        )
+        if not matches
+    )
+    if mismatches:
+        detail = ""
+        if "child_target_roster" in mismatches:
+            detail = (
+                "; child_target_roster_sha256="
+                + _sha256(canonical_json(list(source.child_target_roster)))
+                + "/"
+                + _sha256(canonical_json(list(derived.child_target_roster)))
+            )
+        raise ValueError(
+            "source rollout fields differ from semantic trace derivation: "
+            + ",".join(mismatches)
+            + detail
+        )
 
 
 def _parse_episode(raw_episode: bytes) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -1235,6 +1278,10 @@ def _verify_two_slot_scaffold(
     if len(parents) != 1:
         raise SourceTopologyIneligible(
             "scientific child parent does not biject a committed policy event"
+        )
+    if parents[0].scientific_address.turn != child_parent_event.turn:
+        raise SourceTopologyIneligible(
+            "scientific child parent turn differs from the frozen parent event"
         )
     parent_node = _normalize_openai_message(nodes[parents[0].node_index].get("message"))
     tool_calls = parent_node.get("tool_calls")

@@ -12,6 +12,10 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from run_stage_d_scientific_campaign import (
+    CorrespondenceProtocolError,
+    _require_correspondence_keysets,
+)
 from test_stage_d_evaluation_ledger import _finish_task as _finish_evaluation_task
 from test_stage_d_evaluation_ledger import _start_arm as _start_evaluation_arm
 from test_stage_d_scientific_branch_group import _action, _key
@@ -73,6 +77,10 @@ from redco.analysis.stage_d_receipt_ledger import (
     StageDReceiptLedger,
     inspect_ledger,
 )
+from redco.analysis.stage_d_returning_root_contract import (
+    RAW_EPISODE_SCHEMA,
+    RAW_TRACE_SCHEMA,
+)
 from redco.analysis.stage_d_scientific_branch_group import (
     BranchGroupArtifact,
     BranchGroupSpec,
@@ -90,11 +98,14 @@ from redco.analysis.stage_d_source_artifacts import (
     SourceArtifactError,
     StageDSourceArtifactStore,
 )
+from redco.analysis.stage_d_source_contracts import SourceRolloutVerificationContext
 from redco.analysis.stage_d_source_producer import (
     SAMPLING_CONTRACT,
     SAMPLING_CONTRACT_BYTES,
     SAMPLING_CONTRACT_SHA256,
     SAMPLING_CONTRACT_VERSION,
+    LiveCorrespondenceContractPending,
+    PendingSourcePolicyCall,
     StageDSourceRolloutProducer,
     _normalize_openai_tools,
     _verify_trace_sampling,
@@ -399,11 +410,14 @@ def _child_address() -> PolicyEventAddress:
 
 
 def _target_id(rollout_id: str = "rollout-live") -> str:
-    return structural_child_target_id(
-        PolicyEventAddress(0, "root", 0, 0),
-        rollout_id=rollout_id,
-        parent_tool_call_slot=0,
-        spawn_ordinal=0,
+    return cast(
+        str,
+        structural_child_target_id(
+            PolicyEventAddress(0, "root", 0, 0),
+            rollout_id=rollout_id,
+            parent_tool_call_slot=0,
+            spawn_ordinal=0,
+        ),
     )
 
 
@@ -518,6 +532,30 @@ def test_pinned_sampling_contract_is_lossless_and_canonical() -> None:
     )
     assert canonical_json(SAMPLING_CONTRACT) == SAMPLING_CONTRACT_BYTES
     assert _sha256(SAMPLING_CONTRACT_BYTES) == SAMPLING_CONTRACT_SHA256
+
+
+def test_scientific_runner_rejects_correspondence_keyset_mutations() -> None:
+    eligible = {("group-1", "target-0"), ("group-1", "target-1")}
+    selected = eligible | {("group-1", "excluded-0")}
+    valid = {
+        "eligible_keys": eligible,
+        "selected_keys": selected,
+        "commitment_keys": selected,
+        "recorded_action_keys": selected,
+        "correspondence_keys": eligible,
+    }
+    _require_correspondence_keysets(**valid)
+    mutations = (
+        ("commitment_keys", selected - {("group-1", "target-0")}),
+        ("recorded_action_keys", selected | {("group-1", "extra")}),
+        ("correspondence_keys", eligible | {("wrong-group", "target-0")}),
+        ("correspondence_keys", {("group-1", "wrong-slot")}),
+    )
+    for field, value in mutations:
+        mutated = dict(valid)
+        mutated[field] = value
+        with pytest.raises(CorrespondenceProtocolError):
+            _require_correspondence_keysets(**mutated)
 
 
 @pytest.mark.parametrize(  # type: ignore[untyped-decorator]
@@ -673,6 +711,47 @@ def test_tool_definitions_normalize_without_weakening_the_contract() -> None:
                 _normalize_openai_tools(malformed)
 
 
+def test_real_producer_trace_matches_the_persisted_raw_schema() -> None:
+    from jsonschema import Draft202012Validator, ValidationError
+
+    raw_episode = _episode()
+    episode = cast(dict[str, object], json.loads(raw_episode))
+    Draft202012Validator(RAW_EPISODE_SCHEMA).validate(episode)
+    trace = cast(list[object], episode["traces"])[0]
+    assert isinstance(trace, dict)
+    Draft202012Validator(RAW_TRACE_SCHEMA).validate(trace)
+    call = cast(list[object], trace["calls"])[0]
+    assert isinstance(call, dict)
+    missing_endpoint = dict(call)
+    del missing_endpoint["endpoint"]
+    trace_with_missing_endpoint = dict(trace)
+    trace_with_missing_endpoint["calls"] = [
+        missing_endpoint,
+        *cast(list[object], trace["calls"])[1:],
+    ]
+    with pytest.raises(ValidationError):
+        Draft202012Validator(RAW_TRACE_SCHEMA).validate(trace_with_missing_endpoint)
+    for field in sorted(call):
+        missing = dict(call)
+        del missing[field]
+        mutated_trace = dict(trace)
+        mutated_trace["calls"] = [
+            missing,
+            *cast(list[object], trace["calls"])[1:],
+        ]
+        with pytest.raises(ValidationError):
+            Draft202012Validator(RAW_TRACE_SCHEMA).validate(mutated_trace)
+    unknown_call = dict(call)
+    unknown_call["unknown"] = None
+    unknown_trace = dict(trace)
+    unknown_trace["calls"] = [
+        unknown_call,
+        *cast(list[object], trace["calls"])[1:],
+    ]
+    with pytest.raises(ValidationError):
+        Draft202012Validator(RAW_TRACE_SCHEMA).validate(unknown_trace)
+
+
 def _episode(
     *,
     trace_id: str = "rollout-live",
@@ -810,6 +889,25 @@ def _validate_prepared_action(
 
 def _unexpected_prompt_render(_request: Mapping[str, object]) -> tuple[int, ...]:
     raise AssertionError("prepared source reload must use stored engine prompt IDs")
+
+
+def _source_verification_context(
+    *,
+    lineage: str = "root",
+    session_call_ordinal: int = 0,
+    turn: int = 0,
+    parent_tool_call_slot: int = 0,
+    root_policy_turn_count: int = 2,
+    maximum_root_policy_turn_count: int = 4,
+) -> SourceRolloutVerificationContext:
+    return SourceRolloutVerificationContext.from_stage_d_values(
+        child_parent_lineage=lineage,
+        child_parent_session_call_ordinal=session_call_ordinal,
+        child_parent_turn=turn,
+        parent_tool_call_slot=parent_tool_call_slot,
+        root_policy_turn_count=root_policy_turn_count,
+        maximum_observed_root_policy_turn_count=maximum_root_policy_turn_count,
+    )
 
 
 def _prepared_action(
@@ -1701,6 +1799,8 @@ def test_strict_source_uses_two_structural_slots_despite_reverse_completion(
         evidence_loader=lambda digest: (ledger_root / "evidence" / digest).read_bytes(),
         render_prompt=_unexpected_prompt_render,
         validate_action=_validate_prepared_action,
+        context=_source_verification_context(),
+        require_context=True,
     )
     assert restored == source
     store.assert_no_pending()
@@ -1721,6 +1821,109 @@ def test_strict_source_uses_two_structural_slots_despite_reverse_completion(
     with pytest.raises(SourceArtifactError, match="no durable completion"):
         orphan_store.recover_completed(orphan_ledger_root)
     orphan_writer.close()
+    writer.close()
+
+
+def test_live_finalization_fails_closed_until_returning_root_contract_activation(
+    tmp_path: Path,
+) -> None:
+    ledger_root = tmp_path / "live-correspondence-ledger"
+    writer = StageDReceiptLedger.create(
+        ledger_root,
+        binding=_binding(),
+        master_seed=MASTER_SEED,
+    )
+    parent = PolicyEventAddress(0, "root", 0, 0)
+    rollout_id = "rollout-strict"
+    producer = StageDSourceRolloutProducer(
+        ledger=writer,
+        group_id="group-1",
+        rollout_id=rollout_id,
+        child_parent_event=parent,
+        child_parent_tool_call_slot=0,
+        root_policy_turn_count=2,
+        base_model_manifest_sha256=_sha256(b"base"),
+    )
+    root = _tool_action(81)
+    producer.intercept_policy_call(
+        event_address=parent,
+        action_key=root.key,
+        node_kind="root",
+        target_id=None,
+        branch_selected=False,
+        forward_once=lambda _key: root,
+    )
+    pending: list[tuple[PendingSourcePolicyCall, BehaviorAction]] = []
+    targets = tuple(
+        structural_child_target_id(
+            parent,
+            rollout_id=rollout_id,
+            parent_tool_call_slot=0,
+            spawn_ordinal=ordinal,
+        )
+        for ordinal in (0, 1)
+    )
+    for ordinal, seed in ((0, 82), (1, 83)):
+        address = PolicyEventAddress(
+            1,
+            derive_child_lineage(
+                SpawnScope(1, "root", 0, 0, 0),
+                spawn_ordinal=ordinal,
+            ),
+            0,
+            0,
+        )
+        action = _prepared_action(seed)
+        snapshot_sha256 = writer.put_evidence(f"snapshot:{ordinal}".encode())
+        recorded = writer.commit_pre_action_and_reserve(
+            group_id="group-1",
+            rollout_id=rollout_id,
+            target_roster=targets,
+            target_ordinal=ordinal,
+            target_id=targets[ordinal],
+            target_address=address,
+            pre_action_snapshot_sha256=snapshot_sha256,
+            recorded_action_key=action.key,
+            branch_count=4,
+            continuation_replicates=1,
+            failure_reward=-1.0,
+        )
+        ticket = producer.reserve_policy_call(
+            event_address=address,
+            action_key=action.key,
+            node_kind="child",
+            target_id=targets[ordinal],
+            branch_selected=True,
+            recorded_action_reservation=recorded,
+        )
+        pending.append((ticket, action))
+    producer.complete_policy_call(pending[1][0], action=pending[1][1])
+    producer.complete_policy_call(pending[0][0], action=pending[0][1])
+    continuation = _prepared_action(84)
+    producer.intercept_policy_call(
+        event_address=PolicyEventAddress(0, "root", 1, 1),
+        action_key=continuation.key,
+        node_kind="root",
+        target_id=None,
+        branch_selected=False,
+        forward_once=lambda _key: continuation,
+    )
+    with pytest.raises(LiveCorrespondenceContractPending, match="dormant"):
+        producer.finalize_episode(_strict_episode())
+    scan = inspect_ledger(ledger_root)
+    assert scan.status == "active-clean"
+    correspondence = [
+        receipt
+        for (kind, _), receipt in scan.receipts.items()
+        if kind == "seed_correspondence_map"
+    ]
+    assert correspondence == []
+    assert all(
+        record["record_kind"] != "receipt"
+        or record["body"]["receipt"]["receipt_kind"]
+        != "source_rollout_completed"
+        for record in scan.records
+    )
     writer.close()
 
 
@@ -1886,6 +2089,10 @@ def test_completed_one_child_topology_is_durable_ineligible_evidence(
     assert source.ineligibility_reason == (
         "scientific scaffold has an unexpected policy-call count"
     )
+    assert not any(
+        kind == "seed_correspondence_map"
+        for kind, _ in inspect_ledger(tmp_path / "ledger").receipts
+    )
     assert source.child_target_roster == tuple(
         structural_child_target_id(
             parent,
@@ -1899,6 +2106,48 @@ def test_completed_one_child_topology_is_durable_ineligible_evidence(
         decision for decision in source.decisions if decision.node_kind == "child"
     )
     assert child_decision.outer_weight == 1
+    context = _source_verification_context()
+    restored = SourceRollout.verify_bytes(
+        source.to_bytes(),
+        verifier=writer,
+        evidence_loader=lambda digest: (tmp_path / "ledger" / "evidence" / digest).read_bytes(),
+        render_prompt=_unexpected_prompt_render,
+        validate_action=_validate_prepared_action,
+        context=context,
+        require_context=True,
+    )
+    assert restored == source
+    with pytest.raises(ValueError):
+        SourceRollout.verify_bytes(
+            source.to_bytes(),
+            verifier=writer,
+            evidence_loader=lambda digest: (
+                tmp_path / "ledger" / "evidence" / digest
+            ).read_bytes(),
+            render_prompt=_unexpected_prompt_render,
+            validate_action=_validate_prepared_action,
+        )
+    for invalid_name, invalid_context in (
+        ("parent", _source_verification_context(lineage="wrong-parent")),
+        ("slot", _source_verification_context(parent_tool_call_slot=1)),
+        ("turn", _source_verification_context(turn=1)),
+    ):
+        try:
+            SourceRollout.verify_bytes(
+                source.to_bytes(),
+                verifier=writer,
+                evidence_loader=lambda digest: (
+                    tmp_path / "ledger" / "evidence" / digest
+                ).read_bytes(),
+                render_prompt=_unexpected_prompt_render,
+                validate_action=_validate_prepared_action,
+                context=invalid_context,
+                require_context=True,
+            )
+        except ValueError:
+            pass
+        else:
+            pytest.fail(f"invalid {invalid_name} context was accepted")
     roster = StageDBranchTargetRoster.from_sources(
         (source,),
         planned_source_count=1,

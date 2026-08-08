@@ -38,6 +38,9 @@ from redco.analysis.stage_d_source_artifacts import StageDSourceArtifactStore
 from redco.analysis.stage_d_source_contracts import SourceRollout
 from redco.analysis.stage_d_source_producer import StageDSourceRolloutProducer
 from redco.analysis.stage_d_spawn_provenance import PolicyEventAddress
+from redco.analysis.stage_d_v13_launch_lifecycle import (
+    dispatch_callback_from_environment,
+)
 from redco.contracts import canonical_json
 from redco_evidence_selection_v2.scoring import score_evidence_reply
 from redco_evidence_selection_v2.taskset import (
@@ -641,6 +644,7 @@ class StageDSourceEnv(vf.Env[StageDSourceEnvConfig]):  # type: ignore[misc]
                 ),
                 runtime_snapshot=self._runtime_snapshot(task, agent_config),
                 watchdog=self._watchdog,
+                before_provider_post=dispatch_callback_from_environment(),
                 validate_action=lambda request, message, action_token_ids: (
                     client.validate_assistant_action(
                         request,
@@ -788,11 +792,12 @@ def _episode_seed_and_salt(
     scientific_group_id: str,
     rollout_slot: int,
 ) -> tuple[int, str]:
-    return derive_source_episode_seed_and_salt(
+    seed, cache_salt = derive_source_episode_seed_and_salt(
         master_seed=master_seed,
         scientific_group_id=scientific_group_id,
         rollout_slot=rollout_slot,
     )
+    return int(seed), str(cache_salt)
 
 
 def _episode_sampling(
