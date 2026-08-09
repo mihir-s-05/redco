@@ -31,8 +31,8 @@ from redco.analysis.stage_d_v13_support_readiness import (
 )
 
 ROOT = Path(__file__).parents[3].resolve()
-PARENT_COMMIT = "d3884673faba6dc63916b74960d6a4b5cb691406"
-PARENT_TREE = "e6468e9a857dfbc001e4eb6ad81936de234bdd2a"
+PARENT_COMMIT = "9e8c17f05397e4e10aa38f3ae159c25e73d0d381"
+PARENT_TREE = "61eb8a0c3d2a78e70c1d396b8f0966e535dfbf46"
 OBSERVATION_DOMAIN = "redco-stage-d1-support-v13-prime-inventory-observation-v2"
 OBSERVATION_SCHEMA_VERSION = 2
 CONTRACT_DOMAIN = "redco-stage-d1-support-v13-prime-inventory-contract-v2"
@@ -277,12 +277,33 @@ def _availability(raw: bytes) -> dict[str, Any]:
     if value["total_count"] != len(resources):
         raise ValueError("Prime availability count differs")
     filters = _object(value.get("filters"), "Prime availability filters")
-    if set(filters) != {"gpu_count", "gpu_type"}:
+    if set(filters) != {
+        "gpu_count",
+        "gpu_type",
+        "regions",
+        "socket",
+        "provider",
+        "group_similar",
+    }:
         raise ValueError("Prime availability filter schema differs")
     if type(filters["gpu_count"]) is not int or filters["gpu_count"] != 2:
         raise ValueError("Prime availability GPU-count filter differs")
     if filters["gpu_type"] not in FILTER_GPU_TYPES:
         raise ValueError("Prime availability GPU-type filter differs")
+    regions = filters["regions"]
+    if regions is not None and (
+        not isinstance(regions, list)
+        or not regions
+        or any(not isinstance(region, str) or not region.strip() for region in regions)
+        or len(set(regions)) != len(regions)
+    ):
+        raise ValueError("Prime availability regions filter is malformed")
+    for key in ("socket", "provider"):
+        field = filters[key]
+        if field is not None and (not isinstance(field, str) or not field.strip()):
+            raise ValueError(f"Prime availability {key} filter is malformed")
+    if type(filters["group_similar"]) is not bool or filters["group_similar"] is not True:
+        raise ValueError("Prime availability grouping filter differs")
     parsed = [_parse_resource(resource) for resource in resources]
     eligible = [resource for resource in parsed if resource["eligible"] is True]
     unknown_nonspot = [
@@ -584,7 +605,7 @@ def _bound_file(root: Path, relative: str, expected: str) -> None:
 
 def _authenticate_precommit(root: Path) -> None:
     if _git(root, "rev-parse", "HEAD") != PARENT_COMMIT:
-        raise ValueError("Prime inventory v2 build requires exact parent d3884673")
+        raise ValueError("Prime inventory v2 build requires exact parent 9e8c17f")
     if _git(root, "rev-parse", "HEAD^{tree}") != PARENT_TREE:
         raise ValueError("Prime inventory v2 parent tree differs")
     unexpected = _status_paths(root).difference(CHECKPOINT_PATHS)
@@ -632,6 +653,24 @@ def build_prime_inventory_v2_artifacts(root: Path) -> dict[str, bytes]:
                         name: list(argv) for name, argv in PRIME_READ_ONLY_COMMANDS.items()
                     },
                     "ttl_seconds": OBSERVATION_TTL_SECONDS,
+                    "availability_filters": {
+                        "exact_keys": [
+                            "gpu_count",
+                            "gpu_type",
+                            "group_similar",
+                            "provider",
+                            "regions",
+                            "socket",
+                        ],
+                        "gpu_count": 2,
+                        "allowed_gpu_types": sorted(FILTER_GPU_TYPES),
+                        "group_similar": True,
+                        "nullable_typed_fields": {
+                            "regions": "nonempty_unique_string_array",
+                            "socket": "nonempty_string",
+                            "provider": "nonempty_string",
+                        },
+                    },
                 },
                 "capacity": {
                     "states": sorted(EVIDENCE_STATES),

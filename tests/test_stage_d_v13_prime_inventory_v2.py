@@ -67,7 +67,21 @@ def _resource(
     }
 
 
-def _outputs(resources: list[dict[str, object]]) -> dict[str, bytes]:
+def _outputs(
+    resources: list[dict[str, object]],
+    *,
+    filters: dict[str, object] | None = None,
+) -> dict[str, bytes]:
+    live_filters: dict[str, object] = {
+        "gpu_count": 2,
+        "gpu_type": "L40S_48GB",
+        "regions": None,
+        "socket": None,
+        "provider": None,
+        "group_similar": True,
+    }
+    if filters is not None:
+        live_filters = filters
     return {
         "version": b"Prime CLI version: 0.6.20\n",
         "wallet": canonical_json_bytes(
@@ -86,7 +100,7 @@ def _outputs(resources: list[dict[str, object]]) -> dict[str, bytes]:
             {
                 "gpu_resources": resources,
                 "total_count": len(resources),
-                "filters": {"gpu_count": 2, "gpu_type": "L40S_48GB"},
+                "filters": live_filters,
             }
         ),
     }
@@ -131,6 +145,14 @@ def test_exact_live_shape_is_qualifying_only_with_false_non_spot(
     assert value["resource"]["hourly_rate_cents"] == 150
     assert value["resource"]["raw"]["price_per_hour"] == "$1.50"
     assert value["resource"]["raw"]["price_value"] == 1.5
+    assert value["availability"]["raw_filters"] == {
+        "gpu_count": 2,
+        "gpu_type": "L40S_48GB",
+        "regions": None,
+        "socket": None,
+        "provider": None,
+        "group_similar": True,
+    }
     assert path.read_bytes() == canonical_json_bytes(value)
 
 
@@ -261,6 +283,54 @@ def test_malformed_resources_fail_before_persistence(
             PrimeInventoryObservationProducerV2(ROOT).capture(captured_at_epoch=1_800_000_000)
         assert not output.exists()
 
+    baseline_filters: dict[str, object] = {
+        "gpu_count": 2,
+        "gpu_type": "L40S_48GB",
+        "regions": None,
+        "socket": None,
+        "provider": None,
+        "group_similar": True,
+    }
+    filter_mutations: tuple[tuple[str, object], ...] = (
+        *((f"missing_{key}", None) for key in baseline_filters),
+        ("unknown", None),
+        ("gpu_count", True),
+        ("gpu_type", "A100_80GB"),
+        ("regions", "us-east"),
+        ("regions", ["us-east", "us-east"]),
+        ("socket", 1),
+        ("provider", ""),
+        ("group_similar", 1),
+        ("group_similar", False),
+    )
+    for index, (key, replacement) in enumerate(filter_mutations):
+        filters = dict(baseline_filters)
+        if key.startswith("missing_"):
+            del filters[key.removeprefix("missing_")]
+        else:
+            filters[key] = replacement
+        output = tmp_path / "filter" / str(index) / "observation.json"
+        outputs = _outputs([_resource()], filters=filters)
+
+        def run_filter_command(
+            _self: PrimeInventoryObservationProducerV2,
+            argv: tuple[str, ...],
+            output_map: dict[str, bytes] = outputs,
+        ) -> subprocess.CompletedProcess[bytes]:
+            name = next(
+                name for name, command in PRIME_READ_ONLY_COMMANDS.items() if command == argv
+            )
+            return subprocess.CompletedProcess(argv, 0, output_map[name], b"")
+
+        monkeypatch.setattr(
+            PrimeInventoryObservationProducerV2,
+            "_run_command",
+            run_filter_command,
+        )
+        with pytest.raises(ValueError, match="filter"):
+            PrimeInventoryObservationProducerV2(ROOT).capture(captured_at_epoch=1_800_000_000)
+        assert not output.exists()
+
 
 def test_canonical_and_raw_binding_mutations_fail_closed(
     monkeypatch: pytest.MonkeyPatch,
@@ -329,7 +399,7 @@ def test_artifact_build_is_deterministic_and_non_authorizing() -> None:
     assert set(first) == {CONTRACT_RELATIVE, AUDIT_RELATIVE}
     contract = json.loads(first[CONTRACT_RELATIVE])
     audit = json.loads(first[AUDIT_RELATIVE])
-    assert contract["parent"]["commit"] == ("d3884673faba6dc63916b74960d6a4b5cb691406")
+    assert contract["parent"]["commit"] == ("9e8c17f05397e4e10aa38f3ae159c25e73d0d381")
     assert all(value is False for value in contract["authorization"].values())
     assert all(value is False for value in audit["authorization"].values())
     assert audit["raw_wallet_or_billing_tracked"] is False
