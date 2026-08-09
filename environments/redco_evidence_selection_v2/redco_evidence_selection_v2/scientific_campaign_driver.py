@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+from redco.analysis.stage_d_action_closure import ActionClosureWatchdog
 from redco.analysis.stage_d_dynamic_taint import build_source_causal_graph
 from redco.analysis.stage_d_exact_action import BehaviorAction, ExactActionKey
 from redco.analysis.stage_d_receipt_ledger import StageDReceiptLedger
@@ -56,7 +57,12 @@ class CandidateEngine(Protocol):
 
 
 class BoundEpisodeRunner(Protocol):
-    def __call__(self, binding: StageDScientificEpisodeBinding) -> Awaitable[bytes]: ...
+    def __call__(
+        self,
+        binding: StageDScientificEpisodeBinding,
+        *,
+        watchdog: ActionClosureWatchdog,
+    ) -> Awaitable[bytes]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,20 +106,32 @@ def run_live_scientific_campaign(
         raise ValueError("live scientific campaign requires target groups")
     dispatch = before_provider_post or dispatch_callback_from_environment()
     _verify_artifact_roster_before_calls(live_groups, ledger)
-    scientific_runs = tuple(
-        _group_run(
-            group,
-            ledger=ledger,
-            event_loop=event_loop,
-            before_provider_post=dispatch,
+    watchdog = ActionClosureWatchdog()
+    try:
+        scientific_runs = tuple(
+            _group_run(
+                group,
+                ledger=ledger,
+                event_loop=event_loop,
+                before_provider_post=dispatch,
+                watchdog=watchdog,
+            )
+            for group in live_groups
         )
-        for group in live_groups
-    )
-    return run_scientific_campaign(
-        scientific_runs,
-        ledger=ledger,
-        verifier=ledger,
-    )
+        result = run_scientific_campaign(
+            scientific_runs,
+            ledger=ledger,
+            verifier=ledger,
+        )
+        watchdog.complete()
+        return result
+    except BaseException as error:
+        if not watchdog.terminal:
+            try:
+                watchdog.fail("campaign", "error")
+            except BaseException as terminal_error:
+                raise error.with_traceback(error.__traceback__) from terminal_error
+        raise
 
 
 def _verify_artifact_roster_before_calls(
@@ -152,6 +170,7 @@ def _group_run(
     ledger: StageDReceiptLedger,
     event_loop: asyncio.AbstractEventLoop,
     before_provider_post: Callable[[bytes], None] | None,
+    watchdog: ActionClosureWatchdog,
 ) -> ScientificGroupRun:
     records = extract_v2_rlm_provenance(dict(group.source_trace))
     graph = build_source_causal_graph(records)
@@ -170,7 +189,9 @@ def _group_run(
             expected_terminal_reply=expected_reply,
             ledger=ledger,
         )
-        return event_loop.run_until_complete(group.run_episode(binding))
+        return event_loop.run_until_complete(
+            group.run_episode(binding, watchdog=watchdog)
+        )
 
     def sample_candidate(
         *,
@@ -330,7 +351,9 @@ def _group_run(
         ledger.bind_execution_context(attempt, context_sha256=context_sha256)
         ledger.mark_execution_dispatched(attempt)
         try:
-            return event_loop.run_until_complete(group.run_episode(binding))
+            return event_loop.run_until_complete(
+                group.run_episode(binding, watchdog=watchdog)
+            )
         except BaseException as error:
             failure_evidence = canonical_json(
                 {

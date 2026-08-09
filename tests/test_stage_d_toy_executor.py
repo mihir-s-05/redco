@@ -422,6 +422,19 @@ def _make_fixture(
         failure_reward=-1.0,
     )
     request_sha = writer.put_evidence(recorded.key.request)
+    source_reservation = writer.reserve_source_policy_call(
+        group_id="group-1",
+        rollout_id="rollout-1",
+        decision_id="child-decision-0",
+        node_kind="child",
+        target_id="target-0",
+        target_ordinal=0,
+        target_address=PolicyEventAddress(1, "root/child", 0, 0),
+        recorded_action_key=recorded.key,
+        request_sha256=request_sha,
+        branch_selected=True,
+        recorded_action_reservation=reservation,
+    )
     writer.mark_recorded_action_model_call_started(
         reservation,
         request_sha256=request_sha,
@@ -432,6 +445,11 @@ def _make_fixture(
         action=recorded,
         response_sha256=response_sha,
     )
+    source_completion = writer.complete_source_policy_call(
+        source_reservation,
+        action=recorded,
+        response_sha256=response_sha,
+    )
     correspondence_evidence = writer.put_evidence(b"frozen-correspondence")
     correspondence_receipt = writer.freeze_correspondence(
         group_id="group-1",
@@ -439,6 +457,50 @@ def _make_fixture(
         recorded_action=recorded,
         matched_addresses=(MATCHED,),
         evidence_sha256=correspondence_evidence,
+    )
+    trace = writer.put_evidence(b"raw-trace")
+    reward = writer.put_evidence(b"reward-evidence")
+    stock = writer.put_evidence(b"stock-sequences")
+    writer.record_source_rollout_completed(
+        group_id="group-1",
+        rollout_id="rollout-1",
+        source_sha256="5" * 64,
+        trace_sha256=trace,
+        reward_evidence_sha256=reward,
+        stock_sequences_evidence_sha256=stock,
+        base_model_manifest_sha256="6" * 64,
+        decision_ids=("child-decision-0",),
+        decision_completion_receipt_sha256s=(_sha256(source_completion),),
+    )
+    writer.record_branch_target_roster(
+        canonical_json(
+            {
+                "schema_version": 2,
+                "domain": "redco-stage-d-branch-target-roster-v2",
+                "planned_source_count": 1,
+                "completed_source_count": 1,
+                "eligible_source_count": 1,
+                "ineligible_source_count": 0,
+                "minimum_eligible_sources": 1,
+                "eligibility_passed": True,
+                "source_sha256s": ["5" * 64],
+                "targets": [
+                    {
+                        "source_sha256": "5" * 64,
+                        "group_id": "group-1",
+                        "rollout_id": "rollout-1",
+                        "decision_id": "child-decision-0",
+                        "target_id": "target-0",
+                        "target_ordinal": 0,
+                        "event_address": {
+                            **PolicyEventAddress(1, "root/child", 0, 0).as_payload(),
+                            "turn": 0,
+                        },
+                    }
+                ],
+                "excluded_targets": [],
+            }
+        )
     )
     commitment = PreActionTargetCommitment.from_receipt(
         reservation.commitment_receipt,
@@ -481,7 +543,7 @@ def _make_fixture(
 
 def _qa(fixture: Fixture) -> bytes:
     report = fixture.writer.put_evidence(b"reconstruction-qa")
-    return fixture.writer.record_reconstruction_qa(
+    receipt = fixture.writer.record_reconstruction_qa(
         group_id="group-1",
         target_id="target-0",
         recorded_action=fixture.spec.recorded_action,
@@ -489,6 +551,8 @@ def _qa(fixture: Fixture) -> bytes:
         report_sha256=report,
         actual_cost=ActualEvaluationCost(cpu_seconds=0.01, wall_seconds=0.01),
     )
+    fixture.writer.seal_reconstruction_qa_barrier()
+    return receipt
 
 
 def _executor(

@@ -671,8 +671,12 @@ class ProductionSupportActuator:
                 raise TimeoutError(f"{owner} exceeded the frozen campaign bound") from error
             if process.returncode != 0:
                 self._refresh_dispatch_state()
-                message = stderr.decode("utf-8", "replace")[-2000:]
-                raise RuntimeError(f"{owner} failed: {message}")
+                raise subprocess.CalledProcessError(
+                    process.returncode,
+                    command,
+                    output=stdout,
+                    stderr=stderr,
+                )
             self._refresh_dispatch_state()
             del stdout
 
@@ -781,6 +785,14 @@ def _terminal_payload(
     if error is not None:
         payload["error_type"] = type(error).__qualname__
         payload["error_message_sha256"] = sha256_bytes(str(error).encode("utf-8"))
+        if isinstance(error, subprocess.CalledProcessError):
+            output = error.output
+            stderr = error.stderr
+            if isinstance(output, bytes):
+                payload["error_output_sha256"] = sha256_bytes(output)
+            if isinstance(stderr, bytes):
+                payload["error_stderr_sha256"] = sha256_bytes(stderr)
+            payload["error_returncode"] = error.returncode
     if evidence is not None:
         payload["evidence"] = evidence
     return cast(bytes, canonical_json_bytes(payload))

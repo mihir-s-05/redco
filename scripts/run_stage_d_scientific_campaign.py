@@ -10,9 +10,10 @@ import json
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
+from redco.analysis.stage_d_action_closure import ActionClosureWatchdog
 from redco.analysis.stage_d_branch_artifacts import StageDBranchTargetRoster
 from redco.analysis.stage_d_exact_action import BehaviorAction
 from redco.analysis.stage_d_protocol_manifest import StageDProtocolManifest
@@ -436,7 +437,11 @@ def _run(args: argparse.Namespace) -> None:
         if len(set(paper_ids.values())) != len(sources):
             raise ValueError("scientific source roster repeats an authenticated paper")
 
-        async def run_episode(binding: StageDScientificEpisodeBinding) -> bytes:
+        async def run_episode(
+            binding: StageDScientificEpisodeBinding,
+            *,
+            watchdog: ActionClosureWatchdog,
+        ) -> bytes:
             identity = binding.episode_identity
             output = args.episode_output / f"episode-{identity}"
             episode_config = config.model_copy(
@@ -449,13 +454,11 @@ def _run(args: argparse.Namespace) -> None:
                 },
                 deep=True,
             )
-            return cast(
-                bytes,
-                await run_bound_scientific_episode(
-                    binding=binding,
-                    env_config=config.env,
-                    eval_config=episode_config,
-                ),
+            return await run_bound_scientific_episode(
+                binding=binding,
+                env_config=config.env,
+                eval_config=episode_config,
+                watchdog=watchdog,
             )
 
         eos_token_id = json.loads(config.env.tokenizer_manifest_path.read_bytes()).get(

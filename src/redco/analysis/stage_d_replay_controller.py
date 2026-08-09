@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol, TypeVar, cast
 
+from redco.analysis.stage_d_action_closure import ActionClosureWatchdog
 from redco.analysis.stage_d_dynamic_taint import (
     DynamicCausalTaintTracker,
     ReplayDisposition,
@@ -53,9 +55,51 @@ class SeedOracleLike(Protocol):
     def seed_for(self, address: PolicyEventAddress) -> ScheduledSeed: ...
 
 
+_T = TypeVar("_T")
+
+
+async def _discard_provider_operation(operation: Awaitable[Any]) -> None:
+    """Close or cancel a forbidden QA provider operation without awaiting it."""
+
+    if isinstance(operation, asyncio.Future):
+        operation.cancel()
+        try:
+            await operation
+        except BaseException:
+            return
+        return
+    close = getattr(operation, "close", None)
+    if not callable(close):
+        raise TypeError("QA provider operation is not safely closable")
+    close()
+
+
+@dataclass(frozen=True, slots=True)
+class _ScientificReplayWatchdog:
+    """Compose one campaign watchdog with the authenticated replay mode."""
+
+    watchdog: ActionClosureWatchdog
+    mode: Literal["qa", "execution"]
+
+    def __post_init__(self) -> None:
+        if type(self.watchdog) is not ActionClosureWatchdog:
+            raise TypeError("scientific replay requires the exact watchdog owner")
+        if self.mode not in {"qa", "execution"}:
+            raise ValueError("scientific replay watchdog mode is invalid")
+
+    async def run_provider_call(self, operation: Awaitable[_T]) -> _T:
+        if self.mode == "qa":
+            await _discard_provider_operation(operation)
+            raise RuntimeError("reconstruction QA forbids provider calls")
+        return cast(_T, await self.watchdog.run_provider_call(operation))
+
+    async def run_concurrent_children(self, operation: Awaitable[_T]) -> _T:
+        return cast(_T, await self.watchdog.run_concurrent_children(operation))
+
+
 def preload_replay_runtime_types() -> None:
     """Fail before ledger mutation if the pinned renderer interception API is absent."""
-    from renderers.client import (  # type: ignore[import-not-found]
+    from renderers.client import (
         PreparedGenerateForward,
         PreparedGenerateReturn,
     )
@@ -210,6 +254,7 @@ class StageDReconstructionQAController:
         *,
         source_records: tuple[RecordedRLMProvenanceV2, ...],
         source_actions: Mapping[PolicyEventAddress, BehaviorAction],
+        watchdog: _ScientificReplayWatchdog,
         pre_forward_guard: Callable[[], None] | None = None,
     ) -> None:
         records = {record.scientific_address: record for record in source_records}
@@ -224,6 +269,9 @@ class StageDReconstructionQAController:
         self._raw_observed: set[PolicyEventAddress] = set()
         self._consumed: set[PolicyEventAddress] = set()
         self._lock = threading.Lock()
+        if watchdog.mode != "qa":
+            raise ValueError("reconstruction QA requires the QA watchdog mode")
+        self._watchdog = watchdog
         self._pre_forward_guard = pre_forward_guard
         self._director = ExactSamplingDirector(self._plan)
 
@@ -234,6 +282,12 @@ class StageDReconstructionQAController:
     ) -> SamplingConfigLike:
         self._guard()
         return self._director.direct_sampling(observer_context, sampling)
+
+    async def run_provider_call(self, operation: Awaitable[_T]) -> _T:
+        return await self._watchdog.run_provider_call(operation)
+
+    async def run_concurrent_children(self, operation: Awaitable[_T]) -> _T:
+        return await self._watchdog.run_concurrent_children(operation)
 
     async def before_forward(self, prepared: PreparedRequestLike) -> object:
         self._guard()
@@ -247,7 +301,7 @@ class StageDReconstructionQAController:
                 raise ValueError("QA prepared request lacks one frozen replay plan") from error
         _require_prepared_sampling(prepared, override)
         _require_prepared_action(prepared, action)
-        from renderers.client import PreparedGenerateReturn  # type: ignore[import-not-found]
+        from renderers.client import PreparedGenerateReturn
 
         return PreparedGenerateReturn(
             ticket=_ReconstructionQATicket(address, action),
@@ -320,6 +374,7 @@ class StageDReplayCallController:
         seed_oracle: SeedOracleLike,
         ledger: StageDReceiptLedger,
         attempt: ExecutionAttempt,
+        watchdog: _ScientificReplayWatchdog,
         pre_forward_guard: Callable[[], None] | None = None,
     ) -> None:
         actions = dict(source_actions)
@@ -335,6 +390,9 @@ class StageDReplayCallController:
         self._ledger = ledger
         self._attempt = attempt
         self._lock = threading.Lock()
+        if watchdog.mode != "execution":
+            raise ValueError("scientific replay requires the execution watchdog mode")
+        self._watchdog = watchdog
         self._plans: dict[PolicyEventAddress, _ReplayPlan] = {}
         self._logical_downstream_observed = False
         self._target_injection_delivered = False
@@ -348,6 +406,12 @@ class StageDReplayCallController:
     ) -> SamplingConfigLike:
         self._guard()
         return self._director.direct_sampling(observer_context, sampling)
+
+    async def run_provider_call(self, operation: Awaitable[_T]) -> _T:
+        return await self._watchdog.run_provider_call(operation)
+
+    async def run_concurrent_children(self, operation: Awaitable[_T]) -> _T:
+        return await self._watchdog.run_concurrent_children(operation)
 
     async def before_forward(self, prepared: PreparedRequestLike) -> object:
         self._guard()
@@ -420,20 +484,21 @@ class StageDReplayCallController:
             )
             return
         if type(ticket) is ReplayOverrideTicket:
+            override_ticket = cast(ReplayOverrideTicket, ticket)
             action = (
                 self._candidate_action
-                if ticket.disposition == "inject"
-                else self._source_actions.get(ticket.address)
+                if override_ticket.disposition == "inject"
+                else self._source_actions.get(override_ticket.address)
             )
             if action is None:
                 raise ValueError("delivered replay override lacks its exact action")
             _require_typed_action_response(response, action)
             self._ledger.mark_execution_override_delivered(
                 self._attempt,
-                ticket,
+                override_ticket,
                 typed_response_sha256=response_sha256,
             )
-            if ticket.disposition == "inject":
+            if override_ticket.disposition == "inject":
                 with self._lock:
                     if self._target_injection_delivered:
                         raise ValueError("target injection was delivered twice")
@@ -454,7 +519,8 @@ class StageDReplayCallController:
             )
             return
         if type(ticket) is ReplayOverrideTicket:
-            if response_sha256 != ticket.response_content_sha256:
+            override_ticket = cast(ReplayOverrideTicket, ticket)
+            if response_sha256 != override_ticket.response_content_sha256:
                 raise ValueError("prepared replay override response bytes changed")
             return
         raise ValueError("prepared replay raw response ticket has the wrong type")
@@ -572,7 +638,7 @@ def frozen_engine_response_content(action: BehaviorAction) -> bytes:
             }
         ],
     }
-    return canonical_json(payload)
+    return cast(bytes, canonical_json(payload))
 
 
 def _require_same_qa_provenance(
@@ -641,29 +707,32 @@ def _require_prepared_action(
 
 
 def _prepared_evidence(prepared: PreparedRequestLike) -> bytes:
-    return canonical_json(
-        {
-            "schema_version": 1,
-            "domain": "redco-stage-d-replay-prepared-request-v1",
-            "application_request": _canonical_object(
-                prepared.application_request,
-                "application request",
-            ),
-            "engine_endpoint": prepared.engine_endpoint,
-            "engine_request": _canonical_object(
-                prepared.engine_request,
-                "engine request",
-            ),
-            "engine_headers": _canonical_object(
-                prepared.engine_headers,
-                "engine headers",
-            ),
-            "observer_context": _canonical_object(
-                prepared.observer_context,
-                "observer context",
-            ),
-            "prompt_token_ids": list(prepared.prompt_token_ids),
-        }
+    return cast(
+        bytes,
+        canonical_json(
+            {
+                "schema_version": 1,
+                "domain": "redco-stage-d-replay-prepared-request-v1",
+                "application_request": _canonical_object(
+                    prepared.application_request,
+                    "application request",
+                ),
+                "engine_endpoint": prepared.engine_endpoint,
+                "engine_request": _canonical_object(
+                    prepared.engine_request,
+                    "engine request",
+                ),
+                "engine_headers": _canonical_object(
+                    prepared.engine_headers,
+                    "engine headers",
+                ),
+                "observer_context": _canonical_object(
+                    prepared.observer_context,
+                    "observer context",
+                ),
+                "prompt_token_ids": list(prepared.prompt_token_ids),
+            }
+        ),
     )
 
 
@@ -678,36 +747,39 @@ def _typed_response_evidence(response: object) -> bytes:
         or getattr(tokens, "kept_tokens", None) is not None
     ):
         raise ValueError("Stage-D replay forbids token sidecars")
-    return canonical_json(
-        {
-            "schema_version": 1,
-            "domain": "redco-stage-d-replay-typed-response-v1",
-            "request_id": getattr(response, "id", None),
-            "finish_reason": getattr(response, "finish_reason", None),
-            "message": _response_message(raw),
-            "prompt_token_ids": _integer_list(
-                getattr(tokens, "prompt_ids", None),
-                "prompt token IDs",
-            ),
-            "completion_token_ids": _integer_list(
-                getattr(tokens, "completion_ids", None),
-                "completion token IDs",
-            ),
-            "completion_logprobs": _float_list(
-                getattr(tokens, "completion_logprobs", None),
-                "completion logprobs",
-            ),
-            "usage": {
-                "prompt_tokens": _exact_nonnegative_int(
-                    getattr(usage, "input_tokens", None),
-                    "prompt tokens",
+    return cast(
+        bytes,
+        canonical_json(
+            {
+                "schema_version": 1,
+                "domain": "redco-stage-d-replay-typed-response-v1",
+                "request_id": getattr(response, "id", None),
+                "finish_reason": getattr(response, "finish_reason", None),
+                "message": _response_message(raw),
+                "prompt_token_ids": _integer_list(
+                    getattr(tokens, "prompt_ids", None),
+                    "prompt token IDs",
                 ),
-                "completion_tokens": _exact_nonnegative_int(
-                    getattr(usage, "completion_tokens", None),
-                    "completion tokens",
+                "completion_token_ids": _integer_list(
+                    getattr(tokens, "completion_ids", None),
+                    "completion token IDs",
                 ),
-            },
-        }
+                "completion_logprobs": _float_list(
+                    getattr(tokens, "completion_logprobs", None),
+                    "completion logprobs",
+                ),
+                "usage": {
+                    "prompt_tokens": _exact_nonnegative_int(
+                        getattr(usage, "input_tokens", None),
+                        "prompt tokens",
+                    ),
+                    "completion_tokens": _exact_nonnegative_int(
+                        getattr(usage, "completion_tokens", None),
+                        "completion tokens",
+                    ),
+                },
+            }
+        ),
     )
 
 

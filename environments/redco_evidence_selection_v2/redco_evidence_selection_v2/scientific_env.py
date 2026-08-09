@@ -6,10 +6,11 @@ import asyncio
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import verifiers.v1 as vf
 
+from redco.analysis.stage_d_action_closure import ActionClosureWatchdog
 from redco.analysis.stage_d_dynamic_taint import DynamicCausalTaintTracker
 from redco.analysis.stage_d_exact_action import BehaviorAction
 from redco.analysis.stage_d_receipt_ledger import (
@@ -20,6 +21,7 @@ from redco.analysis.stage_d_replay_controller import (
     SeedOracleLike,
     StageDReconstructionQAController,
     StageDReplayCallController,
+    _ScientificReplayWatchdog,
 )
 from redco.analysis.stage_d_runtime_isolation import (
     StageDIsolatedRuntimeContract,
@@ -103,6 +105,17 @@ class StageDScientificEpisodeBinding:
         return matching[0]
 
     @property
+    def target_id(self) -> str:
+        matching: list[object] = [
+            decision.target_id
+            for decision in self.source.decisions
+            if decision.event_address == self.target
+        ]
+        if len(matching) != 1 or type(matching[0]) is not str or not matching[0]:
+            raise ValueError("scientific target lacks one target ID")
+        return matching[0]
+
+    @property
     def episode_identity(self) -> str:
         attempt = self.execution_attempt
         payload = {
@@ -120,21 +133,28 @@ class StageDScientificEpisodeBinding:
         return _sha256(canonical_json(payload))
 
     def _target_id(self) -> str:
-        matching = [
-            decision.target_id
-            for decision in self.source.decisions
-            if decision.event_address == self.target
-        ]
-        if len(matching) != 1 or not matching[0]:
-            raise ValueError("scientific target lacks one target ID")
-        return matching[0]
+        return self.target_id
 
 
 class _OneTaskset:
     def __init__(self, task: StageDSourceTask) -> None:
         self._task = task
+        self._watchdog: ActionClosureWatchdog | None = None
+
+    def bind_stage_d_watchdog(self, watchdog: ActionClosureWatchdog) -> None:
+        if type(watchdog) is not ActionClosureWatchdog:
+            raise TypeError("scientific taskset requires the exact watchdog owner")
+        if self._watchdog is not None and self._watchdog is not watchdog:
+            raise RuntimeError("scientific taskset watchdog was rebound")
+        self._watchdog = watchdog
+
+    @classmethod
+    def task_type(cls) -> type[object]:
+        return cast(type[object], StageDSourceTask)
 
     def load(self) -> list[StageDSourceTask]:
+        if self._watchdog is not None:
+            self._task.bind_stage_d_watchdog(self._watchdog)
         return [self._task]
 
     def select(self, num_tasks: int, shuffle: bool) -> list[StageDSourceTask]:
@@ -147,7 +167,7 @@ class _OneTaskset:
         return []
 
 
-class StageDScientificReplayEnv(vf.Env[StageDSourceEnvConfig]):
+class StageDScientificReplayEnv(vf.Env[StageDSourceEnvConfig]):  # type: ignore[misc]
     """Run one isolated replay with shared sampling and response control."""
 
     def __init__(
@@ -155,12 +175,17 @@ class StageDScientificReplayEnv(vf.Env[StageDSourceEnvConfig]):
         config: StageDSourceEnvConfig,
         *,
         binding: StageDScientificEpisodeBinding,
+        watchdog: ActionClosureWatchdog,
     ) -> None:
         super().__init__(config)
+        if type(watchdog) is not ActionClosureWatchdog:
+            raise TypeError("scientific replay requires the exact watchdog owner")
         self._validate_policy_identity(config, binding)
-        self.taskset = _OneTaskset(binding.task)  # type: ignore[assignment]
+        self.taskset = _OneTaskset(binding.task)
+        self.taskset.bind_stage_d_watchdog(watchdog)
         self._task_cls = StageDSourceTask
         self._binding = binding
+        self._watchdog = watchdog
         self._controllers: dict[
             str, StageDReconstructionQAController | StageDReplayCallController
         ] = {}
@@ -263,11 +288,16 @@ class StageDScientificReplayEnv(vf.Env[StageDSourceEnvConfig]):
         if self._runtime_snapshot(task, agent_config) != self._binding.expected_runtime_snapshot:
             raise ValueError("scientific replay runtime/workspace snapshot changed")
         self._runtime_verified.add(trace.id)
+        replay_watchdog = _ScientificReplayWatchdog(
+            watchdog=self._watchdog,
+            mode=self._binding.mode,
+        )
         if self._binding.mode == "qa":
             controller: StageDReconstructionQAController | StageDReplayCallController = (
                 StageDReconstructionQAController(
                     source_records=self._binding.source_records,
                     source_actions=self._binding.source_actions,
+                    watchdog=replay_watchdog,
                     pre_forward_guard=lambda: self._require_runtime_preflight(trace),
                 )
             )
@@ -287,6 +317,7 @@ class StageDScientificReplayEnv(vf.Env[StageDSourceEnvConfig]):
                 seed_oracle=self._binding.seed_oracle,
                 ledger=self._binding.ledger,
                 attempt=self._binding.execution_attempt,
+                watchdog=replay_watchdog,
                 pre_forward_guard=lambda: self._require_runtime_preflight(trace),
             )
         self._controllers[trace.id] = controller
@@ -314,89 +345,112 @@ class StageDScientificReplayEnv(vf.Env[StageDSourceEnvConfig]):
         async with self._run_lock:
             if self.receipt is not None:
                 raise RuntimeError("scientific environment already completed its one episode")
-            episode = await super().run_episode(task, ctx, **kwargs)
+            if self._binding.mode == "qa":
+                self._binding.ledger.require_reconstruction_qa_ready(
+                    group_id=self._binding.source.group_id,
+                    target_id=self._binding.target_id,
+                    recorded_action=self._binding.recorded_action,
+                    actual_cost=ActualEvaluationCost(),
+                )
+            episode_operation = super().run_episode(task, ctx, **kwargs)
+            episode = await self._watchdog.run_episode(episode_operation)
             if len(episode.traces) != 1:
                 raise RuntimeError("scientific replay episode did not complete exactly once")
             trace = episode.traces[0]
             controller = self._controllers.get(trace.id)
             if controller is None or trace.id not in self._runtime_verified:
                 raise RuntimeError("scientific replay bypassed its shared controller")
-            allow_terminal_truncation = bool(
-                self._binding.mode == "execution"
-                and isinstance(controller, StageDReplayCallController)
-                and _is_clean_terminal_truncation(episode, trace)
-            )
-            if isinstance(controller, StageDReplayCallController):
-                controller.finalize(
-                    allow_terminal_truncation=allow_terminal_truncation
+
+            def require_finalization_open() -> None:
+                if self._watchdog.closed:
+                    raise RuntimeError(
+                        "scientific replay finalization is closed before ledger mutation"
+                    )
+
+            async def finalize_and_record() -> bytes:
+                require_finalization_open()
+                allow_terminal_truncation = bool(
+                    self._binding.mode == "execution"
+                    and isinstance(controller, StageDReplayCallController)
+                    and _is_clean_terminal_truncation(episode, trace)
                 )
-            else:
-                controller.finalize()
-            if self._binding.mode == "qa":
-                if not episode.ok or not trace.ok or episode.errors or trace.errors:
-                    raise RuntimeError("scientific replay QA did not complete cleanly")
-                if trace.last_reply != self._binding.expected_terminal_reply:
-                    raise RuntimeError("scientific replay changed the terminal reply")
-                outcome_kind = None
-            else:
-                assert isinstance(controller, StageDReplayCallController)
-                assert self._binding.candidate_action is not None
-                outcome_kind = _classify_execution_outcome(
-                    episode=episode,
-                    trace=trace,
-                    action=self._binding.candidate_action,
-                    controller=controller,
+                if isinstance(controller, StageDReplayCallController):
+                    controller.finalize(
+                        allow_terminal_truncation=allow_terminal_truncation
+                    )
+                else:
+                    controller.finalize()
+                require_finalization_open()
+                if self._binding.mode == "qa":
+                    if not episode.ok or not trace.ok or episode.errors or trace.errors:
+                        raise RuntimeError("scientific replay QA did not complete cleanly")
+                    if trace.last_reply != self._binding.expected_terminal_reply:
+                        raise RuntimeError("scientific replay changed the terminal reply")
+                    outcome_kind = None
+                else:
+                    assert isinstance(controller, StageDReplayCallController)
+                    assert self._binding.candidate_action is not None
+                    outcome_kind = _classify_execution_outcome(
+                        episode=episode,
+                        trace=trace,
+                        action=self._binding.candidate_action,
+                        controller=controller,
+                    )
+                score_evidence = canonical_json(
+                    {
+                        "schema_version": 1,
+                        "domain": "redco-stage-d-live-replay-score-v1",
+                        "mode": self._binding.mode,
+                        "source_sha256": self._binding.source.source_sha256,
+                        "trace_reward": trace.reward,
+                        "source_reward": self._binding.source.reward,
+                        "outcome_kind": (
+                            outcome_kind.value if outcome_kind is not None else None
+                        ),
+                        "stop_condition": trace.stop_condition,
+                        "episode_ok": episode.ok,
+                        "trace_ok": trace.ok,
+                        "terminal_reply_exact": (
+                            True if self._binding.mode == "qa" else None
+                        ),
+                        "runtime_snapshot_sha256": _sha256(
+                            self._binding.expected_runtime_snapshot
+                        ),
+                    }
                 )
-            score_evidence = canonical_json(
-                {
-                    "schema_version": 1,
-                    "domain": "redco-stage-d-live-replay-score-v1",
-                    "mode": self._binding.mode,
-                    "source_sha256": self._binding.source.source_sha256,
-                    "trace_reward": trace.reward,
-                    "source_reward": self._binding.source.reward,
-                    "outcome_kind": (
-                        outcome_kind.value if outcome_kind is not None else None
-                    ),
-                    "stop_condition": trace.stop_condition,
-                    "episode_ok": episode.ok,
-                    "trace_ok": trace.ok,
-                    "terminal_reply_exact": (
-                        True if self._binding.mode == "qa" else None
-                    ),
-                    "runtime_snapshot_sha256": _sha256(
-                        self._binding.expected_runtime_snapshot
-                    ),
-                }
-            )
-            evidence_sha256 = self._binding.ledger.put_evidence(score_evidence)
-            if self._binding.mode == "qa":
-                if trace.reward != self._binding.source.reward:
-                    raise RuntimeError("reconstruction QA changed the terminal reward")
-                self.receipt = self._binding.ledger.record_reconstruction_qa(
-                    group_id=self._binding.source.group_id,
-                    target_id=self._target_id(),
-                    recorded_action=self._binding.recorded_action,
-                    passed=True,
-                    report_sha256=evidence_sha256,
-                    actual_cost=ActualEvaluationCost(
-                        generated_tokens=0,
-                        judge_calls=0,
-                        cpu_seconds=0.0,
-                        gpu_seconds=0.0,
-                        wall_seconds=trace.timing.generation.duration,
-                        storage_bytes=0,
-                    ),
-                )
-            else:
+                # No ledger mutation begins until this cancellable checkpoint.
+                # The commit section below has no await points, so a watchdog
+                # timeout cannot race a partially running finalizer worker.
+                await asyncio.sleep(0)
+                require_finalization_open()
+                if self._binding.mode == "qa":
+                    if trace.reward != self._binding.source.reward:
+                        raise RuntimeError("reconstruction QA changed the terminal reward")
+                    require_finalization_open()
+                    return await self._binding.ledger.record_reconstruction_qa_transaction(
+                        group_id=self._binding.source.group_id,
+                        target_id=self._target_id(),
+                        recorded_action=self._binding.recorded_action,
+                        passed=True,
+                        report=score_evidence,
+                        actual_cost=ActualEvaluationCost(
+                            generated_tokens=0,
+                            judge_calls=0,
+                            cpu_seconds=0.0,
+                            gpu_seconds=0.0,
+                            wall_seconds=trace.timing.generation.duration,
+                            storage_bytes=0,
+                        ),
+                    )
                 assert isinstance(controller, StageDReplayCallController)
                 assert self._binding.execution_attempt is not None
                 assert outcome_kind is not None
-                self.receipt = self._binding.ledger.finish_execution(
+                require_finalization_open()
+                return await self._binding.ledger.finish_execution_transaction(
                     self._binding.execution_attempt,
                     outcome_kind=outcome_kind,
                     scored_reward=trace.reward,
-                    scorer_evidence_sha256=evidence_sha256,
+                    scorer_evidence=score_evidence,
                     latency_seconds=trace.timing.generation.duration,
                     dollars=0.0,
                     judge_calls=0,
@@ -405,18 +459,13 @@ class StageDScientificReplayEnv(vf.Env[StageDSourceEnvConfig]):
                     wall_seconds=trace.timing.generation.duration,
                     storage_bytes=0,
                 )
+
+            self.receipt = await self._watchdog.run_finalizer(finalize_and_record())
             self._terminal.add(trace.id)
             return episode
 
     def _target_id(self) -> str:
-        matches = [
-            decision.target_id
-            for decision in self._binding.source.decisions
-            if decision.event_address == self._binding.target
-        ]
-        if len(matches) != 1 or not matches[0]:
-            raise ValueError("scientific target lacks one target ID")
-        return matches[0]
+        return self._binding.target_id
 
     def _runtime_snapshot(self, task: vf.Task, agent_config: vf.AgentConfig) -> bytes:
         image = self.config.taskset.isolated_runtime_image
@@ -437,14 +486,14 @@ class StageDScientificReplayEnv(vf.Env[StageDSourceEnvConfig]):
             mode="json",
             exclude_none=False,
         )
-        return build_pre_action_runtime_snapshot(
+        return cast(bytes, build_pre_action_runtime_snapshot(
             contract=StageDIsolatedRuntimeContract(image),
             runtime_config=runtime,
             task_data=task.data.model_dump(mode="json", exclude_none=False),
             task_config=task.config.model_dump(mode="json", exclude_none=False),
             paper=task.data.paper.encode("utf-8"),
             frozen_workspace_manifest=manifest,
-        )
+        ))
 
     @staticmethod
     def _require_runtime_preflight(trace: vf.Trace) -> None:
@@ -523,6 +572,7 @@ async def run_bound_scientific_episode(
     binding: StageDScientificEpisodeBinding,
     env_config: StageDSourceEnvConfig,
     eval_config: Any,
+    watchdog: ActionClosureWatchdog,
 ) -> bytes:
     """Production entry point: run exactly one bound episode through Verifiers."""
     from verifiers.v1.cli.eval.runner import run_eval
@@ -530,15 +580,36 @@ async def run_bound_scientific_episode(
 
     if not isinstance(eval_config, EvalConfig):
         raise TypeError("scientific episode requires a validated EvalConfig")
+    if type(watchdog) is not ActionClosureWatchdog:
+        raise TypeError("scientific episode requires the exact watchdog owner")
     if eval_config.num_tasks != 1 or eval_config.num_rollouts != 1:
         raise ValueError("scientific episode EvalConfig must contain exactly one rollout")
     if eval_config.max_concurrent != 1 or eval_config.resume is not None:
         raise ValueError("scientific episode forbids concurrency and resume")
-    env = StageDScientificReplayEnv(env_config, binding=binding)
-    episodes = await run_eval(env, eval_config)
-    if len(episodes) != 1 or env.receipt is None:
-        raise RuntimeError("scientific episode did not produce one durable receipt")
-    return env.receipt
+    if binding.mode == "qa":
+        binding.ledger.require_reconstruction_qa_ready(
+            group_id=binding.source.group_id,
+            target_id=binding.target_id,
+            recorded_action=binding.recorded_action,
+            actual_cost=ActualEvaluationCost(),
+        )
+    try:
+        env = StageDScientificReplayEnv(
+            env_config,
+            binding=binding,
+            watchdog=watchdog,
+        )
+        episodes = await run_eval(env, eval_config)
+        if len(episodes) != 1 or env.receipt is None:
+            raise RuntimeError("scientific episode did not produce one durable receipt")
+        return env.receipt
+    except BaseException as error:
+        if not watchdog.terminal:
+            try:
+                watchdog.fail("episode", "error")
+            except BaseException as terminal_error:
+                raise error.with_traceback(error.__traceback__) from terminal_error
+        raise
 
 
 __all__ = [

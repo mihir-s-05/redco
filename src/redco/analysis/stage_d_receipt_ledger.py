@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import importlib
 import json
 import os
 import secrets
+import shutil
+import stat
+import sys
 import tempfile
 import threading
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
@@ -44,6 +49,13 @@ _DOMAIN = "redco-stage-d-receipt-ledger-v2"
 _GENESIS_PRIOR = "0" * 64
 _MAX_RECEIPT_BYTES = 1 << 20
 _MAX_RECORD_BYTES = 2 << 20
+_MAX_FINALIZATION_REQUEST_BYTES = 8 << 20
+# The cleanup request carries the canonical finalization request as hex.  It
+# therefore has a deliberately separate envelope bound instead of reusing the
+# request bound (which silently rejected valid large requests).
+_MAX_FINALIZATION_RESULT_BYTES = 16 << 20
+_MAX_FINALIZATION_CLEANUP_BYTES = (2 * _MAX_FINALIZATION_REQUEST_BYTES) + (1 << 20)
+_MAX_FINALIZATION_CLEANUP_RESULT_BYTES = _MAX_FINALIZATION_RESULT_BYTES + (1 << 20)
 _RECORD_KEYS = {
     "schema_version",
     "domain",
@@ -60,7 +72,136 @@ RecoveryStatus = Literal[
     "sealed-valid",
     "poisoned",
 ]
-FaultHook = Callable[[str, str], None]
+_FINALIZATION_TRANSACTION_DOMAIN = "redco-stage-d-finalization-transaction-v2"
+_FINALIZATION_TRANSACTION_SCHEMA_VERSION = 2
+_FINALIZATION_REQUEST_DOMAIN = "redco-stage-d-finalization-request-v2"
+_FINALIZATION_RESULT_DOMAIN = "redco-stage-d-finalization-result-v2"
+_FINALIZATION_CLEANUP_DOMAIN = "redco-stage-d-finalization-cleanup-v2"
+_FINALIZATION_TERM_GRACE_SECONDS = 0.1
+_FINALIZATION_KILL_WAIT_SECONDS = 2.0
+_FINALIZATION_SOURCE_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+_FINALIZATION_REQUEST_KEYS = {
+    "schema_version",
+    "domain",
+    "transaction_id",
+    "root_path",
+    "root_binding_sha256",
+    "master_seed",
+    "master_seed_sha256",
+    "ledger_id",
+    "genesis_sha256",
+    "base_head_sha256",
+    "base_record_count",
+    "operation",
+    "evidence_hex",
+    "evidence_sha256",
+    "group_id",
+    "target_id",
+    "recorded_action_hex",
+    "passed",
+    "actual_cost",
+    "execution_attempt",
+    "outcome_kind",
+    "scored_reward",
+    "latency_seconds",
+    "dollars",
+    "judge_calls",
+    "cpu_seconds",
+    "gpu_seconds",
+    "wall_seconds",
+    "storage_bytes",
+}
+_FINALIZATION_RESULT_KEYS = {
+    "schema_version",
+    "domain",
+    "transaction_id",
+    "request_sha256",
+    "result_sha256",
+    "receipt_hex",
+    "record_patches",
+    "evidence_patches",
+}
+_FINALIZATION_PATCH_KEYS = {
+    "relative_path",
+    "temporary_relative_path",
+    "sha256",
+    "bytes",
+    "content_hex",
+}
+_FINALIZATION_MANIFEST_KEYS = {
+    "schema_version",
+    "domain",
+    "transaction_id",
+    "root_path",
+    "root_binding_sha256",
+    "ledger_id",
+    "genesis_sha256",
+    "base_head_sha256",
+    "operation",
+    "state",
+    "request_sha256",
+    "result_sha256",
+    "result",
+    "baseline_paths",
+    "baseline_sha256",
+    "request_hex",
+}
+_FINALIZATION_CLEANUP_KEYS = {
+    "schema_version",
+    "domain",
+    "transaction_id",
+    "root_path",
+    "root_binding_sha256",
+    "request_sha256",
+    "action",
+    "request_hex",
+}
+_FINALIZATION_CLEANUP_RESULT_KEYS = {
+    "schema_version",
+    "domain",
+    "transaction_id",
+    "request_sha256",
+    "state",
+    "result",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _ActionDigestProxy:
+    digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class _FinalizationTransactionSpec:
+    """Internal, parent-authored request for one isolated ledger finalization."""
+
+    operation: Literal["qa", "execution"]
+    root: Path
+    master_seed: str
+    transaction_id: str
+    ledger_id: str
+    genesis_sha256: str
+    base_head_sha256: str
+    base_record_count: int
+    evidence: bytes
+    group_id: str
+    target_id: str
+    recorded_action: BehaviorAction | _ActionDigestProxy | None
+    recorded_action_bytes: bytes | None
+    passed: bool | None
+    actual_cost: ActualEvaluationCost | None
+    execution_attempt: ExecutionAttempt | None
+    outcome_kind: OutcomeKind | None
+    scored_reward: float
+    latency_seconds: float
+    dollars: float
+    judge_calls: int
+    cpu_seconds: float
+    gpu_seconds: float
+    wall_seconds: float
+    storage_bytes: int
 
 
 def _writer_transaction[**P, R](method: Callable[P, R]) -> Callable[P, R]:
@@ -251,19 +392,20 @@ class StageDReceiptLedger:
         root: Path,
         *,
         master_seed: str,
-        fault_hook: FaultHook | None = None,
         _allow_repairable_zero_call: bool = False,
     ) -> None:
+        _validate_root_ancestors(root)
         self._root = root
         self._records_dir = root / "records"
         self._evidence_dir = root / "evidence"
         self._lock_path = root / "writer.lock"
-        self._fault_hook = fault_hook
         self._state_lock = threading.RLock()
         self._closed = False
         self._poisoned = False
+        self._finalization_active = False
         self._lock_descriptor: int | None = _acquire_writer_lock(self._lock_path)
         try:
+            _resolve_stale_finalization_manifests(root)
             scan = (
                 _scan_ledger(root, allow_repairable_zero_call=True)
                 if _allow_repairable_zero_call
@@ -297,12 +439,12 @@ class StageDReceiptLedger:
         *,
         binding: GenesisBinding,
         master_seed: str,
-        fault_hook: FaultHook | None = None,
     ) -> StageDReceiptLedger:
         if not master_seed:
             raise ValueError("master_seed must be nonempty")
         if binding.master_seed_sha256 != _sha256(master_seed.encode("utf-8")):
             raise ValueError("binding does not match master_seed")
+        _validate_root_ancestors(root)
         root.mkdir(parents=True, exist_ok=False)
         (root / "records").mkdir()
         (root / "evidence").mkdir()
@@ -319,8 +461,8 @@ class StageDReceiptLedger:
             "record_kind": "genesis",
             "body": binding.to_payload(),
         }
-        _atomic_record_write(root / "records" / _record_name(0), canonical_json(genesis), None)
-        return cls(root, master_seed=master_seed, fault_hook=fault_hook)
+        _atomic_record_write(root / "records" / _record_name(0), canonical_json(genesis))
+        return cls(root, master_seed=master_seed)
 
     @classmethod
     def recover_zero_call_failure(
@@ -330,7 +472,6 @@ class StageDReceiptLedger:
         master_seed: str,
         reason: str,
         supervisor_evidence: bytes,
-        fault_hook: FaultHook | None = None,
     ) -> StageDReceiptLedger:
         """Close one hard-killed, provably zero-activity attempt and reopen safely."""
         if not reason or not supervisor_evidence:
@@ -338,7 +479,6 @@ class StageDReceiptLedger:
         ledger = cls(
             root,
             master_seed=master_seed,
-            fault_hook=fault_hook,
             _allow_repairable_zero_call=True,
         )
         try:
@@ -463,6 +603,295 @@ class StageDReceiptLedger:
             raise LedgerPoisoned("QA barrier state lacks its anchored receipt bytes")
         return canonical_json(payload)
 
+    def require_reconstruction_qa_ready(
+        self,
+        *,
+        group_id: str,
+        target_id: str,
+        recorded_action: BehaviorAction,
+        actual_cost: ActualEvaluationCost,
+    ) -> None:
+        """Check the shared model-free QA gate without changing ledger state.
+
+        The guard is deliberately shared by the pre-``run_eval`` entry point and
+        the durable receipt writer.  A caller cannot use a correctly shaped QA
+        receipt to bypass the frozen target roster, correspondence, recorded
+        action, or the no-scientific-activity barrier.
+        """
+
+        with self._state_lock:
+            self._require_reconstruction_qa_ready(
+                group_id=group_id,
+                target_id=target_id,
+                recorded_action=recorded_action,
+                actual_cost=actual_cost,
+            )
+
+    async def record_reconstruction_qa_transaction(
+        self,
+        *,
+        group_id: str,
+        target_id: str,
+        recorded_action: BehaviorAction,
+        passed: bool,
+        report: bytes,
+        actual_cost: ActualEvaluationCost,
+    ) -> bytes:
+        """Commit evidence and its QA receipt as one bounded transaction.
+
+        The existing receipt methods remain the sole schema/state owner. This
+        method only moves their execution behind an isolated child-process
+        transaction so a synchronous fsync cannot pin the event loop. The live
+        writer is closed while the child owns the lock; an uncommitted child
+        transaction is removed and the writer stays closed fail-closed.
+        """
+
+        with self._state_lock:
+            self._require_reconstruction_qa_ready(
+                group_id=group_id,
+                target_id=target_id,
+                recorded_action=recorded_action,
+                actual_cost=actual_cost,
+            )
+            if type(passed) is not bool:
+                raise ValueError("passed must be bool")
+            if type(report) is not bytes or not report:
+                raise ValueError("report must be nonempty immutable bytes")
+            spec = self._new_finalization_spec(
+                operation="qa",
+                group_id=group_id,
+                target_id=target_id,
+                evidence=report,
+                recorded_action=recorded_action,
+                passed=passed,
+                actual_cost=actual_cost,
+                execution_attempt=None,
+                outcome_kind=None,
+            )
+        return await self._run_finalization_transaction(spec)
+
+    async def finish_execution_transaction(
+        self,
+        attempt: ExecutionAttempt,
+        *,
+        outcome_kind: OutcomeKind,
+        scored_reward: float,
+        scorer_evidence: bytes,
+        latency_seconds: float,
+        dollars: float,
+        judge_calls: int,
+        cpu_seconds: float,
+        gpu_seconds: float,
+        wall_seconds: float,
+        storage_bytes: int,
+    ) -> bytes:
+        """Commit execution evidence and receipt through the same owner."""
+
+        with self._state_lock:
+            self._require_writable()
+            if type(scorer_evidence) is not bytes or not scorer_evidence:
+                raise ValueError("scorer evidence must be nonempty immutable bytes")
+            if not isinstance(outcome_kind, OutcomeKind):
+                raise ValueError("outcome_kind must be OutcomeKind")
+            spec = self._new_finalization_spec(
+                operation="execution",
+                group_id=attempt.group_id,
+                target_id=attempt.target_id,
+                evidence=scorer_evidence,
+                recorded_action=None,
+                passed=None,
+                actual_cost=None,
+                execution_attempt=attempt,
+                outcome_kind=outcome_kind,
+                scored_reward=scored_reward,
+                latency_seconds=latency_seconds,
+                dollars=dollars,
+                judge_calls=judge_calls,
+                cpu_seconds=cpu_seconds,
+                gpu_seconds=gpu_seconds,
+                wall_seconds=wall_seconds,
+                storage_bytes=storage_bytes,
+            )
+        return await self._run_finalization_transaction(spec)
+
+    def _new_finalization_spec(self, **kwargs: Any) -> _FinalizationTransactionSpec:
+        self._require_writable()
+        if self._finalization_active:
+            raise LedgerError("another finalization transaction is active")
+        self._finalization_active = True
+        recorded_action = kwargs.pop("recorded_action")
+        recorded_action_bytes = kwargs.pop("recorded_action_bytes", None)
+        if recorded_action is not None and recorded_action_bytes is None:
+            recorded_action_bytes = recorded_action.to_bytes()
+        return _FinalizationTransactionSpec(
+            root=self._root,
+            master_seed=self._master_seed,
+            transaction_id=secrets.token_hex(16),
+            ledger_id=self._ledger_id,
+            genesis_sha256=self._record_sha256s[0],
+            base_head_sha256=self.head_sha256,
+            base_record_count=len(self._records),
+            scored_reward=kwargs.pop("scored_reward", 0.0),
+            latency_seconds=kwargs.pop("latency_seconds", 0.0),
+            dollars=kwargs.pop("dollars", 0.0),
+            judge_calls=kwargs.pop("judge_calls", 0),
+            cpu_seconds=kwargs.pop("cpu_seconds", 0.0),
+            gpu_seconds=kwargs.pop("gpu_seconds", 0.0),
+            wall_seconds=kwargs.pop("wall_seconds", 0.0),
+            storage_bytes=kwargs.pop("storage_bytes", 0),
+            recorded_action=recorded_action,
+            recorded_action_bytes=recorded_action_bytes,
+            **kwargs,
+        )
+
+    async def _run_finalization_transaction(
+        self,
+        spec: _FinalizationTransactionSpec,
+    ) -> bytes:
+        process: asyncio.subprocess.Process | None = None
+        try:
+            request = _finalization_request_bytes(spec)
+            process = await asyncio.create_subprocess_exec(
+                *_finalization_child_command("--finalize-transaction-stdin", spec.root),
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await process.communicate(request)
+            except asyncio.CancelledError:
+                # The watchdog cancellation is the deadline signal.  Clear
+                # it while the bounded child termination/rollback owner runs;
+                # otherwise Python 3.12 can cancel the cleanup await itself
+                # and leave the event-loop transaction unresolved.
+                current = asyncio.current_task()
+                if current is not None:
+                    while current.cancelling():
+                        current.uncancel()
+                await _terminate_finalization_process(process)
+                resolution = await _run_finalization_cleanup_owner(spec, action="resolve")
+                if resolution.get("state") == "committed":
+                    result = _validate_finalization_result(
+                        spec, resolution["result"], spec.base_record_count
+                    )
+                    await _run_finalization_cleanup_owner(spec, action="ack")
+                    self._apply_finalization_result(spec, result)
+                    return cast(bytes, result["receipt"])
+                raise
+            if len(stdout) > _MAX_FINALIZATION_RESULT_BYTES:
+                raise LedgerPoisoned("finalization result exceeds its bound")
+            if process.returncode != 0:
+                message = stderr.decode("utf-8", errors="replace").strip()
+                resolution = await _run_finalization_cleanup_owner(spec, action="resolve")
+                if resolution.get("state") == "committed":
+                    result = _validate_finalization_result(
+                        spec, resolution["result"], spec.base_record_count
+                    )
+                    await _run_finalization_cleanup_owner(spec, action="ack")
+                    self._apply_finalization_result(spec, result)
+                    return cast(bytes, result["receipt"])
+                raise LedgerError(
+                    "isolated finalization transaction failed"
+                    + (f": {message}" if message else "")
+                )
+            # The child result is only a transport hint.  The authenticated
+            # committed manifest is the authority, so ack re-reads and
+            # validates it in the bounded owner before the parent changes any
+            # in-memory state.
+            del stdout
+            resolution = await _run_finalization_cleanup_owner(spec, action="ack")
+            result = _validate_finalization_result(
+                spec, resolution["result"], spec.base_record_count
+            )
+            self._apply_finalization_result(spec, result)
+            return cast(bytes, result["receipt"])
+        except BaseException:
+            try:
+                if process is not None and process.returncode is None:
+                    await _terminate_finalization_process(process)
+            except BaseException:
+                # Preserve the first operational exception.  The writer is
+                # nevertheless poisoned even if child teardown reports a
+                # secondary failure.
+                pass
+            finally:
+                self._fail_closed_after_finalization()
+            raise
+        finally:
+            with self._state_lock:
+                self._finalization_active = False
+
+    def _fail_closed_after_finalization(self) -> None:
+        """Close and poison after any unresolved transaction failure."""
+
+        with self._state_lock:
+            self._poisoned = True
+            self._closed = True
+            self._finalization_active = False
+            descriptor = self._lock_descriptor
+            self._lock_descriptor = None
+        if descriptor is not None:
+            with suppress(BaseException):
+                _release_os_lock(descriptor)
+
+    def _apply_finalization_result(
+        self,
+        spec: _FinalizationTransactionSpec,
+        result: Mapping[str, Any],
+    ) -> None:
+        """Apply a child-owned commit to the already-authenticated memory view.
+
+        The parent deliberately does not rescan the filesystem here.  The
+        child has authenticated the committed manifest while holding this
+        writer's exclusive lock; only the canonical patch bytes are folded
+        into the parent state after that proof.
+        """
+
+        with self._state_lock:
+            if (
+                len(self._records) != spec.base_record_count
+                or self.head_sha256 != spec.base_head_sha256
+            ):
+                self._poisoned = True
+                raise LedgerPoisoned("ledger changed during finalization")
+            for patch in cast(Sequence[Mapping[str, Any]], result["evidence_patches"]):
+                encoded = cast(bytes, patch["content"])
+                if _sha256(encoded) != patch["sha256"]:
+                    self._poisoned = True
+                    raise LedgerPoisoned("finalization evidence patch changed")
+            for patch in cast(Sequence[Mapping[str, Any]], result["record_patches"]):
+                encoded = cast(bytes, patch["content"])
+                record = _strict_canonical_object(encoded, "finalization record")
+                expected_offset = len(self._records)
+                expected_prior = self.head_sha256
+                if (
+                    record.get("ledger_id") != self._ledger_id
+                    or record.get("offset") != expected_offset
+                    or record.get("prior_record_sha256") != expected_prior
+                ):
+                    self._poisoned = True
+                    raise LedgerPoisoned("finalization record chain changed")
+                self._records.append(record)
+                self._record_sha256s.append(_sha256(encoded))
+                body = _body(record)
+                refs = body.get("evidence_refs", [])
+                if isinstance(refs, list):
+                    self._evidence_refs.update(cast(str, ref) for ref in refs)
+                if record.get("record_kind") == "receipt":
+                    receipt = body.get("receipt")
+                    receipt_sha256 = body.get("receipt_sha256")
+                    kind = body.get("receipt_kind")
+                    if (
+                        not isinstance(receipt, dict)
+                        or not isinstance(kind, str)
+                        or not _is_sha256(receipt_sha256)
+                    ):
+                        self._poisoned = True
+                        raise LedgerPoisoned("finalization receipt is malformed")
+                    self._receipts[(kind, cast(str, receipt_sha256))] = receipt
+            self._rebuild_state()
+            self._repairable_attempt = None
+
     def __enter__(self) -> StageDReceiptLedger:
         return self
 
@@ -471,6 +900,8 @@ class StageDReceiptLedger:
 
     @_writer_transaction
     def close(self) -> None:
+        if self._finalization_active:
+            raise LedgerError("cannot close while finalization is active")
         if not self._closed:
             self._closed = True
             self._release_lock()
@@ -1359,26 +1790,16 @@ class StageDReceiptLedger:
         report_sha256: str,
         actual_cost: ActualEvaluationCost,
     ) -> bytes:
-        key = self._require_committed(group_id, target_id)
+        self._require_reconstruction_qa_ready(
+            group_id=group_id,
+            target_id=target_id,
+            recorded_action=recorded_action,
+            actual_cost=actual_cost,
+        )
+        key = (group_id, target_id)
         self._require_evidence(report_sha256)
-        if key not in self._correspondence:
-            raise LedgerError("correspondence must be frozen before reconstruction QA")
-        if key in self._qa:
-            raise LedgerError("reconstruction QA is already recorded")
-        if self._reconstruction_qa_barrier_sha256 is not None:
-            raise LedgerError("reconstruction QA barrier is already sealed")
-        if self._candidate_slots or self._pending_candidates or self._executions or (
-            self._pending_executions
-        ):
-            raise LedgerError("every reconstruction QA must precede scientific activity")
         if type(passed) is not bool:
             raise ValueError("passed must be bool")
-        if self._recorded_action_digests[key] != recorded_action.digest:
-            raise ValueError("recorded action changed after commitment")
-        if self._branch_target_roster_sha256 is not None and (
-            actual_cost.generated_tokens != 0 or actual_cost.judge_calls != 0
-        ):
-            raise ValueError("whole-roster reconstruction QA must make zero model calls")
         commitment = self._commitments[key]
         receipt = self._append_receipt(
             "reconstruction_qa",
@@ -2561,7 +2982,6 @@ class StageDReceiptLedger:
             _atomic_record_write(
                 self._records_dir / _record_name(len(self._records)),
                 encoded,
-                self._fault_hook,
             )
         except BaseException:
             self._poisoned = True
@@ -2592,6 +3012,56 @@ class StageDReceiptLedger:
         if key not in self._commitments:
             raise LedgerError("group target is not durably committed")
         return key
+
+    def _require_reconstruction_qa_ready(
+        self,
+        *,
+        group_id: str,
+        target_id: str,
+        recorded_action: BehaviorAction,
+        actual_cost: ActualEvaluationCost,
+    ) -> None:
+        self._require_writable()
+        key = self._require_committed(group_id, target_id)
+        commitment = self._commitments[key]
+        rollout_key = (group_id, cast(str, commitment["rollout_id"]))
+        if rollout_key not in self._source_rollout_completed:
+            raise LedgerError("reconstruction QA requires a completed source rollout")
+        if self._branch_target_roster_sha256 is None:
+            raise LedgerError("reconstruction QA requires a frozen target roster")
+        if key not in self._branch_target_keys:
+            raise LedgerError("reconstruction QA target is absent from the frozen roster")
+        if key not in self._correspondence:
+            raise LedgerError("correspondence must be frozen before reconstruction QA")
+        expected_action_digest = self._recorded_action_digests.get(key)
+        if expected_action_digest is None:
+            raise LedgerError("recorded action must materialize before reconstruction QA")
+        if expected_action_digest != recorded_action.digest:
+            raise ValueError("recorded action changed after commitment")
+        if key in self._qa:
+            raise LedgerError("reconstruction QA is already recorded")
+        if self._reconstruction_qa_barrier_sha256 is not None:
+            raise LedgerError("reconstruction QA barrier is already sealed")
+        if (
+            self._candidate_slots
+            or self._pending_candidates
+            or self._executions
+            or self._pending_executions
+            or self._branch_artifacts
+            or self._batch_claims
+            or self._stage_d_training_authorizations
+            or self._verified_support_report_sha256 is not None
+        ):
+            raise LedgerError("every reconstruction QA must precede scientific activity")
+        if type(actual_cost) is not ActualEvaluationCost:
+            raise TypeError("reconstruction QA cost must be ActualEvaluationCost")
+        if (
+            type(actual_cost.generated_tokens) is not int
+            or type(actual_cost.judge_calls) is not int
+            or actual_cost.generated_tokens != 0
+            or actual_cost.judge_calls != 0
+        ):
+            raise ValueError("reconstruction QA must make zero model calls")
 
     def _require_scientific_ready(self, group_id: str, target_id: str) -> tuple[str, str]:
         key = self._require_committed(group_id, target_id)
@@ -2732,6 +3202,8 @@ class StageDReceiptLedger:
             raise LedgerError("ledger writer is closed")
         if self._poisoned:
             raise LedgerPoisoned("ledger writer is poisoned")
+        if self._finalization_active:
+            raise LedgerError("ledger finalization is already active")
 
     def _release_lock(self) -> None:
         descriptor = getattr(self, "_lock_descriptor", None)
@@ -3225,34 +3697,1309 @@ def _lookup_receipt(
     return anchored
 
 
-def _atomic_record_write(path: Path, encoded: bytes, fault_hook: FaultHook | None) -> None:
+def _finalization_manifest_path(spec: _FinalizationTransactionSpec) -> Path:
+    return spec.root / f".{spec.transaction_id}.finalization.json"
+
+
+def _canonical_root_path(root: Path) -> str:
+    _validate_root_ancestors(root)
+    return os.path.normcase(os.path.abspath(os.fspath(root)))
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return False
+    return bool(
+        getattr(metadata, "st_file_attributes", 0)
+        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x00000400)
+    )
+
+
+def _validate_root_ancestors(root: Path) -> None:
+    """Reject symlink/reparse ancestors before any ledger path is used."""
+
+    current = Path(os.path.abspath(os.fspath(root)))
+    while True:
+        if _is_link_or_reparse(current):
+            raise LedgerPoisoned("ledger root or ancestor is a symlink/reparse point")
+        parent = current.parent
+        if parent == current:
+            return
+        current = parent
+
+
+def _root_binding(root: Path) -> str:
+    return _sha256(_canonical_root_path(root).encode("utf-8"))
+
+
+def _strict_keyset(value: Mapping[str, Any], expected: set[str], name: str) -> None:
+    observed = set(value)
+    if observed != expected:
+        raise LedgerPoisoned(
+            f"{name} fields differ: missing={sorted(expected - observed)} "
+            f"unknown={sorted(observed - expected)}"
+        )
+
+
+def _hex_bytes(value: object, name: str, *, maximum: int) -> bytes:
+    if not isinstance(value, str) or len(value) % 2 or len(value) > maximum * 2:
+        raise LedgerPoisoned(f"{name} must be bounded lowercase hex")
+    if any(character not in "0123456789abcdef" for character in value):
+        raise LedgerPoisoned(f"{name} contains noncanonical hex")
+    try:
+        return bytes.fromhex(value)
+    except ValueError as error:
+        raise LedgerPoisoned(f"{name} is not valid hex") from error
+
+
+def _transaction_baseline_paths(root: Path) -> list[dict[str, int | str]]:
+    values: list[dict[str, int | str]] = []
+    for directory in ("records", "evidence"):
+        base = root / directory
+        if not base.is_dir() or _is_link_or_reparse(base):
+            raise LedgerPoisoned("finalization output directory is not a real directory")
+        for path in sorted(base.iterdir(), key=lambda item: item.name):
+            if not path.is_file() or _is_link_or_reparse(path):
+                raise LedgerPoisoned("finalization baseline contains a non-file entry")
+            if getattr(path.lstat(), "st_nlink", 1) != 1:
+                raise LedgerPoisoned("finalization baseline contains an aliased file")
+            if "/" in path.name or "\\" in path.name or path.name in {"", ".", ".."}:
+                raise LedgerPoisoned("finalization baseline contains an invalid name")
+            encoded = path.read_bytes()
+            relative = f"{directory}/{path.name}"
+            values.append(
+                {
+                    "relative_path": relative,
+                    "sha256": _sha256(encoded),
+                    "bytes": len(encoded),
+                }
+            )
+    return sorted(values, key=lambda item: cast(str, item["relative_path"]))
+
+
+def _transaction_file_map(root: Path, directory: str) -> dict[str, bytes]:
+    base = root / directory
+    values: dict[str, bytes] = {}
+    for path in base.iterdir():
+        if path.is_file() and not _is_link_or_reparse(path):
+            values[path.name] = path.read_bytes()
+    return values
+
+
+def _transaction_patch(
+    spec: _FinalizationTransactionSpec,
+    base: dict[str, bytes],
+    prepared: dict[str, bytes],
+    directory: str,
+) -> tuple[dict[str, object], ...]:
+    for name, encoded in base.items():
+        if prepared.get(name) != encoded:
+            raise LedgerError(f"finalization changed an existing {directory} file")
+    patches: list[dict[str, object]] = []
+    for name, encoded in sorted(prepared.items()):
+        if name in base:
+            continue
+        if name.startswith("."):
+            raise LedgerPoisoned("finalization cannot add hidden output files")
+        relative = f"{directory}/{name}"
+        patches.append(
+            {
+                "relative_path": relative,
+                "temporary_relative_path": f"{directory}/.{spec.transaction_id}.{name}.tmp",
+                "sha256": _sha256(encoded),
+                "bytes": len(encoded),
+                "content_hex": encoded.hex(),
+            }
+        )
+    return tuple(patches)
+
+
+def _action_from_bytes(encoded: bytes) -> _ActionDigestProxy:
+    try:
+        envelope = json.loads(encoded)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise LedgerPoisoned("recorded action request is malformed") from error
+    if (
+        not isinstance(envelope, dict)
+        or canonical_json(envelope) != encoded
+        or set(envelope) != {"schema_version", "domain", "action", "digest"}
+        or not isinstance(envelope.get("action"), dict)
+    ):
+        raise LedgerPoisoned("recorded action request envelope is invalid")
+    action_payload = cast(dict[str, Any], envelope["action"])
+    token_values = action_payload.get("action_token_ids")
+    key_payload = action_payload.get("key")
+    if not isinstance(token_values, list) or not isinstance(key_payload, dict):
+        raise LedgerPoisoned("recorded action request lacks its exact key or tokens")
+    prompt_values = key_payload.get("prompt_token_ids")
+    if not isinstance(prompt_values, list):
+        raise LedgerPoisoned("recorded action request lacks prompt tokens")
+    schema_version = key_payload.get("schema_version")
+
+    def render_prompt(_: Mapping[str, Any]) -> tuple[int, ...]:
+        return tuple(prompt_values)
+
+    try:
+        if schema_version == 1:
+            action = BehaviorAction.from_bytes(
+                encoded,
+                encode_action=lambda _request, _message: tuple(token_values),
+                render_prompt=render_prompt,
+            )
+        elif schema_version == 2:
+            action = BehaviorAction.from_bytes(
+                encoded,
+                validate_action=lambda _request, _message, tokens: None,
+                render_prompt=render_prompt,
+            )
+        else:
+            raise LedgerPoisoned("recorded action schema version is unsupported")
+    except LedgerPoisoned:
+        raise
+    except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise LedgerPoisoned("recorded action fields or hashes are invalid") from error
+    if action.to_bytes() != encoded:
+        raise LedgerPoisoned("recorded action canonical bytes changed")
+    return _ActionDigestProxy(action.digest)
+
+
+def _request_attempt(value: object) -> ExecutionAttempt:
+    if not isinstance(value, dict):
+        raise LedgerPoisoned("execution attempt request must be an object")
+    _strict_keyset(
+        value,
+        {
+            "ledger_id",
+            "group_id",
+            "target_id",
+            "arm_id",
+            "action_digest",
+            "continuation_replicate",
+            "attempt_ordinal",
+            "attempt_id",
+        },
+        "execution attempt",
+    )
+    if any(not isinstance(value[name], str) or not value[name] for name in (
+        "ledger_id", "group_id", "target_id", "arm_id", "action_digest", "attempt_id"
+    )):
+        raise LedgerPoisoned("execution attempt has an empty identity")
+    if not _is_sha256(value["action_digest"]):
+        raise LedgerPoisoned("execution attempt action digest is invalid")
+    if type(value["continuation_replicate"]) is not int or value["continuation_replicate"] < 0:
+        raise LedgerPoisoned("execution attempt continuation is invalid")
+    if type(value["attempt_ordinal"]) is not int or value["attempt_ordinal"] < 0:
+        raise LedgerPoisoned("execution attempt ordinal is invalid")
+    return ExecutionAttempt(
+        value["ledger_id"],
+        value["group_id"],
+        value["target_id"],
+        value["arm_id"],
+        value["action_digest"],
+        value["continuation_replicate"],
+        value["attempt_ordinal"],
+        value["attempt_id"],
+    )
+
+
+def _request_cost(value: object) -> ActualEvaluationCost:
+    if not isinstance(value, dict):
+        raise LedgerPoisoned("actual cost request must be an object")
+    _strict_keyset(
+        value,
+        {
+            "generated_tokens",
+            "judge_calls",
+            "cpu_seconds",
+            "gpu_seconds",
+            "wall_seconds",
+            "storage_bytes",
+        },
+        "actual cost",
+    )
+    for name in ("generated_tokens", "judge_calls", "storage_bytes"):
+        if type(value[name]) is not int or value[name] < 0:
+            raise LedgerPoisoned(f"actual cost {name} is invalid")
+    for name in ("cpu_seconds", "gpu_seconds", "wall_seconds"):
+        _finite_float(value[name], f"actual cost {name}")
+    return ActualEvaluationCost(
+        generated_tokens=value["generated_tokens"],
+        judge_calls=value["judge_calls"],
+        cpu_seconds=value["cpu_seconds"],
+        gpu_seconds=value["gpu_seconds"],
+        wall_seconds=value["wall_seconds"],
+        storage_bytes=value["storage_bytes"],
+    )
+
+
+def _finalization_request_bytes(spec: _FinalizationTransactionSpec) -> bytes:
+    action_hex = (
+        None
+        if spec.recorded_action_bytes is None
+        else spec.recorded_action_bytes.hex()
+    )
+    attempt = None
+    if spec.execution_attempt is not None:
+        attempt = {
+            "ledger_id": spec.execution_attempt.ledger_id,
+            "group_id": spec.execution_attempt.group_id,
+            "target_id": spec.execution_attempt.target_id,
+            "arm_id": spec.execution_attempt.arm_id,
+            "action_digest": spec.execution_attempt.action_digest,
+            "continuation_replicate": spec.execution_attempt.continuation_replicate,
+            "attempt_ordinal": spec.execution_attempt.attempt_ordinal,
+            "attempt_id": spec.execution_attempt.attempt_id,
+        }
+    cost = None if spec.actual_cost is None else _actual_cost_payload(spec.actual_cost)
+    payload: dict[str, Any] = {
+        "schema_version": 2,
+        "domain": _FINALIZATION_REQUEST_DOMAIN,
+        "transaction_id": spec.transaction_id,
+        "root_path": _canonical_root_path(spec.root),
+        "root_binding_sha256": _root_binding(spec.root),
+        "master_seed": spec.master_seed,
+        "master_seed_sha256": _sha256(spec.master_seed.encode("utf-8")),
+        "ledger_id": spec.ledger_id,
+        "genesis_sha256": spec.genesis_sha256,
+        "base_head_sha256": spec.base_head_sha256,
+        "base_record_count": spec.base_record_count,
+        "operation": spec.operation,
+        "evidence_hex": spec.evidence.hex(),
+        "evidence_sha256": _sha256(spec.evidence),
+        "group_id": spec.group_id,
+        "target_id": spec.target_id,
+        "recorded_action_hex": action_hex,
+        "passed": spec.passed,
+        "actual_cost": cost,
+        "execution_attempt": attempt,
+        "outcome_kind": None if spec.outcome_kind is None else spec.outcome_kind.value,
+        "scored_reward": spec.scored_reward,
+        "latency_seconds": spec.latency_seconds,
+        "dollars": spec.dollars,
+        "judge_calls": spec.judge_calls,
+        "cpu_seconds": spec.cpu_seconds,
+        "gpu_seconds": spec.gpu_seconds,
+        "wall_seconds": spec.wall_seconds,
+        "storage_bytes": spec.storage_bytes,
+    }
+    _strict_keyset(payload, _FINALIZATION_REQUEST_KEYS, "finalization request")
+    encoded = cast(bytes, canonical_json(payload))
+    if len(encoded) > _MAX_FINALIZATION_REQUEST_BYTES:
+        raise LedgerPoisoned("finalization request exceeds its bound")
+    return encoded
+
+
+def _finalization_child_command(
+    mode: Literal["--finalize-transaction-stdin", "--cleanup-finalization-stdin"],
+    root: Path,
+) -> tuple[str, ...]:
+    """Return an isolated child command with a fixed repository import root."""
+
+    import_code = (
+        "import sys; sys.path.insert(0, "
+        + json.dumps(_FINALIZATION_SOURCE_ROOT)
+        + "); from redco.analysis.stage_d_receipt_ledger import "
+        "_finalization_transaction_main; raise SystemExit("
+        "_finalization_transaction_main(sys.argv[1:]))"
+    )
+    return (sys.executable, "-I", "-c", import_code, mode, str(root))
+
+
+def _spec_from_request(
+    encoded: bytes,
+    root: Path,
+    *,
+    require_action: bool = True,
+) -> tuple[_FinalizationTransactionSpec, str]:
+    value = _strict_canonical_object(encoded, "finalization request")
+    _strict_keyset(value, _FINALIZATION_REQUEST_KEYS, "finalization request")
+    if value.get("schema_version") != 2 or value.get("domain") != _FINALIZATION_REQUEST_DOMAIN:
+        raise LedgerPoisoned("finalization request schema is unsupported")
+    if (
+        value.get("root_path") != _canonical_root_path(root)
+        or value.get("root_binding_sha256") != _root_binding(root)
+    ):
+        raise LedgerPoisoned("finalization request root binding changed")
+    transaction_id = value.get("transaction_id")
+    if (
+        not isinstance(transaction_id, str)
+        or len(transaction_id) != 32
+        or any(character not in "0123456789abcdef" for character in transaction_id)
+    ):
+        raise LedgerPoisoned("finalization transaction ID is invalid")
+    master_seed = value.get("master_seed")
+    if not isinstance(master_seed, str) or not master_seed:
+        raise LedgerPoisoned("finalization request master seed is invalid")
+    if value.get("master_seed_sha256") != _sha256(master_seed.encode("utf-8")):
+        raise LedgerPoisoned("finalization request master seed binding changed")
+    for name in ("ledger_id", "group_id", "target_id"):
+        if not isinstance(value.get(name), str) or not value[name]:
+            raise LedgerPoisoned(f"finalization request {name} is invalid")
+    base_head = value.get("base_head_sha256")
+    if not _is_sha256(base_head):
+        raise LedgerPoisoned("finalization request base head is invalid")
+    genesis_sha256 = value.get("genesis_sha256")
+    if not _is_sha256(genesis_sha256):
+        raise LedgerPoisoned("finalization request genesis is invalid")
+    base_record_count = value.get("base_record_count")
+    if type(base_record_count) is not int or base_record_count < 1:
+        raise LedgerPoisoned("finalization request base record count is invalid")
+    operation = value.get("operation")
+    if operation not in {"qa", "execution"}:
+        raise LedgerPoisoned("finalization request operation is invalid")
+    evidence = _hex_bytes(
+        value.get("evidence_hex"), "finalization evidence", maximum=_MAX_RECEIPT_BYTES
+    )
+    if not evidence or value.get("evidence_sha256") != _sha256(evidence):
+        raise LedgerPoisoned("finalization evidence binding changed")
+    action: BehaviorAction | _ActionDigestProxy | None = None
+    action_hex = value.get("recorded_action_hex")
+    action_bytes: bytes | None = None
+    if action_hex is not None:
+        action_bytes = _hex_bytes(action_hex, "recorded action", maximum=_MAX_RECORD_BYTES)
+        if require_action:
+            action = _action_from_bytes(action_bytes)
+    passed = value.get("passed")
+    cost_value = value.get("actual_cost")
+    attempt_value = value.get("execution_attempt")
+    outcome_value = value.get("outcome_kind")
+    cost = None if cost_value is None else _request_cost(cost_value)
+    attempt = None if attempt_value is None else _request_attempt(attempt_value)
+    outcome = None
+    if outcome_value is not None:
+        try:
+            outcome = OutcomeKind(outcome_value)
+        except (TypeError, ValueError) as error:
+            raise LedgerPoisoned("finalization outcome kind is invalid") from error
+    if operation == "qa":
+        if (
+            (require_action and action is None)
+            or type(passed) is not bool
+            or cost is None
+            or attempt is not None
+            or outcome is not None
+        ):
+            raise LedgerPoisoned("QA finalization request fields are inconsistent")
+    elif (
+        action is not None
+        or passed is not None
+        or cost is not None
+        or attempt is None
+        or outcome is None
+    ):
+        raise LedgerPoisoned("execution finalization request fields are inconsistent")
+    for name in (
+        "scored_reward",
+        "latency_seconds",
+        "dollars",
+        "cpu_seconds",
+        "gpu_seconds",
+        "wall_seconds",
+    ):
+        _finite_float(value.get(name), name)
+    for name in ("judge_calls", "storage_bytes"):
+        if type(value.get(name)) is not int or value[name] < 0:
+            raise LedgerPoisoned(f"finalization request {name} is invalid")
+    spec = _FinalizationTransactionSpec(
+        operation=operation,
+        root=root,
+        master_seed=master_seed,
+        transaction_id=transaction_id,
+        ledger_id=value["ledger_id"],
+        genesis_sha256=cast(str, genesis_sha256),
+        base_head_sha256=cast(str, base_head),
+        base_record_count=base_record_count,
+        evidence=evidence,
+        group_id=value["group_id"],
+        target_id=value["target_id"],
+        recorded_action=action,
+        recorded_action_bytes=action_bytes,
+        passed=passed,
+        actual_cost=cost,
+        execution_attempt=attempt,
+        outcome_kind=outcome,
+        scored_reward=value["scored_reward"],
+        latency_seconds=value["latency_seconds"],
+        dollars=value["dollars"],
+        judge_calls=value["judge_calls"],
+        cpu_seconds=value["cpu_seconds"],
+        gpu_seconds=value["gpu_seconds"],
+        wall_seconds=value["wall_seconds"],
+        storage_bytes=value["storage_bytes"],
+    )
+    return spec, _sha256(encoded)
+
+
+def _transaction_temp_path(spec: _FinalizationTransactionSpec, relative: str) -> str:
+    directory, name = relative.split("/", 1)
+    return f"{directory}/.{spec.transaction_id}.{name}.tmp"
+
+
+def _transaction_patch_payloads(
+    patches: Sequence[Mapping[str, Any]],
+    *,
+    transaction_id: str,
+    directory: str,
+) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    paths: set[str] = set()
+    temporary_paths: set[str] = set()
+    for patch in patches:
+        if not isinstance(patch, dict):
+            raise LedgerPoisoned("finalization patch is not an object")
+        _strict_keyset(patch, _FINALIZATION_PATCH_KEYS, "finalization patch")
+        relative = patch.get("relative_path")
+        temporary = patch.get("temporary_relative_path")
+        if (
+            not isinstance(relative, str)
+            or not isinstance(temporary, str)
+            or relative in paths
+            or temporary in temporary_paths
+            or "\\" in relative
+            or "\\" in temporary
+        ):
+            raise LedgerPoisoned("finalization patch path is invalid or duplicated")
+        parts = relative.split("/")
+        if len(parts) != 2 or parts[0] != directory or not parts[1] or ".." in parts:
+            raise LedgerPoisoned("finalization patch escapes its output directory")
+        expected_temporary = f"{directory}/.{transaction_id}.{parts[1]}.tmp"
+        if temporary != expected_temporary:
+            raise LedgerPoisoned("finalization temporary path is not transaction-specific")
+        encoded = _hex_bytes(
+            patch.get("content_hex"), "finalization patch content", maximum=_MAX_RECORD_BYTES
+        )
+        if (
+            type(patch.get("bytes")) is not int
+            or patch.get("bytes") != len(encoded)
+            or patch.get("sha256") != _sha256(encoded)
+        ):
+            raise LedgerPoisoned("finalization patch content binding changed")
+        if directory == "records" and not _valid_record_name(parts[1]):
+            raise LedgerPoisoned("finalization record path is invalid")
+        if directory == "evidence" and not _is_sha256(parts[1]):
+            raise LedgerPoisoned("finalization evidence path is invalid")
+        paths.add(relative)
+        temporary_paths.add(temporary)
+        values.append({**patch, "content": encoded})
+    return values
+
+
+def _baseline_payload(
+    baseline_paths: Sequence[Mapping[str, object]],
+) -> list[dict[str, int | str]]:
+    expected_entry_keys = {"relative_path", "sha256", "bytes"}
+    result: list[dict[str, int | str]] = []
+    previous = ""
+    for item in baseline_paths:
+        if not isinstance(item, Mapping) or set(item) != expected_entry_keys:
+            raise LedgerPoisoned("finalization baseline entry schema differs")
+        relative = item.get("relative_path")
+        sha256 = item.get("sha256")
+        size = item.get("bytes")
+        if (
+            not isinstance(relative, str)
+            or "\\" in relative
+            or relative <= previous
+            or relative.count("/") != 1
+            or relative.split("/", 1)[0] not in {"records", "evidence"}
+            or not relative.split("/", 1)[1]
+            or relative.split("/", 1)[1] in {".", ".."}
+            or not _is_sha256(sha256)
+            or type(size) is not int
+            or size < 0
+        ):
+            raise LedgerPoisoned("finalization baseline path or digest is invalid")
+        name = relative.split("/", 1)[1]
+        if relative.startswith("records/") and not _valid_record_name(name):
+            raise LedgerPoisoned("finalization baseline record name is invalid")
+        if relative.startswith("evidence/") and not _is_sha256(name):
+            raise LedgerPoisoned("finalization baseline evidence name is invalid")
+        result.append(
+            {
+                "relative_path": relative,
+                "sha256": cast(str, sha256),
+                "bytes": size,
+            }
+        )
+        previous = relative
+    return result
+
+
+def _baseline_digest(baseline_paths: Sequence[Mapping[str, object]]) -> str:
+    return _sha256(canonical_json([dict(item) for item in baseline_paths]))
+
+
+def _transaction_manifest(
+    spec: _FinalizationTransactionSpec,
+    *,
+    state: Literal["committing", "committed"],
+    request: bytes,
+    baseline_paths: Sequence[Mapping[str, object]],
+    result: Mapping[str, Any],
+) -> bytes:
+    canonical_baseline = _baseline_payload(baseline_paths)
+    payload = {
+        "schema_version": _FINALIZATION_TRANSACTION_SCHEMA_VERSION,
+        "domain": _FINALIZATION_TRANSACTION_DOMAIN,
+        "transaction_id": spec.transaction_id,
+        "root_path": _canonical_root_path(spec.root),
+        "root_binding_sha256": _root_binding(spec.root),
+        "ledger_id": spec.ledger_id,
+        "genesis_sha256": spec.genesis_sha256,
+        "base_head_sha256": spec.base_head_sha256,
+        "operation": spec.operation,
+        "state": state,
+        "request_sha256": _sha256(request),
+        "result_sha256": result["result_sha256"],
+        "result": dict(result),
+        "baseline_paths": canonical_baseline,
+        "baseline_sha256": _baseline_digest(canonical_baseline),
+        "request_hex": request.hex(),
+    }
+    _strict_keyset(payload, _FINALIZATION_MANIFEST_KEYS, "finalization manifest")
+    return cast(bytes, canonical_json(payload))
+
+
+def _finalization_manifest_name(transaction_id: str) -> str:
+    return f".{transaction_id}.finalization.json"
+
+
+def _transaction_stage_path(spec: _FinalizationTransactionSpec) -> Path:
+    return spec.root.parent / f".{spec.transaction_id}.stage-d-finalization-copy"
+
+
+def _transaction_manifest_commit_temp(spec: _FinalizationTransactionSpec) -> Path:
+    return _finalization_manifest_path(spec).with_name(
+        _finalization_manifest_path(spec).name + ".commit.tmp"
+    )
+
+
+def _validate_transaction_spec_against_root(
+    spec: _FinalizationTransactionSpec,
+    *,
+    root: Path,
+    require_base: bool = True,
+) -> None:
+    scan = inspect_ledger(root)
+    if scan.status != "active-clean":
+        raise LedgerPoisoned("finalization root is not active-clean")
+    if not scan.records:
+        raise LedgerPoisoned("finalization root has no records")
+    genesis = _body(scan.records[0])
+    base_matches = (
+        scan.record_sha256s[-1] == spec.base_head_sha256
+        and len(scan.records) == spec.base_record_count
+    )
+    if (
+        scan.records[0].get("ledger_id") != spec.ledger_id
+        or scan.record_sha256s[0] != spec.genesis_sha256
+        or (require_base and not base_matches)
+        or genesis.get("master_seed_sha256") != _sha256(spec.master_seed.encode("utf-8"))
+    ):
+        raise LedgerPoisoned("finalization request is not bound to the live ledger base")
+
+
+def _safe_output_path(root: Path, relative: str) -> Path:
+    if "\\" in relative or relative.count("/") != 1:
+        raise LedgerPoisoned("finalization path is not canonical")
+    directory, name = relative.split("/", 1)
+    if directory not in {"records", "evidence"} or not name or name in {".", ".."}:
+        raise LedgerPoisoned("finalization path is outside the output directories")
+    directory_path = root / directory
+    path = directory_path / name
+    if (
+        _is_link_or_reparse(root)
+        or not root.is_dir()
+        or _is_link_or_reparse(directory_path)
+        or not directory_path.is_dir()
+        or path.parent != directory_path
+        or path.name != name
+        or (path.exists() and _is_link_or_reparse(path))
+    ):
+        raise LedgerPoisoned("finalization path escapes the transaction root")
+    return path
+
+
+def _validate_manifest_state(
+    root: Path,
+    manifest: Mapping[str, Any],
+) -> tuple[_FinalizationTransactionSpec, dict[str, Any], list[dict[str, int | str]]]:
+    _strict_keyset(manifest, _FINALIZATION_MANIFEST_KEYS, "finalization manifest")
+    if (
+        manifest.get("schema_version") != _FINALIZATION_TRANSACTION_SCHEMA_VERSION
+        or manifest.get("domain") != _FINALIZATION_TRANSACTION_DOMAIN
+        or manifest.get("root_path") != _canonical_root_path(root)
+        or manifest.get("root_binding_sha256") != _root_binding(root)
+    ):
+        raise LedgerPoisoned("finalization manifest root binding changed")
+    transaction_id = manifest.get("transaction_id")
+    if (
+        not isinstance(transaction_id, str)
+        or len(transaction_id) != 32
+        or any(character not in "0123456789abcdef" for character in transaction_id)
+    ):
+        raise LedgerPoisoned("finalization manifest transaction ID is invalid")
+    state = manifest.get("state")
+    if type(state) is not str or state not in {"committing", "committed"}:
+        raise LedgerPoisoned("finalization manifest state is invalid")
+    manifest_path = root / _finalization_manifest_name(transaction_id)
+    if manifest_path.name != _finalization_manifest_name(transaction_id):
+        raise LedgerPoisoned("finalization manifest path is invalid")
+    request = _hex_bytes(
+        manifest.get("request_hex"),
+        "finalization request",
+        maximum=_MAX_FINALIZATION_REQUEST_BYTES,
+    )
+    spec, request_sha256 = _spec_from_request(request, root, require_action=False)
+    if (
+        spec.transaction_id != transaction_id
+        or request_sha256 != manifest.get("request_sha256")
+        or spec.ledger_id != manifest.get("ledger_id")
+        or spec.genesis_sha256 != manifest.get("genesis_sha256")
+        or spec.base_head_sha256 != manifest.get("base_head_sha256")
+        or spec.operation != manifest.get("operation")
+    ):
+        raise LedgerPoisoned("finalization manifest request binding changed")
+    baseline = _baseline_payload(cast(Sequence[Mapping[str, object]], manifest["baseline_paths"]))
+    if manifest.get("baseline_sha256") != _baseline_digest(baseline):
+        raise LedgerPoisoned("finalization baseline digest changed")
+    result = _validate_finalization_result(spec, manifest["result"], spec.base_record_count)
+    if manifest.get("result_sha256") != result["result"]["result_sha256"]:
+        raise LedgerPoisoned("finalization manifest result binding changed")
+    return spec, result, baseline
+
+
+def _read_transaction_manifest(
+    root: Path,
+    path: Path,
+) -> tuple[
+    dict[str, Any],
+    _FinalizationTransactionSpec,
+    dict[str, Any],
+    list[dict[str, int | str]],
+]:
+    if _is_link_or_reparse(path) or not path.is_file():
+        raise LedgerPoisoned("finalization manifest is not a regular file")
+    value = _strict_canonical_object(path.read_bytes(), "finalization manifest")
+    spec, result, baseline = _validate_manifest_state(root, value)
+    if path.name != _finalization_manifest_name(spec.transaction_id):
+        raise LedgerPoisoned("finalization manifest filename is not transaction-specific")
+    return value, spec, result, baseline
+
+
+def _current_output_map(root: Path) -> dict[str, bytes]:
+    result: dict[str, bytes] = {}
+    for directory in ("records", "evidence"):
+        base = root / directory
+        if not base.is_dir() or _is_link_or_reparse(base):
+            raise LedgerPoisoned("finalization output directory changed")
+        for path in base.iterdir():
+            if _is_link_or_reparse(path) or not path.is_file():
+                raise LedgerPoisoned("finalization output contains a non-file")
+            if getattr(path.lstat(), "st_nlink", 1) != 1:
+                raise LedgerPoisoned("finalization output contains an aliased file")
+            result[f"{directory}/{path.name}"] = path.read_bytes()
+    return result
+
+
+def _validate_manifest_outputs(
+    root: Path,
+    manifest: Mapping[str, Any],
+    result: Mapping[str, Any],
+    baseline: Sequence[Mapping[str, object]],
+    *,
+    committed: bool,
+) -> None:
+    current = _current_output_map(root)
+    expected_baseline = {
+        cast(str, item["relative_path"]): item for item in baseline
+    }
+    patches = [
+        *cast(Sequence[Mapping[str, Any]], result["evidence_patches"]),
+        *cast(Sequence[Mapping[str, Any]], result["record_patches"]),
+    ]
+    expected_patches = {cast(str, item["relative_path"]): item for item in patches}
+    expected_temp = {cast(str, item["temporary_relative_path"]): item for item in patches}
+    # A committing transaction may have durable patch temporaries while the
+    # child is between its manifest and final replacement.  They are allowed
+    # only when their exact transaction-specific names are declared below;
+    # committed state must still contain no temporaries.
+    if set(current) - set(expected_baseline) - set(expected_patches) - set(expected_temp):
+        raise LedgerPoisoned("finalization output contains an unbound path")
+    for relative, item in expected_baseline.items():
+        encoded = current.get(relative)
+        if encoded is None or len(encoded) != item["bytes"] or _sha256(encoded) != item["sha256"]:
+            raise LedgerPoisoned("finalization baseline was changed")
+    for relative, item in expected_patches.items():
+        if relative in expected_baseline:
+            raise LedgerPoisoned("finalization patch replaces a baseline path")
+        path = _safe_output_path(root, relative)
+        encoded = current.get(relative)
+        if committed:
+            if encoded != item["content"]:
+                raise LedgerPoisoned("committed finalization output differs from its patch")
+        elif encoded is not None and encoded != item["content"]:
+            raise LedgerPoisoned("partial finalization output differs from its patch")
+        if path.exists() and _is_link_or_reparse(path):
+            raise LedgerPoisoned("finalization output is a symlink")
+    for temporary in expected_temp:
+        if temporary in expected_baseline:
+            raise LedgerPoisoned("finalization temporary path was present in the baseline")
+        path = _safe_output_path(root, temporary)
+        if path.exists():
+            if committed:
+                raise LedgerPoisoned("committed finalization left a temporary output")
+            if _is_link_or_reparse(path):
+                raise LedgerPoisoned("finalization temporary output is a symlink")
+
+
+def _cleanup_request_bytes(spec: _FinalizationTransactionSpec, action: str) -> bytes:
+    if action not in {"resolve", "ack"}:
+        raise ValueError("unknown finalization cleanup action")
+    payload = {
+        "schema_version": _FINALIZATION_TRANSACTION_SCHEMA_VERSION,
+        "domain": _FINALIZATION_CLEANUP_DOMAIN,
+        "transaction_id": spec.transaction_id,
+        "root_path": _canonical_root_path(spec.root),
+        "root_binding_sha256": _root_binding(spec.root),
+        "request_sha256": _sha256(_finalization_request_bytes(spec)),
+        "action": action,
+        "request_hex": _finalization_request_bytes(spec).hex(),
+    }
+    _strict_keyset(payload, _FINALIZATION_CLEANUP_KEYS, "finalization cleanup request")
+    encoded = cast(bytes, canonical_json(payload))
+    if len(encoded) > _MAX_FINALIZATION_CLEANUP_BYTES:
+        raise LedgerPoisoned("finalization cleanup request exceeds its bound")
+    return encoded
+
+
+def _remove_owned_transaction_file(path: Path) -> None:
+    if _is_link_or_reparse(path) or not path.is_file():
+        raise LedgerPoisoned("transaction-owned path is not a regular file")
+    if getattr(path.lstat(), "st_nlink", 1) != 1:
+        raise LedgerPoisoned("transaction-owned path has an alias")
+    path.unlink()
+
+
+def _rollback_manifest(
+    root: Path,
+    result: Mapping[str, Any],
+    baseline: Sequence[Mapping[str, object]],
+) -> None:
+    baseline_paths = {cast(str, item["relative_path"]) for item in baseline}
+    patches = [
+        *cast(Sequence[Mapping[str, Any]], result["evidence_patches"]),
+        *cast(Sequence[Mapping[str, Any]], result["record_patches"]),
+    ]
+    removals: list[Path] = []
+    for patch in patches:
+        relative = cast(str, patch["relative_path"])
+        temporary = cast(str, patch["temporary_relative_path"])
+        if relative in baseline_paths or temporary in baseline_paths:
+            raise LedgerPoisoned("rollback path was present in the immutable baseline")
+        final_path = _safe_output_path(root, relative)
+        temporary_path = _safe_output_path(root, temporary)
+        if final_path.exists():
+            if (
+                _is_link_or_reparse(final_path)
+                or getattr(final_path.lstat(), "st_nlink", 1) != 1
+                or final_path.read_bytes() != patch["content"]
+            ):
+                raise LedgerPoisoned("rollback encountered a changed final output")
+            removals.append(final_path)
+        if temporary_path.exists():
+            if (
+                _is_link_or_reparse(temporary_path)
+                or getattr(temporary_path.lstat(), "st_nlink", 1) != 1
+            ):
+                raise LedgerPoisoned("rollback encountered a symlink temporary output")
+            # A transaction-specific name is not ownership proof by itself:
+            # an attacker could pre-create that name.  The child writes the
+            # complete canonical patch before publishing the manifest, so the
+            # exact bytes are the second, immutable ownership proof.  Reject
+            # partial or substituted contents rather than deleting them.
+            if temporary_path.read_bytes() != patch["content"]:
+                raise LedgerPoisoned("rollback encountered an unbound temporary output")
+            removals.append(temporary_path)
+    # No filesystem mutation occurs until every baseline/path/ownership check
+    # above has succeeded.
+    for path in removals:
+        _remove_owned_transaction_file(path)
+    if os.name != "nt":
+        _fsync_directory(root / "records")
+        _fsync_directory(root / "evidence")
+
+
+def _remove_manifest_and_stage(
+    root: Path,
+    manifest_path: Path,
+    spec: _FinalizationTransactionSpec,
+    manifest: Mapping[str, Any],
+) -> None:
+    if manifest_path.name != _finalization_manifest_name(spec.transaction_id):
+        raise LedgerPoisoned("finalization manifest filename is not transaction-specific")
+    commit_temp = manifest_path.with_name(manifest_path.name + ".commit.tmp")
+    if commit_temp.exists():
+        if _is_link_or_reparse(commit_temp) or not commit_temp.is_file():
+            raise LedgerPoisoned("finalization manifest temporary is invalid")
+        if getattr(commit_temp.lstat(), "st_nlink", 1) != 1:
+            raise LedgerPoisoned("finalization manifest temporary has an alias")
+        committed_manifest = dict(manifest)
+        committed_manifest["state"] = "committed"
+        if commit_temp.read_bytes() != canonical_json(committed_manifest):
+            raise LedgerPoisoned("finalization manifest temporary is not transaction-owned")
+    stage = _transaction_stage_path(spec)
+    if stage.exists():
+        if _is_link_or_reparse(stage) or not stage.is_dir():
+            raise LedgerPoisoned("finalization stage is not a real directory")
+        marker = stage / ".transaction-owner"
+        if _is_link_or_reparse(marker) or not marker.is_file():
+            raise LedgerPoisoned("finalization stage owner marker is invalid")
+        if marker.read_bytes() != _sha256(_finalization_request_bytes(spec)).encode("ascii"):
+            raise LedgerPoisoned("finalization stage owner binding changed")
+    _remove_owned_transaction_file(manifest_path)
+    if commit_temp.exists():
+        commit_temp.unlink()
+    if stage.exists():
+        shutil.rmtree(stage)
+    if os.name != "nt":
+        _fsync_directory(root)
+        _fsync_directory(root.parent)
+
+
+def _resolve_stale_finalization_manifests(root: Path) -> None:
+    for path in sorted(root.glob(".*.finalization.json"), key=lambda item: item.name):
+        if _is_link_or_reparse(path) or not path.is_file():
+            raise LedgerPoisoned("finalization manifest is not a regular file")
+        manifest, spec, result, baseline = _read_transaction_manifest(root, path)
+        state = manifest["state"]
+        _validate_manifest_outputs(
+            root,
+            manifest,
+            result,
+            baseline,
+            committed=state == "committed",
+        )
+        if state == "committed":
+            _validate_transaction_spec_against_root(spec, root=root, require_base=False)
+            _validate_committed_finalization(spec, result)
+        else:
+            _rollback_manifest(root, result, baseline)
+        _remove_manifest_and_stage(root, path, spec, manifest)
+
+
+async def _run_finalization_cleanup_owner(
+    spec: _FinalizationTransactionSpec,
+    *,
+    action: Literal["resolve", "ack"],
+) -> dict[str, Any]:
+    request = _cleanup_request_bytes(spec, action)
+    process = await asyncio.create_subprocess_exec(
+        *_finalization_child_command("--cleanup-finalization-stdin", spec.root),
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(request),
+            timeout=_FINALIZATION_KILL_WAIT_SECONDS,
+        )
+    except BaseException:
+        await _terminate_finalization_process(process)
+        raise
+    if process.returncode != 0:
+        raise LedgerPoisoned(
+            "finalization cleanup owner failed"
+            + (f": {stderr.decode('utf-8', errors='replace').strip()}" if stderr else "")
+        )
+    if len(stdout) > _MAX_FINALIZATION_CLEANUP_RESULT_BYTES:
+        raise LedgerPoisoned("finalization cleanup result exceeds its bound")
+    result = _strict_canonical_object(stdout, "finalization cleanup result")
+    _strict_keyset(result, _FINALIZATION_CLEANUP_RESULT_KEYS, "finalization cleanup result")
+    if (
+        result.get("schema_version") != _FINALIZATION_TRANSACTION_SCHEMA_VERSION
+        or result.get("domain") != _FINALIZATION_CLEANUP_DOMAIN
+        or result.get("transaction_id") != spec.transaction_id
+        or result.get("request_sha256") != _sha256(_finalization_request_bytes(spec))
+        or result.get("state") not in {"committed", "rolled_back"}
+    ):
+        raise LedgerPoisoned("finalization cleanup result binding changed")
+    return result
+
+
+def _result_payload(
+    spec: _FinalizationTransactionSpec,
+    request_sha256: str,
+    receipt: bytes,
+    record_patches: Sequence[Mapping[str, Any]],
+    evidence_patches: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    core = {
+        "schema_version": 2,
+        "domain": _FINALIZATION_RESULT_DOMAIN,
+        "transaction_id": spec.transaction_id,
+        "request_sha256": request_sha256,
+        "receipt_hex": receipt.hex(),
+        "record_patches": [dict(patch) for patch in record_patches],
+        "evidence_patches": [dict(patch) for patch in evidence_patches],
+    }
+    return {**core, "result_sha256": _sha256(canonical_json(core))}
+
+
+def _result_bytes(result: Mapping[str, Any]) -> bytes:
+    return cast(bytes, canonical_json(result))
+
+
+def _emit_finalization_output(encoded: bytes, *, maximum: int) -> None:
+    if len(encoded) > maximum:
+        raise LedgerPoisoned("finalization child output exceeds its bound")
+    sys.stdout.buffer.write(encoded)
+    sys.stdout.buffer.flush()
+
+
+def _validate_finalization_result(
+    spec: _FinalizationTransactionSpec,
+    encoded: bytes | Mapping[str, Any],
+    baseline_record_count: int | None = None,
+) -> dict[str, Any]:
+    if isinstance(encoded, bytes) and len(encoded) > _MAX_FINALIZATION_RESULT_BYTES:
+        raise LedgerPoisoned("finalization result exceeds its bound")
+    value = (
+        _strict_canonical_object(encoded, "finalization result")
+        if isinstance(encoded, bytes)
+        else dict(encoded)
+    )
+    _strict_keyset(value, _FINALIZATION_RESULT_KEYS, "finalization result")
+    if (
+        value.get("schema_version") != 2
+        or value.get("domain") != _FINALIZATION_RESULT_DOMAIN
+        or value.get("transaction_id") != spec.transaction_id
+        or value.get("request_sha256") != _sha256(_finalization_request_bytes(spec))
+    ):
+        raise LedgerPoisoned("finalization result binding changed")
+    result_sha256 = value.get("result_sha256")
+    core = dict(value)
+    core.pop("result_sha256", None)
+    if result_sha256 != _sha256(canonical_json(core)):
+        raise LedgerPoisoned("finalization result digest changed")
+    receipt = _hex_bytes(
+        value.get("receipt_hex"), "finalization receipt", maximum=_MAX_RECEIPT_BYTES
+    )
+    receipt_value = _strict_canonical_object(receipt, "finalization receipt")
+    expected_kind = "reconstruction_qa" if spec.operation == "qa" else "scientific_arm_execution"
+    if receipt_value.get("receipt_kind") != expected_kind:
+        raise LedgerPoisoned("finalization receipt kind is inconsistent")
+    records = _transaction_patch_payloads(
+        cast(Sequence[Mapping[str, Any]], value["record_patches"]),
+        transaction_id=spec.transaction_id,
+        directory="records",
+    )
+    evidence = _transaction_patch_payloads(
+        cast(Sequence[Mapping[str, Any]], value["evidence_patches"]),
+        transaction_id=spec.transaction_id,
+        directory="evidence",
+    )
+    if not records:
+        raise LedgerPoisoned("finalization result has no record patch")
+    expected_offset = (
+        spec.base_record_count if baseline_record_count is None else baseline_record_count
+    )
+    if type(expected_offset) is not int or expected_offset != spec.base_record_count:
+        raise LedgerPoisoned("finalization baseline record count changed")
+    prior = spec.base_head_sha256
+    receipt_found = False
+    for index, patch in enumerate(records):
+        record = _strict_canonical_object(cast(bytes, patch["content"]), "finalization record")
+        if (
+            record.get("ledger_id") != spec.ledger_id
+            or record.get("offset") != expected_offset + index
+            or record.get("prior_record_sha256") != prior
+        ):
+            raise LedgerPoisoned("finalization record chain differs from the authenticated base")
+        prior = _sha256(cast(bytes, patch["content"]))
+        if record.get("record_kind") == "receipt":
+            body = _body(record)
+            if (
+                body.get("receipt") == receipt_value
+                and body.get("receipt_sha256") == _sha256(receipt)
+            ):
+                receipt_found = True
+    if not receipt_found:
+        raise LedgerPoisoned("finalization receipt is not in the new record patch")
+    return {
+        "receipt": receipt,
+        "record_patches": records,
+        "evidence_patches": evidence,
+        "result": value,
+    }
+
+
+def _validate_committed_finalization(
+    spec: _FinalizationTransactionSpec,
+    result: Mapping[str, Any],
+) -> None:
+    """Bind a committed transaction to the reopened ledger, not its manifest."""
+
+    scan = inspect_ledger(spec.root)
+    if scan.status != "active-clean":
+        raise LedgerPoisoned("committed finalization is not active-clean")
+    records = cast(Sequence[Mapping[str, Any]], result["record_patches"])
+    expected_record_hashes = tuple(
+        _sha256(cast(bytes, patch["content"])) for patch in records
+    )
+    if (
+        len(scan.records) != spec.base_record_count + len(records)
+        or tuple(scan.record_sha256s[spec.base_record_count:]) != expected_record_hashes
+    ):
+        raise LedgerPoisoned("committed finalization record chain is not anchored")
+    receipt = cast(bytes, result["receipt"])
+    receipt_value = _strict_canonical_object(receipt, "finalization receipt")
+    receipt_kind = cast(str, receipt_value["receipt_kind"])
+    if scan.receipts.get((receipt_kind, _sha256(receipt))) != receipt_value:
+        raise LedgerPoisoned("committed finalization receipt is not ledger-anchored")
+    for patch in cast(Sequence[Mapping[str, Any]], result["evidence_patches"]):
+        relative = cast(str, patch["relative_path"])
+        digest = relative.split("/", 1)[1]
+        evidence_path = _safe_output_path(spec.root, relative)
+        if (
+            digest not in scan.evidence_refs
+            or not evidence_path.is_file()
+            or _is_link_or_reparse(evidence_path)
+            or evidence_path.read_bytes() != cast(bytes, patch["content"])
+        ):
+            raise LedgerPoisoned("committed finalization evidence is not anchored")
+
+
+def _finalization_stage_glob(spec: _FinalizationTransactionSpec) -> str:
+    return f".{spec.transaction_id}.stage-d-finalization-copy-*"
+
+
+def _cleanup_finalization_stages(spec: _FinalizationTransactionSpec) -> None:
+    removed = False
+    for path in spec.root.parent.glob(_finalization_stage_glob(spec)):
+        if path.is_dir() and not _is_link_or_reparse(path):
+            shutil.rmtree(path)
+            removed = True
+    if removed and os.name != "nt":
+        _fsync_directory(spec.root.parent)
+
+
+def _run_finalization_transaction_worker(spec: _FinalizationTransactionSpec) -> None:
+    _validate_transaction_spec_against_root(spec, root=spec.root)
+    baseline_paths = _transaction_baseline_paths(spec.root)
+    stage_directory = _transaction_stage_path(spec)
+    if stage_directory.exists() or _is_link_or_reparse(stage_directory):
+        raise LedgerPoisoned("finalization stage path already exists")
+    manifest_path = _finalization_manifest_path(spec)
+    if manifest_path.exists() or _is_link_or_reparse(manifest_path):
+        raise LedgerPoisoned("finalization manifest path already exists")
+    if _transaction_manifest_commit_temp(spec).exists():
+        raise LedgerPoisoned("finalization manifest temporary path already exists")
+    request = _finalization_request_bytes(spec)
+    request_sha256 = _sha256(request)
+    stage_directory.mkdir()
+    if os.name != "nt":
+        _fsync_directory(spec.root.parent)
+    (stage_directory / ".transaction-owner").write_bytes(request_sha256.encode("ascii"))
+    if os.name != "nt":
+        _fsync_directory(stage_directory)
+    stage_root = stage_directory / "ledger"
+    try:
+        stage_root.mkdir()
+        shutil.copytree(spec.root / "records", stage_root / "records", symlinks=False)
+        shutil.copytree(spec.root / "evidence", stage_root / "evidence", symlinks=False)
+        staged = StageDReceiptLedger(stage_root, master_seed=spec.master_seed)
+        try:
+            if spec.operation == "qa":
+                if (
+                    spec.recorded_action is None
+                    or spec.passed is None
+                    or spec.actual_cost is None
+                ):
+                    raise LedgerError("QA finalization request is incomplete")
+                report_sha256 = staged.put_evidence(spec.evidence)
+                receipt = staged.record_reconstruction_qa(
+                    group_id=spec.group_id,
+                    target_id=spec.target_id,
+                    recorded_action=spec.recorded_action,
+                    passed=spec.passed,
+                    report_sha256=report_sha256,
+                    actual_cost=spec.actual_cost,
+                )
+            else:
+                if spec.execution_attempt is None or spec.outcome_kind is None:
+                    raise LedgerError("execution finalization request is incomplete")
+                evidence_sha256 = staged.put_evidence(spec.evidence)
+                receipt = staged.finish_execution(
+                    spec.execution_attempt,
+                    outcome_kind=spec.outcome_kind,
+                    scored_reward=spec.scored_reward,
+                    scorer_evidence_sha256=evidence_sha256,
+                    latency_seconds=spec.latency_seconds,
+                    dollars=spec.dollars,
+                    judge_calls=spec.judge_calls,
+                    cpu_seconds=spec.cpu_seconds,
+                    gpu_seconds=spec.gpu_seconds,
+                    wall_seconds=spec.wall_seconds,
+                    storage_bytes=spec.storage_bytes,
+                )
+        finally:
+            staged.close()
+        base_records = _transaction_file_map(spec.root, "records")
+        base_evidence = _transaction_file_map(spec.root, "evidence")
+        prepared_records = _transaction_file_map(stage_root, "records")
+        prepared_evidence = _transaction_file_map(stage_root, "evidence")
+        record_patches = _transaction_patch(spec, base_records, prepared_records, "records")
+        evidence_patches = _transaction_patch(spec, base_evidence, prepared_evidence, "evidence")
+        if not record_patches:
+            raise LedgerError("finalization transaction did not prepare a ledger record")
+        result = _result_payload(
+            spec,
+            request_sha256,
+            receipt,
+            record_patches,
+            evidence_patches,
+        )
+        committing = _transaction_manifest(
+            spec,
+            state="committing",
+            request=request,
+            baseline_paths=baseline_paths,
+            result=result,
+        )
+        _exclusive_durable_write(manifest_path, committing)
+        for patch in evidence_patches:
+            relative = cast(str, patch["relative_path"])
+            _atomic_record_write(
+                _safe_output_path(spec.root, relative),
+                prepared_evidence[Path(relative).name],
+                temporary_path=spec.root / cast(str, patch["temporary_relative_path"]),
+            )
+        for patch in record_patches:
+            relative = cast(str, patch["relative_path"])
+            _atomic_record_write(
+                _safe_output_path(spec.root, relative),
+                prepared_records[Path(relative).name],
+                temporary_path=spec.root / cast(str, patch["temporary_relative_path"]),
+            )
+        if inspect_ledger(spec.root).status != "active-clean":
+            raise LedgerPoisoned("prepared finalization did not produce a valid ledger")
+        committed = _transaction_manifest(
+            spec,
+            state="committed",
+            request=request,
+            baseline_paths=baseline_paths,
+            result=result,
+        )
+        _replace_durable_bytes(manifest_path, committed)
+        _emit_finalization_output(
+            _result_bytes(result), maximum=_MAX_FINALIZATION_RESULT_BYTES
+        )
+    finally:
+        shutil.rmtree(stage_directory, ignore_errors=True)
+
+
+async def _terminate_finalization_process(
+    process: asyncio.subprocess.Process,
+) -> None:
+    """Terminate and reap one isolated commit process within a fixed bound."""
+
+    if process.returncode is not None:
+        return
+    process.terminate()
+    try:
+        await asyncio.wait_for(
+            process.wait(),
+            timeout=_FINALIZATION_TERM_GRACE_SECONDS,
+        )
+        return
+    except TimeoutError:
+        process.kill()
+        await asyncio.wait_for(
+            process.wait(),
+            timeout=_FINALIZATION_KILL_WAIT_SECONDS,
+        )
+
+
+def _exclusive_durable_write(path: Path, encoded: bytes) -> None:
+    if path.exists() or _is_link_or_reparse(path):
+        raise FileExistsError(path)
+    descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        view = memoryview(encoded)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("short durable transaction write")
+            view = view[written:]
+        os.fsync(descriptor)
+        if os.name != "nt":
+            _fsync_directory(path.parent)
+    except BaseException:
+        try:
+            os.close(descriptor)
+        finally:
+            if path.exists() and not _is_link_or_reparse(path):
+                path.unlink()
+        raise
+    else:
+        os.close(descriptor)
+
+
+def _replace_durable_bytes(path: Path, encoded: bytes) -> None:
+    if not path.is_file() or _is_link_or_reparse(path):
+        raise LedgerPoisoned("transaction manifest is not replaceable")
+    temporary = path.with_name(path.name + ".commit.tmp")
+    _exclusive_durable_write(temporary, encoded)
+    os.replace(temporary, path)
+    if os.name != "nt":
+        _fsync_directory(path.parent)
+
+
+def _atomic_record_write(
+    path: Path,
+    encoded: bytes,
+    *,
+    temporary_path: Path | None = None,
+) -> None:
     if path.exists():
         raise FileExistsError(path)
-    descriptor, temporary_name = tempfile.mkstemp(
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-    )
-    temporary = Path(temporary_name)
+    if _is_link_or_reparse(path):
+        raise LedgerPoisoned("transaction output is a symlink")
+    if temporary_path is None:
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        )
+        temporary = Path(temporary_name)
+    else:
+        if temporary_path.exists() or _is_link_or_reparse(temporary_path):
+            raise LedgerPoisoned("transaction temporary path already exists")
+        descriptor = os.open(
+            temporary_path,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            0o600,
+        )
+        temporary = temporary_path
     try:
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
-        if fault_hook is not None:
-            fault_hook("after_file_fsync", path.name)
         _durable_rename(temporary, path)
-        if fault_hook is not None:
-            fault_hook("after_rename", path.name)
-        if fault_hook is not None:
-            fault_hook("after_directory_fsync", path.name)
     finally:
-        if temporary.exists() and fault_hook is None:
+        if temporary.exists():
             temporary.unlink()
 
 
 def _atomic_blob_write(path: Path, data: bytes) -> None:
-    _atomic_record_write(path, data, None)
+    _atomic_record_write(path, data)
 
 
 def _acquire_writer_lock(path: Path) -> int:
@@ -3351,6 +5098,144 @@ def _strict_canonical_object(encoded: bytes, name: str) -> dict[str, Any]:
     if not isinstance(value, dict) or canonical_json(value) != encoded:
         raise LedgerPoisoned(f"{name} is not canonical JSON")
     return value
+
+
+def _cleanup_result(
+    spec: _FinalizationTransactionSpec,
+    request_sha256: str,
+    state: str,
+    result: Mapping[str, Any] | None,
+) -> bytes:
+    payload = {
+        "schema_version": _FINALIZATION_TRANSACTION_SCHEMA_VERSION,
+        "domain": _FINALIZATION_CLEANUP_DOMAIN,
+        "transaction_id": spec.transaction_id,
+        "request_sha256": request_sha256,
+        "state": state,
+        "result": None if result is None else dict(result),
+    }
+    _strict_keyset(payload, _FINALIZATION_CLEANUP_RESULT_KEYS, "finalization cleanup result")
+    encoded = cast(bytes, canonical_json(payload))
+    if len(encoded) > _MAX_FINALIZATION_CLEANUP_RESULT_BYTES:
+        raise LedgerPoisoned("finalization cleanup result exceeds its bound")
+    return encoded
+
+
+def _cleanup_owned_stage_if_present(spec: _FinalizationTransactionSpec) -> None:
+    stage = _transaction_stage_path(spec)
+    if not stage.exists():
+        return
+    if _is_link_or_reparse(stage) or not stage.is_dir():
+        raise LedgerPoisoned("finalization stage is not a real directory")
+    marker = stage / ".transaction-owner"
+    if not marker.is_file() or _is_link_or_reparse(marker):
+        raise LedgerPoisoned("unbound finalization stage cannot be removed")
+    if marker.read_bytes() != _sha256(_finalization_request_bytes(spec)).encode("ascii"):
+        raise LedgerPoisoned("finalization stage owner binding changed")
+    shutil.rmtree(stage)
+    if os.name != "nt":
+        _fsync_directory(stage.parent)
+
+
+def _run_finalization_cleanup_worker(encoded: bytes, root: Path) -> None:
+    if len(encoded) > _MAX_FINALIZATION_CLEANUP_BYTES:
+        raise LedgerPoisoned("finalization cleanup request exceeds its bound")
+    value = _strict_canonical_object(encoded, "finalization cleanup request")
+    _strict_keyset(value, _FINALIZATION_CLEANUP_KEYS, "finalization cleanup request")
+    if (
+        value.get("schema_version") != _FINALIZATION_TRANSACTION_SCHEMA_VERSION
+        or value.get("domain") != _FINALIZATION_CLEANUP_DOMAIN
+        or value.get("root_path") != _canonical_root_path(root)
+        or value.get("root_binding_sha256") != _root_binding(root)
+    ):
+        raise LedgerPoisoned("finalization cleanup root binding changed")
+    request = _hex_bytes(
+        value.get("request_hex"),
+        "finalization cleanup request payload",
+        maximum=_MAX_FINALIZATION_REQUEST_BYTES,
+    )
+    spec, request_sha256 = _spec_from_request(request, root, require_action=False)
+    if (
+        value.get("transaction_id") != spec.transaction_id
+        or value.get("request_sha256") != request_sha256
+    ):
+        raise LedgerPoisoned("finalization cleanup request binding changed")
+    action = value.get("action")
+    if action not in {"resolve", "ack"}:
+        raise LedgerPoisoned("finalization cleanup action is invalid")
+    manifest_path = _finalization_manifest_path(spec)
+    if not manifest_path.exists():
+        _cleanup_owned_stage_if_present(spec)
+        _emit_finalization_output(
+            _cleanup_result(spec, request_sha256, "rolled_back", None),
+            maximum=_MAX_FINALIZATION_CLEANUP_RESULT_BYTES,
+        )
+        return
+    manifest, manifest_spec, result, baseline = _read_transaction_manifest(root, manifest_path)
+    if manifest_spec != spec:
+        raise LedgerPoisoned("finalization cleanup manifest spec changed")
+    state = manifest["state"]
+    if state == "committed":
+        _validate_transaction_spec_against_root(spec, root=root, require_base=False)
+        _validate_manifest_outputs(root, manifest, result, baseline, committed=True)
+        _validate_committed_finalization(spec, result)
+        if action == "resolve":
+            cleanup_output = _cleanup_result(
+                spec, request_sha256, "committed", result["result"]
+            )
+            _emit_finalization_output(
+                cleanup_output,
+                maximum=_MAX_FINALIZATION_CLEANUP_RESULT_BYTES,
+            )
+            return
+        cleanup_output = _cleanup_result(
+            spec, request_sha256, "committed", result["result"]
+        )
+        _remove_manifest_and_stage(root, manifest_path, spec, manifest)
+        _emit_finalization_output(
+            cleanup_output,
+            maximum=_MAX_FINALIZATION_CLEANUP_RESULT_BYTES,
+        )
+        return
+    if action == "ack":
+        raise LedgerPoisoned("uncommitted finalization cannot be acknowledged")
+    _validate_manifest_outputs(root, manifest, result, baseline, committed=False)
+    cleanup_output = _cleanup_result(spec, request_sha256, "rolled_back", None)
+    _rollback_manifest(root, result, baseline)
+    _remove_manifest_and_stage(root, manifest_path, spec, manifest)
+    _emit_finalization_output(
+        cleanup_output,
+        maximum=_MAX_FINALIZATION_CLEANUP_RESULT_BYTES,
+    )
+
+
+def _finalization_transaction_main(argv: Sequence[str]) -> int:
+    if len(argv) != 2 or argv[0] not in {
+        "--finalize-transaction-stdin",
+        "--cleanup-finalization-stdin",
+    }:
+        return 2
+    root = Path(argv[1])
+    try:
+        maximum = (
+            _MAX_FINALIZATION_CLEANUP_BYTES
+            if argv[0] == "--cleanup-finalization-stdin"
+            else _MAX_FINALIZATION_REQUEST_BYTES
+        )
+        encoded = sys.stdin.buffer.read(maximum + 1)
+        if not encoded:
+            raise LedgerPoisoned("finalization child received no request")
+        if len(encoded) > maximum:
+            raise LedgerPoisoned("finalization child request exceeds its bound")
+        if argv[0] == "--finalize-transaction-stdin":
+            spec, _ = _spec_from_request(encoded, root)
+            _run_finalization_transaction_worker(spec)
+        else:
+            _run_finalization_cleanup_worker(encoded, root)
+        return 0
+    except BaseException as error:
+        print(f"{type(error).__name__}: {error}", file=sys.stderr)
+        return 1
 
 
 def _body(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -3476,3 +5361,7 @@ def _finite_nonnegative(value: object, name: str) -> float:
     if result < 0:
         raise ValueError(f"{name} must be nonnegative")
     return result
+
+
+if __name__ == "__main__":
+    raise SystemExit(_finalization_transaction_main(sys.argv[1:]))

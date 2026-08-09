@@ -8,12 +8,13 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import pytest
 
 import redco.analysis.stage_d_receipt_ledger as receipt_ledger_module
 from redco.analysis.stage_d_exact_action import BehaviorAction, ExactActionKey
+from redco.analysis.stage_d_ledger_contracts import ExecutionAttempt
 from redco.analysis.stage_d_ledger_validation import validate_state_machine
 from redco.analysis.stage_d_receipt_ledger import (
     BatchAlreadyClaimed,
@@ -164,12 +165,11 @@ def _bind_source_rollout(
     return result.receipt
 
 
-def _create(root: Path, *, fault_hook: Any = None) -> StageDReceiptLedger:
+def _create(root: Path) -> StageDReceiptLedger:
     return StageDReceiptLedger.create(
         root,
         binding=_binding(),
         master_seed=MASTER_SEED,
-        fault_hook=fault_hook,
     )
 
 
@@ -177,9 +177,11 @@ def _commit(
     writer: StageDReceiptLedger,
     *,
     branch_count: int = 2,
+    freeze_roster: bool = True,
 ) -> tuple[BehaviorAction, PolicyEventAddress, bytes, bytes]:
     recorded_key = _key(17)
     target = PolicyEventAddress(1, "root/child", 0, 0)
+    matched = PolicyEventAddress(0, "root", 2, 2)
     snapshot = writer.put_evidence(b"snapshot")
     reservation = writer.commit_pre_action_and_reserve(
         group_id="group-1",
@@ -194,20 +196,55 @@ def _commit(
         continuation_replicates=1,
         failure_reward=-1.0,
     )
+    root_request = writer.put_evidence(recorded_key.request)
+    root_reservation = writer.reserve_source_policy_call(
+        group_id="group-1",
+        rollout_id="rollout-1",
+        decision_id="root-decision-0",
+        node_kind="root",
+        target_id=None,
+        target_ordinal=None,
+        target_address=matched,
+        recorded_action_key=recorded_key,
+        request_sha256=root_request,
+        branch_selected=False,
+    )
     request = writer.put_evidence(recorded_key.request)
+    source_reservation = writer.reserve_source_policy_call(
+        group_id="group-1",
+        rollout_id="rollout-1",
+        decision_id="child-decision-0",
+        node_kind="child",
+        target_id="target-0",
+        target_ordinal=0,
+        target_address=target,
+        recorded_action_key=recorded_key,
+        request_sha256=request,
+        branch_selected=True,
+        recorded_action_reservation=reservation,
+    )
+    recorded = _materialize(recorded_key)
+    response = writer.put_evidence(recorded.to_bytes())
     writer.mark_recorded_action_model_call_started(
         reservation,
         request_sha256=request,
     )
-    recorded = _materialize(recorded_key)
-    response = writer.put_evidence(recorded.to_bytes())
     writer.complete_recorded_action(
         reservation,
         action=recorded,
         response_sha256=response,
     )
+    root_completion = writer.complete_source_policy_call(
+        root_reservation,
+        action=recorded,
+        response_sha256=response,
+    )
+    source_completion = writer.complete_source_policy_call(
+        source_reservation,
+        action=recorded,
+        response_sha256=response,
+    )
     correspondence_evidence = writer.put_evidence(b"correspondence")
-    matched = PolicyEventAddress(0, "root", 2, 2)
     correspondence_receipt = writer.freeze_correspondence(
         group_id="group-1",
         target_id="target-0",
@@ -215,7 +252,174 @@ def _commit(
         matched_addresses=(matched,),
         evidence_sha256=correspondence_evidence,
     )
+    trace = writer.put_evidence(b"raw-trace")
+    reward = writer.put_evidence(b"reward-evidence")
+    stock = writer.put_evidence(b"stock-sequences")
+    writer.record_source_rollout_completed(
+        group_id="group-1",
+        rollout_id="rollout-1",
+        source_sha256="5" * 64,
+        trace_sha256=trace,
+        reward_evidence_sha256=reward,
+        stock_sequences_evidence_sha256=stock,
+        base_model_manifest_sha256="6" * 64,
+        decision_ids=("root-decision-0", "child-decision-0"),
+        decision_completion_receipt_sha256s=(
+            _sha256(root_completion),
+            _sha256(source_completion),
+        ),
+    )
+    if freeze_roster:
+        roster = {
+            "schema_version": 2,
+            "domain": "redco-stage-d-branch-target-roster-v2",
+            "planned_source_count": 1,
+            "completed_source_count": 1,
+            "eligible_source_count": 1,
+            "ineligible_source_count": 0,
+            "minimum_eligible_sources": 1,
+            "eligibility_passed": True,
+            "source_sha256s": ["5" * 64],
+            "targets": [
+                {
+                    "source_sha256": "5" * 64,
+                    "group_id": "group-1",
+                    "rollout_id": "rollout-1",
+                    "decision_id": "child-decision-0",
+                    "target_id": "target-0",
+                    "target_ordinal": 0,
+                    "event_address": {**target.as_payload(), "turn": target.turn},
+                }
+            ],
+            "excluded_targets": [],
+        }
+        writer.record_branch_target_roster(canonical_json(roster))
     return recorded, matched, reservation.commitment_receipt, correspondence_receipt
+
+
+def _record_qa(
+    writer: StageDReceiptLedger,
+    recorded: BehaviorAction,
+    *,
+    report_sha256: str,
+    actual_cost: ActualEvaluationCost,
+    passed: bool = True,
+) -> bytes:
+    receipt = writer.record_reconstruction_qa(
+        group_id="group-1",
+        target_id="target-0",
+        recorded_action=recorded,
+        passed=passed,
+        report_sha256=report_sha256,
+        actual_cost=actual_cost,
+    )
+    if writer.branch_target_roster_sha256 is not None:
+        writer.seal_reconstruction_qa_barrier()
+    return receipt
+
+
+def _inject_target(
+    writer: StageDReceiptLedger,
+    attempt: ExecutionAttempt,
+    action: BehaviorAction,
+) -> None:
+    evidence = writer.put_evidence(action.to_bytes())
+    ticket = writer.commit_execution_override(
+        attempt,
+        address=PolicyEventAddress(1, "root/child", 0, 0),
+        action_digest=action.digest,
+        disposition="inject",
+        request_sha256=writer.put_evidence(b"target-injection-request"),
+        response_content_sha256=evidence,
+        prompt_tokens=action.prompt_tokens,
+        completion_tokens=action.completion_tokens,
+        counts_toward_logical_cost=False,
+    )
+    writer.mark_execution_override_delivered(
+        attempt,
+        ticket,
+        typed_response_sha256=evidence,
+    )
+
+
+def test_reconstruction_qa_readiness_requires_roster_and_zero_real_cost(
+    tmp_path: Path,
+) -> None:
+    writer = _create(tmp_path / "qa-readiness")
+    recorded, _, _, _ = _commit(writer, freeze_roster=False)
+    cost = ActualEvaluationCost()
+    with pytest.raises(LedgerError, match="frozen target roster"):
+        writer.require_reconstruction_qa_ready(
+            group_id="group-1",
+            target_id="target-0",
+            recorded_action=recorded,
+            actual_cost=cost,
+        )
+    report = writer.put_evidence(b"qa-report")
+    with pytest.raises(LedgerError, match="frozen target roster"):
+        writer.record_reconstruction_qa(
+            group_id="group-1",
+            target_id="target-0",
+            recorded_action=recorded,
+            passed=True,
+            report_sha256=report,
+            actual_cost=cost,
+        )
+    writer.close()
+
+
+def test_reconstruction_qa_rejects_nonzero_generated_or_judge_cost_before_append(
+    tmp_path: Path,
+) -> None:
+    writer = _create(tmp_path / "qa-cost")
+    recorded, _, _, _ = _commit(writer)
+    report = writer.put_evidence(b"qa-report")
+    before = writer.record_count
+    with pytest.raises(ValueError, match="zero model calls"):
+        writer.require_reconstruction_qa_ready(
+            group_id="group-1",
+            target_id="target-0",
+            recorded_action=recorded,
+            actual_cost=ActualEvaluationCost(generated_tokens=1),
+        )
+    with pytest.raises(ValueError, match="zero model calls"):
+        writer.record_reconstruction_qa(
+            group_id="group-1",
+            target_id="target-0",
+            recorded_action=recorded,
+            passed=True,
+            report_sha256=report,
+            actual_cost=ActualEvaluationCost(judge_calls=1),
+        )
+    assert writer.record_count == before
+    writer.close()
+
+
+def test_reconstruction_qa_duplicate_fails_before_second_receipt(
+    tmp_path: Path,
+) -> None:
+    writer = _create(tmp_path / "qa-duplicate")
+    recorded, _, _, _ = _commit(writer)
+    first = writer.put_evidence(b"qa-first")
+    _record_qa(
+        writer,
+        recorded,
+        report_sha256=first,
+        actual_cost=ActualEvaluationCost(),
+    )
+    second = writer.put_evidence(b"qa-second")
+    before = writer.record_count
+    with pytest.raises(LedgerError, match="already recorded"):
+        writer.record_reconstruction_qa(
+            group_id="group-1",
+            target_id="target-0",
+            recorded_action=recorded,
+            passed=True,
+            report_sha256=second,
+            actual_cost=ActualEvaluationCost(),
+        )
+    assert writer.record_count == before
+    writer.close()
 
 
 def _complete_scientific_artifact(
@@ -236,14 +440,13 @@ def _complete_scientific_artifact(
 
     def qa(_: BranchGroupSpec) -> bytes:
         evidence = writer.put_evidence(b"qa-report")
-        return writer.record_reconstruction_qa(
-            group_id="group-1",
-            target_id="target-0",
-            recorded_action=recorded,
-            passed=True,
+        receipt = _record_qa(
+            writer,
+            recorded,
             report_sha256=evidence,
             actual_cost=ActualEvaluationCost(cpu_seconds=0.1, wall_seconds=0.1),
         )
+        return receipt
 
     def sample(
         *,
@@ -286,6 +489,7 @@ def _complete_scientific_artifact(
         context = writer.put_evidence(f"execution-context-{arm_id}".encode())
         writer.bind_execution_context(attempt, context_sha256=context)
         writer.mark_execution_dispatched(attempt)
+        _inject_target(writer, attempt, action)
         request = writer.put_evidence(f"execution-request-{arm_id}".encode())
         call = writer.mark_execution_model_call_started(
             attempt,
@@ -925,15 +1129,23 @@ def test_unknown_temp_or_gap_is_poisoned(tmp_path: Path) -> None:
     assert inspect_ledger(root).status == "poisoned"
 
 
-def test_commitment_crash_before_reservation_is_unresumable(tmp_path: Path) -> None:
-    def fail(stage: str, name: str) -> None:
-        if stage == "after_directory_fsync" and name == "00000000000000000001.json":
+def test_commitment_crash_before_reservation_is_unresumable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "ledger"
+    writer = _create(root)
+    recorded_key = _key(17)
+    snapshot = writer.put_evidence(b"snapshot")
+    real_fsync_directory = receipt_ledger_module._fsync_directory
+
+    def fail_after_record_fsync(path: Path) -> None:
+        real_fsync_directory(path)
+        if path == root / "records":
             raise RuntimeError("crash after commitment")
 
-    root = tmp_path / "ledger"
-    writer = _create(root, fault_hook=fail)
-    recorded_key = _key(17)
-    snapshot = writer.put_evidence(b"snapshot")
+    monkeypatch.setattr(
+        receipt_ledger_module, "_fsync_directory", fail_after_record_fsync
+    )
     with pytest.raises(RuntimeError, match="crash"):
         writer.commit_pre_action_and_reserve(
             group_id="group-1",
@@ -952,15 +1164,23 @@ def test_commitment_crash_before_reservation_is_unresumable(tmp_path: Path) -> N
     assert inspect_ledger(root).status == "poisoned"
 
 
-def test_crash_before_rename_leaves_fail_closed_temp(tmp_path: Path) -> None:
-    def fail(stage: str, name: str) -> None:
-        if stage == "after_file_fsync" and name == "00000000000000000001.json":
+def test_crash_before_rename_leaves_fail_closed_temp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "ledger"
+    writer = _create(root)
+    recorded_key = _key(17)
+    snapshot = writer.put_evidence(b"snapshot")
+    real_durable_rename = receipt_ledger_module._durable_rename
+    crash_temp = root / "records" / ".crash-before-rename.tmp"
+
+    def fail_before_rename(source: Path, destination: Path) -> None:
+        if destination.name == "00000000000000000001.json":
+            crash_temp.write_bytes(b"partial process residue")
             raise RuntimeError("crash before rename")
+        real_durable_rename(source, destination)
 
-    root = tmp_path / "ledger"
-    writer = _create(root, fault_hook=fail)
-    recorded_key = _key(17)
-    snapshot = writer.put_evidence(b"snapshot")
+    monkeypatch.setattr(receipt_ledger_module, "_durable_rename", fail_before_rename)
     with pytest.raises(RuntimeError, match="crash"):
         writer.commit_pre_action_and_reserve(
             group_id="group-1",
@@ -976,7 +1196,10 @@ def test_crash_before_rename_leaves_fail_closed_temp(tmp_path: Path) -> None:
             failure_reward=-1.0,
         )
     writer.close()
-    assert inspect_ledger(root).status == "poisoned"
+    try:
+        assert inspect_ledger(root).status == "poisoned"
+    finally:
+        crash_temp.unlink()
 
 
 def test_dangling_model_call_start_poisons_recovery_and_blocks_zero_call(tmp_path: Path) -> None:
@@ -984,11 +1207,9 @@ def test_dangling_model_call_start_poisons_recovery_and_blocks_zero_call(tmp_pat
     writer = _create(root)
     recorded, _, _, _ = _commit(writer)
     qa = writer.put_evidence(b"qa")
-    writer.record_reconstruction_qa(
-        group_id="group-1",
-        target_id="target-0",
-        recorded_action=recorded,
-        passed=True,
+    _record_qa(
+        writer,
+        recorded,
         report_sha256=qa,
         actual_cost=ActualEvaluationCost(),
     )
@@ -1015,11 +1236,9 @@ def test_zero_call_receipt_is_minted_only_before_start(tmp_path: Path) -> None:
     writer = _create(root)
     recorded, _, commitment, _ = _commit(writer)
     qa = writer.put_evidence(b"qa")
-    writer.record_reconstruction_qa(
-        group_id="group-1",
-        target_id="target-0",
-        recorded_action=recorded,
-        passed=True,
+    _record_qa(
+        writer,
+        recorded,
         report_sha256=qa,
         actual_cost=ActualEvaluationCost(),
     )
@@ -1074,11 +1293,9 @@ def test_zero_call_execution_failure_resumes_once_without_scientific_activity(
     writer = _create(root)
     recorded, _, _, _ = _commit(writer)
     qa = writer.put_evidence(b"qa")
-    writer.record_reconstruction_qa(
-        group_id="group-1",
-        target_id="target-0",
-        recorded_action=recorded,
-        passed=True,
+    _record_qa(
+        writer,
+        recorded,
         report_sha256=qa,
         actual_cost=ActualEvaluationCost(),
     )
@@ -1118,6 +1335,7 @@ def test_zero_call_execution_failure_resumes_once_without_scientific_activity(
     context = reopened.put_evidence(b"successor dispatch context")
     reopened.bind_execution_context(repair, context_sha256=context)
     reopened.mark_execution_dispatched(repair)
+    _inject_target(reopened, repair, recorded)
     score = reopened.put_evidence(b"terminal score")
     reopened.finish_execution(
         repair,
@@ -1140,11 +1358,9 @@ def test_reopen_recovers_hard_exit_before_candidate_model_call(tmp_path: Path) -
     writer = _create(root)
     recorded, _, _, _ = _commit(writer)
     qa = writer.put_evidence(b"qa")
-    writer.record_reconstruction_qa(
-        group_id="group-1",
-        target_id="target-0",
-        recorded_action=recorded,
-        passed=True,
+    _record_qa(
+        writer,
+        recorded,
         report_sha256=qa,
         actual_cost=ActualEvaluationCost(),
     )
@@ -1186,11 +1402,9 @@ def test_candidate_post_kill_boundary_is_evidenced_or_atomically_complete(
     writer = _create(root)
     recorded, _, _, _ = _commit(writer)
     qa = writer.put_evidence(b"qa")
-    writer.record_reconstruction_qa(
-        group_id="group-1",
-        target_id="target-0",
-        recorded_action=recorded,
-        passed=True,
+    _record_qa(
+        writer,
+        recorded,
         report_sha256=qa,
         actual_cost=ActualEvaluationCost(),
     )
@@ -1255,11 +1469,9 @@ def test_zero_call_archive_and_ledger_recovery_are_crash_idempotent(
     root = tmp_path / "ledger"
     writer = _create(root)
     recorded, _, _, _ = _commit(writer)
-    writer.record_reconstruction_qa(
-        group_id="group-1",
-        target_id="target-0",
-        recorded_action=recorded,
-        passed=True,
+    _record_qa(
+        writer,
+        recorded,
         report_sha256=writer.put_evidence(b"qa"),
         actual_cost=ActualEvaluationCost(),
     )
@@ -1323,11 +1535,9 @@ def test_reopen_recovers_hard_exit_after_zero_activity_execution_dispatch(
     writer = _create(root)
     recorded, _, _, _ = _commit(writer)
     qa = writer.put_evidence(b"qa")
-    writer.record_reconstruction_qa(
-        group_id="group-1",
-        target_id="target-0",
-        recorded_action=recorded,
-        passed=True,
+    _record_qa(
+        writer,
+        recorded,
         report_sha256=qa,
         actual_cost=ActualEvaluationCost(),
     )
@@ -1422,11 +1632,9 @@ def test_execution_cannot_dispatch_or_finish_without_a_frozen_context(
     writer = _create(tmp_path / "ledger")
     recorded, matched, _, _ = _commit(writer)
     qa_evidence = writer.put_evidence(b"qa")
-    writer.record_reconstruction_qa(
-        group_id="group-1",
-        target_id="target-0",
-        recorded_action=recorded,
-        passed=True,
+    _record_qa(
+        writer,
+        recorded,
         report_sha256=qa_evidence,
         actual_cost=ActualEvaluationCost(cpu_seconds=0.1, wall_seconds=0.1),
     )
@@ -1493,6 +1701,7 @@ def test_execution_cannot_dispatch_or_finish_without_a_frozen_context(
             storage_bytes=0,
         )
     writer.mark_execution_dispatched(attempt)
+    _inject_target(writer, attempt, recorded)
     writer.finish_execution(
         attempt,
         outcome_kind=OutcomeKind.TERMINAL_WITHOUT_DOWNSTREAM,
@@ -1516,11 +1725,9 @@ def test_replay_override_is_committed_before_delivery_and_must_be_acknowledged(
     recorded, _, _, _ = _commit(writer)
     target = PolicyEventAddress(1, "root/child", 0, 0)
     qa = writer.put_evidence(b"qa")
-    writer.record_reconstruction_qa(
-        group_id="group-1",
-        target_id="target-0",
-        recorded_action=recorded,
-        passed=True,
+    _record_qa(
+        writer,
+        recorded,
         report_sha256=qa,
         actual_cost=ActualEvaluationCost(cpu_seconds=0.1, wall_seconds=0.1),
     )
@@ -1599,11 +1806,9 @@ def test_crash_after_undelivered_override_is_one_time_zero_post_repairable(
     recorded, _, _, _ = _commit(writer)
     target = PolicyEventAddress(1, "root/child", 0, 0)
     qa = writer.put_evidence(b"qa")
-    writer.record_reconstruction_qa(
-        group_id="group-1",
-        target_id="target-0",
-        recorded_action=recorded,
-        passed=True,
+    _record_qa(
+        writer,
+        recorded,
         report_sha256=qa,
         actual_cost=ActualEvaluationCost(cpu_seconds=0.1, wall_seconds=0.1),
     )
@@ -1662,11 +1867,9 @@ def test_parallel_generated_calls_complete_out_of_order_and_seal(
     writer = _create(root)
     recorded, first_address, _, _ = _commit(writer)
     qa = writer.put_evidence(b"qa")
-    writer.record_reconstruction_qa(
-        group_id="group-1",
-        target_id="target-0",
-        recorded_action=recorded,
-        passed=True,
+    _record_qa(
+        writer,
+        recorded,
         report_sha256=qa,
         actual_cost=ActualEvaluationCost(cpu_seconds=0.1, wall_seconds=0.1),
     )
@@ -1682,6 +1885,7 @@ def test_parallel_generated_calls_complete_out_of_order_and_seal(
         context_sha256=writer.put_evidence(b"context"),
     )
     writer.mark_execution_dispatched(attempt)
+    _inject_target(writer, attempt, recorded)
     second_address = PolicyEventAddress(1, "root/parallel-child", 0, 0)
     scheduler = EventSeedScheduler(MASTER_SEED, "rollout-1", "target-0", 1)
     first = writer.mark_execution_model_call_started(
@@ -1759,11 +1963,9 @@ def test_crash_with_parallel_generated_calls_is_terminal(tmp_path: Path) -> None
     root = tmp_path / "ledger"
     writer = _create(root)
     recorded, first_address, _, _ = _commit(writer)
-    writer.record_reconstruction_qa(
-        group_id="group-1",
-        target_id="target-0",
-        recorded_action=recorded,
-        passed=True,
+    _record_qa(
+        writer,
+        recorded,
         report_sha256=writer.put_evidence(b"qa"),
         actual_cost=ActualEvaluationCost(cpu_seconds=0.1, wall_seconds=0.1),
     )
@@ -1808,11 +2010,9 @@ def test_replayed_continuation_counts_logically_but_not_as_generated_cost(
     recorded, _, _, _ = _commit(writer)
     target = PolicyEventAddress(1, "root/child", 0, 0)
     qa = writer.put_evidence(b"qa")
-    writer.record_reconstruction_qa(
-        group_id="group-1",
-        target_id="target-0",
-        recorded_action=recorded,
-        passed=True,
+    _record_qa(
+        writer,
+        recorded,
         report_sha256=qa,
         actual_cost=ActualEvaluationCost(cpu_seconds=0.1, wall_seconds=0.1),
     )
@@ -1857,7 +2057,7 @@ def test_replayed_continuation_counts_logically_but_not_as_generated_cost(
         )
 
     replay(target, "inject", logical=False)
-    replay(PolicyEventAddress(1, "root/sibling", 0, 0), "reuse", logical=True)
+    replay(PolicyEventAddress(0, "root", 2, 2), "reuse", logical=True)
     receipt = writer.finish_execution(
         attempt,
         outcome_kind=OutcomeKind.SUCCESS,

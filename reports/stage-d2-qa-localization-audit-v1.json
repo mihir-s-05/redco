@@ -1,0 +1,246 @@
+{
+  "artifact": "stage-d2-qa-localization-audit-v1",
+  "audit_scope": "phase-2-reconstruction-qa-localization",
+  "version": 12,
+  "parent": {
+    "commit": "a1dddbc4da870fe887545b23783b029f7ce1e0a4",
+    "tree": "4d005e667dfa47f740ca583e6e9a4a1edcac229e"
+  },
+  "allowlist": [
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/scientific_campaign_driver.py",
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/scientific_env.py",
+    "scripts/run_stage_d_scientific_campaign.py",
+    "src/redco/analysis/stage_d_action_closure.py",
+    "src/redco/analysis/stage_d_dependency_stack.py",
+    "src/redco/analysis/stage_d_receipt_ledger.py",
+    "src/redco/analysis/stage_d_replay_controller.py",
+    "src/redco/analysis/stage_d_toy_executor.py",
+    "src/redco/analysis/stage_d_v13_support_launch_runtime.py",
+    "tests/test_stage_d_receipt_ledger.py",
+    "tests/test_stage_d_replay_controller.py",
+    "tests/test_stage_d_source_env_pinned.py",
+    "tests/test_stage_d_toy_executor.py",
+    "tests/test_stage_d_v13_support_launch.py"
+  ],
+  "self_hash": "excluded_to_avoid_circular_binding",
+  "authorization": {
+    "candidate_selection_authorized": false,
+    "launch_authorized": false,
+    "phase_2_authorized": false,
+    "provider_calls_authorized": false,
+    "science_authorized": false,
+    "support_launch_authorized": false
+  },
+  "execution_boundary": {
+    "ordinal_181_accessed": false,
+    "parquet_accessed": false,
+    "provider_callbacks": 0,
+    "qasper_rows_read": 0,
+    "source_access": false,
+    "external_prime_rl_edited": false,
+    "long_64_row_integration_run": false,
+    "phase_2_qa_fixture": "synthetic local source/trace and patched Verifiers boundary only",
+    "checkout_outputs_residue": {
+      "relative_root": "outputs/redco-evidence-selection-v2+redco-evidence-selection-v2--model@commit--stage-d-qa-http-fixture",
+      "file_count": 42,
+      "bytes": 112813,
+      "tree_digest_unchanged": true,
+      "cleanup": "moved recoverably to a disposable temp backup named redco-stage-d-qa-output-residue-20260808; no unrelated output was removed"
+    }
+  },
+  "production_changes": {
+    "watchdog_owner": "One ActionClosureWatchdog is created by run_live_scientific_campaign, passed through every bound episode and StageDScientificReplayEnv, bound to the task runtime, and completed or failed once at campaign scope.",
+    "composition_adapter": "_ScientificReplayWatchdog is the single private mode adapter. Its mode is taken from the authenticated StageDScientificEpisodeBinding; QA provider calls are closed/cancelled and rejected, while execution provider and child-gather calls delegate to ActionClosureWatchdog.",
+    "controller_hooks": "Both replay controllers expose provider and concurrent-child hooks required by the pinned prepared-observer path; controller finalization still asserts ExactSamplingDirector drain.",
+    "phase_order": "QA readiness remains before run_eval; provider/child calls are watchdog-owned; finalization and receipt append are inside the finalizer phase after controller, trace, terminal-reply, reward, and evidence checks.",
+    "finalizer_ownership": "Finalization validates controller/trace state before starting one StageDReceiptLedger-owned transaction. Preparation runs in a disposable ledger copy; the live ledger is changed only by a short-lived child process under an authenticated transaction manifest. The manifest's committed state is the linearization point. A timeout terminates with a 0.1-second grace, kills and reaps within a 2-second bound, removes only its authenticated new record/evidence paths and temporary stages, and leaves the parent writer closed fail-closed; any post-commit acknowledgement, cleanup, verification, or apply failure also irreversibly closes and poisons the writer until a fresh authenticated reopen resolves the committed manifest. No synchronous ledger fsync runs on the event loop and no worker survives.",
+    "transaction_security": "The v2 transaction request, result, manifest, and cleanup messages use exact canonical key sets and domain/schema bindings with separate request, result, cleanup-request, and cleanup-result size limits; cleanup accepts the request hex envelope at its independently derived bound. Root, ledger ID, genesis digest, transaction, operation, request/result, immutable baseline, and child patch hashes are authenticated. Root and every existing ancestor are rejected when symlink/reparse-linked. Paths are restricted to exact records/evidence names and transaction-specific temporary names beneath the bound ledger root; aliases, baseline files, substituted temporary bytes, and pre-existing transaction temporaries cannot be removed. Recorded actions are parsed by the exact BehaviorAction/ExactActionKey schema and domain owner, with canonical bytes and recomputed digest validation, not a caller-supplied minimal envelope. The parent exchanges only bounded canonical stdin/stdout bytes with an isolated Python -I child using the fixed repository source root, with no pickle, inherited test hook, caller commit gate, or caller-supplied request path. Request creation, commit, rollback, verification, cleanup, and fsync operations are owned by bounded child processes; malformed or unanchored state is poison/fail-closed.",
+    "fixture_binding": "The source-free QA fixture derives each frozen BehaviorAction from the exact replay task, FixtureRenderer output, resolved sampling, split_engine_sampling result, and TrainClient prepared request; _require_prepared_action remains unchanged.",
+    "target_id": "scientific_env validates the selected target ID as exactly one nonempty str without an untyped return.",
+    "readiness_guard": "StageDReceiptLedger continues to require completed source rollout, frozen roster, exact target membership, correspondence, recorded-action digest equality, no prior QA/scientific activity, and zero generated/judge cost.",
+    "compatibility": "_OneTaskset exposes the pinned Taskset.task_type owner required by Verifiers serving; no protocol or receipt schema changed."
+  },
+  "file_bindings": {
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/scientific_campaign_driver.py": "7b7ed4d8609c4a2ee70196e6dd02a5bb56d4a490deb9a7b5303ea0a1f6b455d8",
+    "environments/redco_evidence_selection_v2/redco_evidence_selection_v2/scientific_env.py": "98a87b799bfd4cd51af26a7b3231026dd17589b58723d4253c51bf6a4a8f3da5",
+    "scripts/run_stage_d_scientific_campaign.py": "ecec893b0c254af1c39525d1a558ab97ebfaf15adc840082d890128376d93eaa",
+    "src/redco/analysis/stage_d_action_closure.py": "8f16c1b2d3ab8e7280452e2e1b6090b06ea3934a18cede092b8e058585b5e864",
+    "src/redco/analysis/stage_d_dependency_stack.py": "7feba4914177d9475ecc936447cd5b7aa0a6e9df891fcf7592fa84ccb9c4c95e",
+    "src/redco/analysis/stage_d_receipt_ledger.py": "e0a6c7b0663c2f6888b2fd5964d7b757a574d9dbfd12c00b5afcfef904df84f5",
+    "src/redco/analysis/stage_d_replay_controller.py": "cf2f9ac4aaae43b74540057dc3263d03fc37fa38a7b342e8259c9bdc34787734",
+    "src/redco/analysis/stage_d_toy_executor.py": "acb23a8636dd88ab7d1629147099cab70527e30adc29da4331576fb029315f0a",
+    "src/redco/analysis/stage_d_v13_support_launch_runtime.py": "5c3daa882079295f81aa861ccf7775f54a2632ffe2df0b54802b506cd966ed30",
+    "tests/test_stage_d_receipt_ledger.py": "2103397bbf726f08bc8f9bc26d3b6ce17b73a50350f900abd986febe59bc8bdc",
+    "tests/test_stage_d_replay_controller.py": "e6ab5550de81c58a34dc05d63514d244d85304fec2dd869c03eb4c2b734876e2",
+    "tests/test_stage_d_source_env_pinned.py": "db0414b08178cd180261df303ec57a717cf5f34f15633bc676046933b1861f7c",
+    "tests/test_stage_d_toy_executor.py": "107cfcd701a83a0e6775f37e18368b6d72f623229d153b1d0e6c7fba00d3e3fb",
+    "tests/test_stage_d_v13_support_launch.py": "042cf773795551c9394a4d4dddcac9406ee9d786e55e7bbda11e1403a49e4397"
+  },
+  "dependency_bindings": {
+    "renderer_base_commit": "bdb96b0c84a307e2b71c6a366c9d718c3ac7fe78",
+    "renderer_post_tree_sha256": "bd43d515c12dcaa1e1c0279941a1397d4ffba31a1557d6d7342a1322b195fcc4",
+    "verifier_base_commit": "b13ba60da63cea91389e7575766b7270d0d11fc5",
+    "verifier_post_tree_sha256": "9dcf9e98dea73c2487d2165cd6cae35dc61fb66e00d377d85d5466886b3ea4e0",
+    "patch_sha256": {
+      "renderers-stage-d-prepared-observer-v1.patch": "1f10cff27b6097a70474926f916129948d1c176c1c8f12692c6e5498eb06163c",
+      "renderers-stage-d-replay-directives-v1.patch": "ce0c2fa4112a3fd8aafb7c3bf4aa18807e1f558d08a4b8a814272e2f100e73b6",
+      "renderers-stage-d-watchdog-owner-v1.patch": "3f3f3a30462a1cd81195a4dac60ffd5c845865b58e960028d32fa00ac59cea38",
+      "verifiers-stage-d-provenance-baseline-v1.patch": "2b9eeb758f7bdf3726763b9923eb6b3a83d89be9caa9804119a7c31465cb6c64",
+      "verifiers-stage-d-prepared-observer-v1.patch": "10292432e3324f8b086e352e56f516223e2cb733bcddafc4b43d385d33d0517f",
+      "verifiers-stage-d-replay-directives-v1.patch": "8b76b8638cb3d4435b240de67eccda8bce17c33a8f312b258623d5359985a714",
+      "verifiers-stage-d-sampling-director-v1.patch": "6a21db821d1f52647e284813ff71d4177be79ac5538b9ed3ce31d47b2af87ddb",
+      "verifiers-stage-d-isolated-docker-v1.patch": "c69961c89bd50b6597515ede4e28d68a5331574a477057328fa5c7455b231d83",
+      "verifiers-stage-d-pre-generation-preflight-v1.patch": "767708a04b360f4ec34377c195d029a3e4461e118898aa6e09487e80db931017",
+      "verifiers-stage-d-patched-rlm-archive-v1.patch": "c76f332c48e4a65a0524f15174c89825cfb636527e1f179be31fadc9e0997535",
+      "verifiers-stage-d-frozen-rlm-install-v1.patch": "136cc89de669acf50145cbe486520f0290da084516deca6a43c2dfbaeb679fa3",
+      "verifiers-stage-d-observer-failfast-v1.patch": "63c19112c1cdaf142339b95d8891fd384867cbc7dd7a23d9f7cd7c9055d4acb4",
+      "verifiers-stage-d-watchdog-owner-v1.patch": "3c7977d0d0f2781fc96bfec0154e4c86a40df64b163d2e63fbed5d4381ae1c19"
+    },
+    "deadlines_seconds": {
+      "provider_call": 900.0,
+      "episode": 900.0,
+      "concurrent_children": 900.0,
+      "finalizer": 120.0,
+      "campaign": 21600.0,
+      "pod_lifetime": 21600.0,
+      "runtime_term": 2.0
+    },
+    "renderer_patch_order": [
+      "renderers-stage-d-prepared-observer-v1.patch",
+      "renderers-stage-d-replay-directives-v1.patch",
+      "renderers-stage-d-watchdog-owner-v1.patch"
+    ],
+    "verifier_patch_order": [
+      "verifiers-stage-d-provenance-baseline-v1.patch",
+      "verifiers-stage-d-prepared-observer-v1.patch",
+      "verifiers-stage-d-replay-directives-v1.patch",
+      "verifiers-stage-d-sampling-director-v1.patch",
+      "verifiers-stage-d-isolated-docker-v1.patch",
+      "verifiers-stage-d-pre-generation-preflight-v1.patch",
+      "verifiers-stage-d-patched-rlm-archive-v1.patch",
+      "verifiers-stage-d-frozen-rlm-install-v1.patch",
+      "verifiers-stage-d-observer-failfast-v1.patch",
+      "verifiers-stage-d-watchdog-owner-v1.patch"
+    ]
+  },
+  "tests": {
+    "replay_controller_watchdog": {
+      "command": "wsl.exe -d Ubuntu --cd /mnt/c/Users/mihir/Documents/redco -- timeout 300s env VIRTUAL_ENV=/home/mihir/.venvs/redco-prime-cpu PYTHONDONTWRITEBYTECODE=1 PYTHONFAULTHANDLER=1 PYTHONPATH=/mnt/c/Users/mihir/Documents/redco/src:/mnt/c/Users/mihir/Documents/redco/tests:/mnt/c/Users/mihir/Documents/redco/scripts:/mnt/c/Users/mihir/Documents/redco/environments/redco_evidence_selection_v2 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /home/mihir/.local/uv-latest/uv run --active --no-project --offline pytest -q --disable-warnings --capture=no tests/test_stage_d_replay_controller.py",
+      "collected": 8,
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0,
+      "xfail": 0,
+      "coverage": "QA tripwire closes/cancels without execution; execution provider and concurrent-child hooks delegate to one watchdog"
+    },
+    "source_env_qa": {
+      "command": "wsl.exe -d Ubuntu --cd /mnt/c/Users/mihir/Documents/redco -- timeout 300s env VIRTUAL_ENV=/home/mihir/.venvs/redco-prime-cpu PYTHONDONTWRITEBYTECODE=1 PYTHONFAULTHANDLER=1 PYTHONPATH=/mnt/c/Users/mihir/Documents/redco/src:/mnt/c/Users/mihir/Documents/redco/tests:/mnt/c/Users/mihir/Documents/redco/scripts:/mnt/c/Users/mihir/Documents/redco/environments/redco_evidence_selection_v2 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /home/mihir/.local/uv-latest/uv run --active --no-project --offline pytest -q --disable-warnings --capture=no tests/test_stage_d_source_env_pinned.py::test_bound_scientific_qa_missing_roster_fails_before_run_eval tests/test_stage_d_source_env_pinned.py::test_scientific_finalizer_timeout_is_bounded_and_side_effect_free tests/test_stage_d_source_env_pinned.py::test_finalization_manifest_is_strict_and_baseline_bound tests/test_stage_d_source_env_pinned.py::test_finalization_refuses_preexisting_transaction_temporary tests/test_stage_d_source_env_pinned.py::test_real_bound_scientific_qa_runs_with_zero_provider_calls tests/test_stage_d_source_env_pinned.py::test_typed_episode_runs_through_real_source_finalization",
+      "overlay": "/home/mihir/.venvs/redco-prime-cpu with repository external/prime-rl Verifiers tree",
+      "collected": 6,
+      "passed": 4,
+      "failed": 2,
+      "skipped": 0,
+      "xfail": 0,
+      "provider_callbacks": 0,
+      "generated_tokens": 0,
+      "judge_calls": 0,
+      "output_isolation": "EvalConfig.output_dir is a tmp_path-owned directory; checkout outputs tree digest was unchanged",
+      "recovery": "not reached in this overlay; the four transaction/guard nodes passed",
+      "limitation": "The retained overlay cannot collect the two full patched-Verifiers nodes: its train client exports no split_engine_sampling, and its Episode schema rejects the authenticated v2 provenance fields. No source/provider call occurred in either failed collection."
+    },
+    "finalizer_cancellation": {
+      "command": "wsl.exe -d Ubuntu --cd /mnt/c/Users/mihir/Documents/redco -- timeout 300s env VIRTUAL_ENV=/home/mihir/.venvs/redco-prime-cpu PYTHONDONTWRITEBYTECODE=1 PYTHONFAULTHANDLER=1 PYTHONPATH=/mnt/c/Users/mihir/Documents/redco/src:/mnt/c/Users/mihir/Documents/redco/tests:/mnt/c/Users/mihir/Documents/redco/scripts:/mnt/c/Users/mihir/Documents/redco/environments/redco_evidence_selection_v2 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /home/mihir/.local/uv-latest/uv run --active --no-project --offline pytest -q --disable-warnings --capture=no tests/test_stage_d_source_env_pinned.py::test_scientific_finalizer_timeout_is_bounded_and_side_effect_free",
+      "collected": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "xfail": 0,
+      "coverage": "The real StageDReceiptLedger transaction blocks after an actual commit-path file fsync, watchdog timeout remains bounded, child process is terminated/reaped, authenticated new evidence/record paths and temporary files are rolled back, ledger remains active-clean with no QA receipt, and success plus primary exception paths remain intact"
+    },
+    "transaction_adversarial": {
+      "command": "wsl.exe -d Ubuntu --cd /mnt/c/Users/mihir/Documents/redco -- timeout 300s env VIRTUAL_ENV=/home/mihir/.venvs/redco-prime-cpu PYTHONDONTWRITEBYTECODE=1 PYTHONFAULTHANDLER=1 PYTHONPATH=/mnt/c/Users/mihir/Documents/redco/src:/mnt/c/Users/mihir/Documents/redco/tests:/mnt/c/Users/mihir/Documents/redco/scripts:/mnt/c/Users/mihir/Documents/redco/environments/redco_evidence_selection_v2 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /home/mihir/.local/uv-latest/uv run --active --no-project --offline pytest -q --disable-warnings --capture=no tests/test_stage_d_source_env_pinned.py::test_bound_scientific_qa_missing_roster_fails_before_run_eval tests/test_stage_d_source_env_pinned.py::test_scientific_finalizer_timeout_is_bounded_and_side_effect_free tests/test_stage_d_source_env_pinned.py::test_finalization_manifest_is_strict_and_baseline_bound tests/test_stage_d_source_env_pinned.py::test_finalization_refuses_preexisting_transaction_temporary tests/test_stage_d_source_env_pinned.py::test_finalization_ack_failure_poison_closes_until_authenticated_recovery tests/test_stage_d_source_env_pinned.py::test_finalization_envelopes_have_separate_cleanup_bound tests/test_stage_d_source_env_pinned.py::test_finalization_rejects_root_ancestor_and_forged_action",
+      "collected": 7,
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "xfail": 0,
+      "coverage": "Strict keysets, root/genesis/base binding, forged receipt/request, traversal, wrong filename, baseline mutation, symlink/reparse and hardlink alias rejection, pre-existing temporary preservation, separate cleanup envelope bound, post-commit acknowledgement poisoning/reopen recovery, bounded commit-path timeout, child reap, and zero side effects"
+    },
+    "ledger_toy_campaign_replay": {
+      "command": "wsl.exe -d Ubuntu --cd /mnt/c/Users/mihir/Documents/redco -- timeout 300s env VIRTUAL_ENV=/home/mihir/.venvs/redco-prime-cpu PYTHONDONTWRITEBYTECODE=1 PYTHONFAULTHANDLER=1 PYTHONPATH=/mnt/c/Users/mihir/Documents/redco/src:/mnt/c/Users/mihir/Documents/redco/tests:/mnt/c/Users/mihir/Documents/redco/scripts:/mnt/c/Users/mihir/Documents/redco/environments/redco_evidence_selection_v2 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /home/mihir/.local/uv-latest/uv run --active --no-project --offline pytest -q --disable-warnings --capture=no tests/test_stage_d_receipt_ledger.py tests/test_stage_d_replay_controller.py tests/test_stage_d_scientific_campaign.py",
+      "collected": 58,
+      "passed": 58,
+      "failed": 0,
+      "skipped": 0,
+      "xfail": 0,
+      "limitation": "This requested ledger/replay/campaign run intentionally excludes the separate toy-executor overlay; the retained WSL toy environment remains platform-limited by Windows Job Object containment and was not counted as a pass."
+    },
+    "source_finalizer_retained": {
+      "command": "wsl.exe -d Ubuntu --cd /mnt/c/Users/mihir/Documents/redco -- timeout 300s env VIRTUAL_ENV=/home/mihir/.venvs/redco-prime-cpu PYTHONDONTWRITEBYTECODE=1 PYTHONFAULTHANDLER=1 PYTHONPATH=/mnt/c/Users/mihir/Documents/redco/src:/mnt/c/Users/mihir/Documents/redco/tests:/mnt/c/Users/mihir/Documents/redco/scripts:/mnt/c/Users/mihir/Documents/redco/environments/redco_evidence_selection_v2 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /home/mihir/.local/uv-latest/uv run --active --no-project --offline pytest -q --disable-warnings --capture=no tests/test_stage_d_source_producer.py -k 'real_producer_trace_matches_the_persisted_raw_schema or source_finalization_failure_is_durably_terminal_after_restart or live_source_is_derived_from_intercepted_calls_and_trace or ineligible_max_token_source_strictly_reloads_after_restart or completed_one_child_topology_is_durable_ineligible_evidence'",
+      "collected": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "xfail": 0,
+      "note": "retained evidence from the prior Phase-2 pass; no source or Parquet access"
+    },
+    "static": {
+      "ruff": {
+        "version": "0.16.0",
+        "result": "passed",
+        "paths": 3,
+        "command": "wsl.exe -d Ubuntu --cd /mnt/c/Users/mihir/Documents/redco -- timeout 300s env VIRTUAL_ENV=/home/mihir/.venvs/redco-prime-cpu PYTHONDONTWRITEBYTECODE=1 PYTHONFAULTHANDLER=1 PYTHONPATH=/mnt/c/Users/mihir/Documents/redco/src:/mnt/c/Users/mihir/Documents/redco/tests:/mnt/c/Users/mihir/Documents/redco/scripts:/mnt/c/Users/mihir/Documents/redco/environments/redco_evidence_selection_v2 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /home/mihir/.local/uv-latest/uv run --active --no-project --offline ruff check src/redco/analysis/stage_d_receipt_ledger.py tests/test_stage_d_receipt_ledger.py tests/test_stage_d_source_env_pinned.py"
+      },
+        "mypy": {
+          "version": "2.3.0",
+          "command_scope": "four materially changed Python files with --strict --follow-imports=skip --ignore-missing-imports --no-incremental",
+          "command": "wsl.exe -d Ubuntu --cd /mnt/c/Users/mihir/Documents/redco -- timeout 60s env VIRTUAL_ENV=/home/mihir/.venvs/redco-prime-cpu PYTHONDONTWRITEBYTECODE=1 PYTHONFAULTHANDLER=1 PYTHONPATH=/mnt/c/Users/mihir/Documents/redco/src:/mnt/c/Users/mihir/Documents/redco/tests:/mnt/c/Users/mihir/Documents/redco/scripts:/mnt/c/Users/mihir/Documents/redco/environments/redco_evidence_selection_v2 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /home/mihir/.local/uv-latest/uv run --active --no-project --offline mypy --strict --follow-imports=skip --ignore-missing-imports --no-incremental src/redco/analysis/stage_d_receipt_ledger.py environments/redco_evidence_selection_v2/redco_evidence_selection_v2/scientific_env.py tests/test_stage_d_receipt_ledger.py tests/test_stage_d_source_env_pinned.py",
+          "scoped_repair_paths": 4,
+          "scoped_new_diagnostics": 0,
+          "result": "preexisting_baseline_diagnostics",
+          "current_diagnostics": 33,
+          "transaction_diagnostics_fixed": 3,
+          "transaction_diagnostics_fixed_locations": [
+            "src/redco/analysis/stage_d_receipt_ledger.py:770",
+            "src/redco/analysis/stage_d_receipt_ledger.py:781",
+            "src/redco/analysis/stage_d_receipt_ledger.py:796"
+          ],
+          "previous_three_file_baseline_diagnostics": 30,
+          "broader_baseline_diagnostics": 35,
+          "global_clean_claim": false
+        },
+        "py_compile": {
+          "result": "passed",
+          "compiled_files": 3,
+          "command": "wsl.exe -d Ubuntu --cd /mnt/c/Users/mihir/Documents/redco -- timeout 300s env VIRTUAL_ENV=/home/mihir/.venvs/redco-prime-cpu PYTHONDONTWRITEBYTECODE=1 PYTHONFAULTHANDLER=1 PYTHONPATH=/mnt/c/Users/mihir/Documents/redco/src:/mnt/c/Users/mihir/Documents/redco/tests:/mnt/c/Users/mihir/Documents/redco/scripts:/mnt/c/Users/mihir/Documents/redco/environments/redco_evidence_selection_v2 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /home/mihir/.local/uv-latest/uv run --active --no-project --offline python -c \"from pathlib import Path; files=['src/redco/analysis/stage_d_receipt_ledger.py','tests/test_stage_d_receipt_ledger.py','tests/test_stage_d_source_env_pinned.py']; [compile(Path(f).read_bytes(),f,'exec') for f in files]; print('compiled',len(files),'files')\"",
+        "cfile_root": "disposable temporary root, removed after compilation"
+      },
+      "git_diff_check": "passed"
+    },
+    "launch_check_only": {
+      "status": "historical_precommit_gate_expected",
+      "reason": "The launch checker remains bound to its historical b0a41608... topology; current uncommitted HEAD is a1dddbc4..., so no gate was weakened and no launch authority was obtained."
+    }
+  },
+  "real_qa_contract": {
+    "required_path": "run_bound_scientific_episode -> pinned run_eval -> StageDScientificReplayEnv -> StageDReconstructionQAController -> record_reconstruction_qa",
+    "provider_post_sentinel": "installed and not reached",
+      "watchdog_order": "readiness -> watchdog episode -> controller hooks/frozen responses -> exact sampling drain -> isolated transactional ledger prepare/commit -> durable QA receipt or terminal failure; commit timeout rolls back before terminal publication",
+    "second_invocation_recovery": "receipt-first byte-identical recovery; duplicate invocation is rejected before rerunning QA",
+    "receipt_schema": "unchanged",
+    "semantic_change": "none"
+  },
+  "state": "non_authorizing_cpu_audit_complete",
+  "prohibited_actions": {
+    "commit": false,
+    "push": false,
+    "prime": false,
+    "network": false,
+    "provider": false,
+    "model": false,
+    "gpu": false,
+    "wallet": false,
+    "source_rows": false,
+    "external_prime_rl_edit": false
+  }
+}

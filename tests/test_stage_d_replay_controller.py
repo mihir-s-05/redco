@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import json
@@ -11,6 +12,7 @@ from typing import Any, cast
 
 import pytest
 
+from redco.analysis.stage_d_action_closure import ActionClosureWatchdog
 from redco.analysis.stage_d_dynamic_taint import DynamicCausalTaintTracker
 from redco.analysis.stage_d_exact_action import BehaviorAction, ExactActionKey
 from redco.analysis.stage_d_receipt_ledger import (
@@ -22,6 +24,7 @@ from redco.analysis.stage_d_replay_controller import (
     SamplingOverride,
     StageDReconstructionQAController,
     StageDReplayCallController,
+    _ScientificReplayWatchdog,
     frozen_engine_response_content,
 )
 from redco.analysis.stage_d_spawn_provenance import (
@@ -191,6 +194,14 @@ def _prepared_action() -> BehaviorAction:
         prompt_token_ids=(10, 11),
         prepared_engine_request=engine,
     )
+    def validate_action(
+        _request: Mapping[str, object],
+        _message: Mapping[str, object],
+        action_ids: tuple[int, ...],
+    ) -> None:
+        if action_ids != (20, 2):
+            raise ValueError("prepared action IDs changed")
+
     return BehaviorAction.build(
         key=key,
         action_token_ids=(20, 2),
@@ -201,9 +212,37 @@ def _prepared_action() -> BehaviorAction:
         completion_tokens=2,
         termination_kind="eos",
         eos_token_id=2,
-        encode_action=lambda _request, _message: (20, 2),
+        validate_action=validate_action,
         request_id="source-request-id",
     )
+
+
+def test_scientific_watchdog_adapter_enforces_qa_tripwire_and_execution_hooks() -> None:
+    executed = False
+
+    async def provider_operation() -> str:
+        nonlocal executed
+        executed = True
+        return "provider"
+
+    async def exercise() -> None:
+        qa_watchdog = _ScientificReplayWatchdog(ActionClosureWatchdog(), "qa")
+        operation = provider_operation()
+        with pytest.raises(RuntimeError, match="reconstruction QA forbids provider calls"):
+            await qa_watchdog.run_provider_call(operation)
+        assert not executed
+
+        execution_owner = ActionClosureWatchdog()
+        execution_watchdog = _ScientificReplayWatchdog(execution_owner, "execution")
+        assert await execution_watchdog.run_provider_call(asyncio.sleep(0, result="provider")) == (
+            "provider"
+        )
+        assert await execution_watchdog.run_concurrent_children(
+            asyncio.sleep(0, result="children")
+        ) == "children"
+        execution_owner.complete()
+
+    asyncio.run(exercise())
 
 
 def test_director_changes_only_seed_and_cache_salt() -> None:
@@ -272,6 +311,7 @@ def test_reconstruction_qa_replays_complete_source_with_zero_forward(
     controller = StageDReconstructionQAController(
         source_records=(record,),
         source_actions={record.scientific_address: action},
+        watchdog=_ScientificReplayWatchdog(ActionClosureWatchdog(), "qa"),
     )
     controller.direct_sampling(
         _context(),
@@ -338,6 +378,7 @@ def test_replay_guard_runs_at_sampling_boundary_before_any_plan() -> None:
     controller = StageDReconstructionQAController(
         source_records=(record,),
         source_actions={record.scientific_address: action},
+        watchdog=_ScientificReplayWatchdog(ActionClosureWatchdog(), "qa"),
         pre_forward_guard=require_ready,
     )
     sampling = _Sampling(
@@ -466,6 +507,7 @@ def test_shared_controller_commits_zero_call_override_before_return_and_delivery
         seed_oracle=UnusedOracle(),
         ledger=ledger,  # type: ignore[arg-type]
         attempt=attempt,
+        watchdog=_ScientificReplayWatchdog(ActionClosureWatchdog(), "execution"),
     )
     controller.direct_sampling(
         _context(),

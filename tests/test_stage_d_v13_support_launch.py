@@ -66,6 +66,25 @@ def _prime_must_not_run(*_args: Any, **_kwargs: Any) -> Any:
     raise AssertionError("Prime must not be called")
 
 
+def test_terminal_payload_preserves_owned_process_failure_bytes_as_hashes() -> None:
+    error = subprocess.CalledProcessError(
+        17,
+        ["owner", "--execute"],
+        output=b"exact stdout\x00",
+        stderr=b"exact stderr\xff",
+    )
+    payload = json.loads(
+        runtime.terminal_payload(
+            state="failed_terminal_no_retry",
+            provider_dispatch_observed=True,
+            error=error,
+        )
+    )
+    assert payload["error_returncode"] == 17
+    assert payload["error_output_sha256"] == sha256_bytes(b"exact stdout\x00")
+    assert payload["error_stderr_sha256"] == sha256_bytes(b"exact stderr\xff")
+
+
 @pytest.fixture(scope="module")  # type: ignore[untyped-decorator]
 def payloads() -> dict[str, bytes]:
     return build_launch_artifacts(ROOT)

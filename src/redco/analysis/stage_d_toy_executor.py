@@ -618,6 +618,24 @@ class ToySubprocessArmExecutor:
             context_sha256=request_evidence_sha256,
         )
         self._writer.mark_execution_dispatched(attempt)
+        if self._writer.branch_target_roster_sha256 is not None:
+            injected_response_sha256 = self._writer.put_evidence(action.to_bytes())
+            injected_ticket = self._writer.commit_execution_override(
+                attempt,
+                address=self._context.spec.commitment.target_address,
+                action_digest=action.digest,
+                disposition="inject",
+                request_sha256=self._writer.put_evidence(b"target-injection-request"),
+                response_content_sha256=injected_response_sha256,
+                prompt_tokens=action.prompt_tokens,
+                completion_tokens=action.completion_tokens,
+                counts_toward_logical_cost=False,
+            )
+            self._writer.mark_execution_override_delivered(
+                attempt,
+                injected_ticket,
+                typed_response_sha256=injected_response_sha256,
+            )
         if action.parse_status == "malformed":
             return self._finish_failure(
                 attempt,
