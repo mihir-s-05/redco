@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -70,6 +71,8 @@ from redco.analysis.stage_d_source_producer import (  # noqa: E402
 from redco.analysis.stage_d_spawn_provenance import PolicyEventAddress  # noqa: E402
 from redco.contracts import ActualEvaluationCost, canonical_json  # noqa: E402
 
+ROOT = Path(__file__).parents[1]
+
 
 def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
@@ -100,6 +103,72 @@ def _tree_digest(root: Path) -> str:
         else:
             raise AssertionError(f"unsupported checkout output entry: {path}")
     return _sha256(canonical_json(entries))
+
+
+def test_stage_d2_v2_audit_rejects_nested_evidence_mutations(
+    tmp_path: Path,
+) -> None:
+    from scripts import build_stage_d2_qa_localization_audit_v2 as audit_builder
+
+    audit = json.loads(
+        (ROOT / "reports/stage-d2-qa-localization-audit-v2.json").read_bytes()
+    )
+    verification = cast(dict[str, object], audit["verification_evidence"])
+    base = cast(dict[str, Any], verification["payload"])
+
+    def clone() -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(canonical_json(base)))
+
+    def dependency(value: dict[str, Any]) -> None:
+        stack = cast(dict[str, Any], value["dependency_stack"])
+        components = cast(list[dict[str, Any]], stack["components"])
+        components[0]["post_tree_sha256"] = "0" * 64
+
+    def abi(value: dict[str, Any]) -> None:
+        cast(dict[str, Any], value["abi_probe"])["split_engine_sampling"] = False
+
+    def modules(value: dict[str, Any]) -> None:
+        cast(dict[str, Any], value["abi_probe"])["module_bindings"] = []
+
+    def tests(value: dict[str, Any]) -> None:
+        cast(dict[str, Any], value["tests"])["nodes"] = []
+
+    def runtime(value: dict[str, Any]) -> None:
+        cast(dict[str, Any], value["runtime"])["uv_lock_sha256"] = "0" * 64
+
+    def positive(value: dict[str, Any]) -> None:
+        cast(dict[str, Any], value["positive"])["receipt_sha256"] = "1" * 64
+
+    def external(value: dict[str, Any]) -> None:
+        cast(dict[str, Any], value["external_activity"])["provider_calls"] = 1
+
+    def coordinated(value: dict[str, Any]) -> None:
+        dependency(value)
+        abi(value)
+        modules(value)
+        tests(value)
+        positive(value)
+
+    mutations: tuple[tuple[str, Callable[[dict[str, Any]], None]], ...] = (
+        ("dependency", dependency),
+        ("abi", abi),
+        ("modules", modules),
+        ("tests", tests),
+        ("runtime", runtime),
+        ("positive", positive),
+        ("external", external),
+        ("coordinated", coordinated),
+    )
+    legitimate = tmp_path / "legitimate.json"
+    legitimate.write_bytes(canonical_json(base))
+    assert audit_builder.build_audit(legitimate)
+    for name, mutate in mutations:
+        value = clone()
+        mutate(value)
+        path = tmp_path / f"{name}.json"
+        path.write_bytes(canonical_json(value))
+        with pytest.raises(ValueError, match="evidence is invalid"):
+            audit_builder.build_audit(path)
 
 
 def _inputs(tmp_path: Path) -> dict[str, object]:
@@ -848,7 +917,7 @@ def test_finalization_ack_failure_poison_closes_until_authenticated_recovery(
     ) -> dict[str, Any]:
         if action == "ack":
             raise LedgerPoisoned("forced post-commit acknowledgement failure")
-        return await real_cleanup(cleanup_spec, action=action)
+        return cast(dict[str, Any], await real_cleanup(cleanup_spec, action=action))
 
     monkeypatch.setattr(receipt_ledger_module, "_run_finalization_cleanup_owner", fail_ack)
     with pytest.raises(LedgerPoisoned, match="acknowledgement"):
@@ -942,8 +1011,19 @@ def test_real_bound_scientific_qa_runs_with_zero_provider_calls(
     ``StageDScientificReplayEnv``, the prepared observer/controller, and the
     ledger receipt writer remain the production implementations.
     """
-    checkout_outputs = Path(__file__).parents[1] / "outputs"
+    checkout_outputs = ROOT / "outputs"
     checkout_outputs_before = _tree_digest(checkout_outputs)
+    launch_claim_paths = (
+        ROOT / "runs/stage-d/stage-d1-support-v13-launch/provision-claim-v2.json",
+        ROOT / "runs/stage-d/stage-d1-support-v13-launch/attempt-v1.json",
+    )
+
+    def path_binding(path: Path) -> tuple[str, int] | None:
+        if path.is_symlink():
+            raise AssertionError("QA fixture launch guard path is a symlink")
+        return (_sha256(path.read_bytes()), path.stat().st_size) if path.exists() else None
+
+    launch_claims_before = tuple(path_binding(path) for path in launch_claim_paths)
     import httpx
     import test_stage_d_source_producer as producer_tests
     from redco_evidence_selection_v2.scientific_campaign_driver import (
@@ -965,6 +1045,17 @@ def test_real_bound_scientific_qa_runs_with_zero_provider_calls(
     from redco.analysis.stage_d_branch_artifacts import StageDBranchTargetRoster
     from redco.analysis.stage_d_dynamic_taint import build_source_causal_graph
     from redco.analysis.stage_d_receipt_ledger import StageDReceiptLedger
+    from redco.analysis.stage_d_scientific_branch_group import (
+        BranchGroupArtifact,
+        BranchGroupSpec,
+        BranchSeedOracle,
+        CandidateSubmission,
+        NonRepairableCampaignAbort,
+    )
+    from redco.analysis.stage_d_scientific_campaign import (
+        ScientificGroupRun,
+        run_scientific_campaign,
+    )
     from redco.integrations.verifiers_trace_v2 import extract_v2_rlm_provenance
 
     observer = getattr(vf.Env, "prepared_call_observer", None)
@@ -975,7 +1066,7 @@ def test_real_bound_scientific_qa_runs_with_zero_provider_calls(
         "agent_config",
         "client",
     ):
-        pytest.skip("requires the pinned prepared-observer Verifiers overlay")
+        raise AssertionError("requires the pinned prepared-observer Verifiers overlay")
 
     source_trace_holder: dict[str, object] = {}
     action_holder: list[BehaviorAction] = []
@@ -1041,6 +1132,7 @@ def test_real_bound_scientific_qa_runs_with_zero_provider_calls(
     payload["resolved_agent_sampling_law_sha256"] = _resolved_agent_sampling_law_sha256(
         base_sampling
     )
+    loopback_fixture_calls = 0
 
     class FixtureRenderer:
         supports_tools = False
@@ -1088,7 +1180,7 @@ def test_real_bound_scientific_qa_runs_with_zero_provider_calls(
                 raise AssertionError("QA fixture received unexpected frozen token IDs")
             return ParsedResponse(content="['exact evidence']")
 
-    class FixtureHarness(Harness[HarnessConfig]):
+    class FixtureHarness(Harness[HarnessConfig]):  # type: ignore[misc]
         async def launch(
             self,
             _ctx: object,
@@ -1098,6 +1190,7 @@ def test_real_bound_scientific_qa_runs_with_zero_provider_calls(
             secret: str,
             _mcp_urls: dict[str, str],
         ) -> ProgramResult:
+            nonlocal loopback_fixture_calls
             trace_payload = cast(dict[str, object], source_trace_holder["trace"])
             calls = cast(list[dict[str, object]], trace_payload["calls"])
             actions = tuple(action_holder)
@@ -1147,6 +1240,7 @@ def test_real_bound_scientific_qa_runs_with_zero_provider_calls(
                         content=action.key.request,
                         headers=headers,
                     )
+                    loopback_fixture_calls += 1
                     if response.status_code != 200:
                         raise AssertionError(
                             f"fixture interception returned {response.status_code}: "
@@ -1201,7 +1295,7 @@ def test_real_bound_scientific_qa_runs_with_zero_provider_calls(
         def host_url(self, url: str) -> str:
             return url
 
-    class FixtureDockerConfig(DockerConfig):
+    class FixtureDockerConfig(DockerConfig):  # type: ignore[misc]
         execution_user: str = "65534:65534"
         execution_home: str = "/tmp/redco-agent"
 
@@ -1213,7 +1307,7 @@ def test_real_bound_scientific_qa_runs_with_zero_provider_calls(
     def fixture_harness_class(identifier: str) -> type[Harness[HarnessConfig]]:
         if identifier == "stage-d-qa-http-fixture":
             return FixtureHarness
-        return original_harness_class(identifier)
+        return cast(type[Harness[HarnessConfig]], original_harness_class(identifier))
 
     monkeypatch.setattr(vf_loaders, "harness_class", fixture_harness_class)
     monkeypatch.setattr(
@@ -1268,13 +1362,18 @@ def test_real_bound_scientific_qa_runs_with_zero_provider_calls(
     taskset["policy_checkpoint_id"] = base_key.checkpoint_id
     payload["frozen_workspace_manifest_path"] = str(workspace_manifest)
     payload["frozen_workspace_manifest_sha256"] = _sha256(workspace_manifest.read_bytes())
+    provider_dispatches = 0
+
+    def reject_provider_post(*_args: object, **_kwargs: object) -> None:
+        nonlocal provider_dispatches
+        provider_dispatches += 1
+        raise AssertionError("provider POST was reached during reconstruction QA")
+
     async def scenario() -> None:
         fake_openai = SimpleNamespace(
             base_url="http://qa-provider.invalid/v1",
             max_retries=0,
-            post=lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                AssertionError("provider POST was reached during reconstruction QA")
-            ),
+            post=reject_provider_post,
             close=lambda: asyncio.sleep(0),
         )
         client = TrainClient(fake_openai)
@@ -1417,7 +1516,8 @@ def test_real_bound_scientific_qa_runs_with_zero_provider_calls(
                 / source.trace_sha256
             ).read_bytes()
         )
-        trace = cast(dict[str, object], cast(dict[str, object], raw_source)["traces"][0])
+        traces = cast(list[object], cast(dict[str, object], raw_source)["traces"])
+        trace = cast(dict[str, object], traces[0])
         source_trace_holder["trace"] = trace
         records = extract_v2_rlm_provenance(trace)
         graph = build_source_causal_graph(records)
@@ -1479,17 +1579,173 @@ def test_real_bound_scientific_qa_runs_with_zero_provider_calls(
         assert receipt is not None
         assert writer.reconstruction_qa_barrier_receipt() is None
         watchdog.complete()
+
+        qa_callback_calls = 0
+        candidate_callback_calls = 0
+
+        def qa_callback_sentinel(_spec: BranchGroupSpec) -> bytes:
+            nonlocal qa_callback_calls
+            qa_callback_calls += 1
+            raise AssertionError("campaign reran reconstruction QA instead of recovering")
+
+        def candidate_boundary_sentinel(
+            *,
+            action_slot: int,
+            action_seed: int,
+            reference_key: ExactActionKey,
+        ) -> CandidateSubmission:
+            del action_slot, action_seed, reference_key
+            nonlocal candidate_callback_calls
+            candidate_callback_calls += 1
+            raise AssertionError("stop after receipt-first QA recovery")
+
+        def execution_boundary_sentinel(
+            *,
+            arm_id: str,
+            action: BehaviorAction,
+            continuation_replicate: int,
+            seed_oracle: BranchSeedOracle,
+        ) -> bytes:
+            del arm_id, action, continuation_replicate, seed_oracle
+            raise AssertionError("scientific execution was reached during QA recovery")
+
+        def artifact_boundary_sentinel(_artifact: BranchGroupArtifact) -> None:
+            raise AssertionError("scientific artifact publication was reached during QA")
+
+        campaign_group = ScientificGroupRun(
+            spec=spec,
+            run_reconstruction_qa=qa_callback_sentinel,
+            sample_candidate=candidate_boundary_sentinel,
+            execute_arm=execution_boundary_sentinel,
+            prepare_artifact=artifact_boundary_sentinel,
+        )
+        with pytest.raises(
+            NonRepairableCampaignAbort,
+            match="candidate slot 1 raised without a zero-call receipt",
+        ):
+            run_scientific_campaign(
+                (campaign_group,),
+                ledger=writer,
+                verifier=writer,
+            )
+        assert qa_callback_calls == 0
+        assert candidate_callback_calls == 1
+        assert writer.reconstruction_qa_barrier_receipt() is not None
+
+        duplicate_run_eval_calls = 0
+
+        async def duplicate_run_eval_sentinel(
+            *_args: object, **_kwargs: object
+        ) -> list[object]:
+            nonlocal duplicate_run_eval_calls
+            duplicate_run_eval_calls += 1
+            raise AssertionError("duplicate QA reached run_eval")
+
+        monkeypatch.setattr(runner, "run_eval", duplicate_run_eval_sentinel)
         with pytest.raises(LedgerError, match="reconstruction QA is already recorded"):
             await run_bound_scientific_episode(
                 binding=binding,
                 env_config=nonlocal_config,
                 eval_config=eval_config,
-                watchdog=watchdog,
+                watchdog=ActionClosureWatchdog(),
             )
+        assert duplicate_run_eval_calls == 0
         recovered = writer.reconstruction_qa_receipt("group-1", spec.commitment.target_id)
         assert recovered == receipt
+
+        receipt_value = json.loads(receipt)
+        assert receipt_value["recorded_action_digest"] == spec.recorded_action.digest
+        assert (
+            receipt_value["pre_action_snapshot_sha256"]
+            == spec.commitment.pre_action_snapshot_sha256
+        )
+        assert receipt_value["actual_cost"]["generated_tokens"] == 0
+        assert receipt_value["actual_cost"]["judge_calls"] == 0
+        report_sha256 = cast(str, receipt_value["report_sha256"])
+        report_bytes = (
+            Path(cast(str, payload["ledger_path"])) / "evidence" / report_sha256
+        ).read_bytes()
+        assert _sha256(report_bytes) == report_sha256
+        report_value = json.loads(report_bytes)
+        assert report_value["source_sha256"] == source.source_sha256
+        assert report_value["trace_reward"] == source.reward
+        assert report_value["source_reward"] == source.reward
+        assert report_value["terminal_reply_exact"] is True
+        assert report_value["runtime_snapshot_sha256"] == _sha256(expected_snapshot)
+        assert writer.branch_target_roster_sha256 == _sha256(roster.to_bytes())
+        assert spec.correspondence.recorded_action_digest == spec.recorded_action.digest
+        scan = inspect_ledger(Path(cast(str, payload["ledger_path"])))
+        record_kinds = tuple(record["record_kind"] for record in scan.records)
+        receipt_kinds = tuple(
+            cast(dict[str, object], record["body"])["receipt_kind"]
+            for record in scan.records
+            if record["record_kind"] == "receipt"
+        )
+        assert receipt_kinds.count("reconstruction_qa") == 1
+        assert receipt_kinds.count("reconstruction_qa_barrier") == 1
+        assert not {
+            "candidate_attempt",
+            "candidate_action_inference",
+            "scientific_arm_execution",
+            "scientific_branch_group",
+        }.intersection(record_kinds)
+        assert provider_dispatches == 0
+        assert loopback_fixture_calls == 2
+
+        evidence_output_value = os.environ.get("REDCO_PHASE2_QA_EVIDENCE_PATH")
+        if evidence_output_value is not None:
+            evidence_output = Path(evidence_output_value).resolve()
+            try:
+                evidence_output.relative_to(ROOT.resolve())
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("Phase-2 QA evidence output must be outside checkout")
+            evidence_output.parent.mkdir(parents=True, exist_ok=True)
+            evidence = canonical_json(
+                {
+                    "schema_version": 1,
+                    "domain": "redco-stage-d2-qa-positive-evidence-v1",
+                    "receipt_sha256": _sha256(receipt),
+                    "receipt_bytes": len(receipt),
+                    "report_sha256": report_sha256,
+                    "source_sha256": source.source_sha256,
+                    "trace_sha256": source.trace_sha256,
+                    "recorded_action_digest": spec.recorded_action.digest,
+                    "commitment_receipt_sha256": spec.commitment.receipt_sha256,
+                    "correspondence_receipt_sha256": spec.correspondence.receipt_sha256,
+                    "roster_sha256": _sha256(roster.to_bytes()),
+                    "runtime_snapshot_sha256": _sha256(expected_snapshot),
+                    "terminal_reply_sha256": _sha256(
+                        canonical_json(binding.expected_terminal_reply)
+                    ),
+                    "reward": source.reward,
+                    "qa_receipt_record_count": receipt_kinds.count("reconstruction_qa"),
+                    "qa_barrier_record_count": receipt_kinds.count(
+                        "reconstruction_qa_barrier"
+                    ),
+                    "provider_dispatches": provider_dispatches,
+                    "generated_tokens": receipt_value["actual_cost"][
+                        "generated_tokens"
+                    ],
+                    "judge_calls": receipt_value["actual_cost"]["judge_calls"],
+                    "candidate_records": 0,
+                    "scientific_execution_records": 0,
+                    "qasper_rows_read": 0,
+                    "launch_dataset_reads": 0,
+                    "loopback_fixture_calls": loopback_fixture_calls,
+                    "sampling_directions_drained": True,
+                    "campaign_recovery_callback_calls": qa_callback_calls,
+                    "duplicate_run_eval_calls": duplicate_run_eval_calls,
+                    "checkout_outputs_unchanged": True,
+                    "launch_claims_unchanged": True,
+                }
+            )
+            with evidence_output.open("xb") as output:
+                output.write(evidence)
         writer.close()
         assert _tree_digest(checkout_outputs) == checkout_outputs_before
+        assert tuple(path_binding(path) for path in launch_claim_paths) == launch_claims_before
 
     asyncio.run(scenario())
 

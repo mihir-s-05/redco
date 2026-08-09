@@ -164,6 +164,55 @@ def _git_run(repository: Path, *args: str) -> None:
     )
 
 
+def _materialize_live_owner_tree_sha256(
+    root: Path,
+    *,
+    target: Path,
+    name: str,
+    base_commit: str,
+    patch_names: tuple[str, ...],
+) -> str:
+    """Materialize one clean pinned dependency stack and hash its canonical tree."""
+
+    root = root.resolve()
+    source = root / "external" / "prime-rl" / "deps" / name
+    if not (source / ".git").exists():
+        raise ValueError(f"pinned dependency checkout is absent: {source}")
+    if target.exists() or target.is_symlink():
+        raise ValueError(f"dependency materialization target already exists: {target}")
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "--no-hardlinks",
+            "--no-checkout",
+            str(source),
+            str(target),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    _git_run(target, "checkout", "--detach", base_commit)
+    for patch_name in patch_names:
+        patch = root / "patches" / patch_name
+        subprocess.run(
+            ["git", "apply", "--check", str(patch)],
+            cwd=target,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        subprocess.run(
+            ["git", "apply", str(patch)],
+            cwd=target,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+    return _sha256(canonical_tree_manifest_bytes(target))
+
+
 def _reconstruct_live_owner_tree_sha256(
     root: Path,
     *,
@@ -173,43 +222,15 @@ def _reconstruct_live_owner_tree_sha256(
 ) -> str:
     """Rebuild one clean pinned dependency stack and hash its canonical tree."""
 
-    root = root.resolve()
-    source = root / "external" / "prime-rl" / "deps" / name
-    if not (source / ".git").exists():
-        raise ValueError(f"pinned dependency checkout is absent: {source}")
     with tempfile.TemporaryDirectory(prefix=f"redco-{name}-stack-") as temporary:
         target = Path(temporary) / name
-        subprocess.run(
-            [
-                "git",
-                "clone",
-                "--no-hardlinks",
-                "--no-checkout",
-                str(source),
-                str(target),
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+        return _materialize_live_owner_tree_sha256(
+            root,
+            target=target,
+            name=name,
+            base_commit=base_commit,
+            patch_names=patch_names,
         )
-        _git_run(target, "checkout", "--detach", base_commit)
-        for patch_name in patch_names:
-            patch = root / "patches" / patch_name
-            subprocess.run(
-                ["git", "apply", "--check", str(patch)],
-                cwd=target,
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-            subprocess.run(
-                ["git", "apply", str(patch)],
-                cwd=target,
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-        return _sha256(canonical_tree_manifest_bytes(target))
 
 
 def _git_tracked_modes(root: Path) -> dict[str, str]:
@@ -237,9 +258,11 @@ def _git_tracked_modes(root: Path) -> dict[str, str]:
     return modes
 
 
-def live_owner_dependency_payload(root: Path) -> dict[str, Any]:
-    """Authenticate the final composable renderer/verifier owner patches."""
-
+def _live_owner_dependency_payload(
+    root: Path,
+    *,
+    materialization_root: Path | None,
+) -> dict[str, Any]:
     root = root.resolve()
     components: list[dict[str, Any]] = []
     for name, base_commit, patch_names, post_tree_sha256 in _LIVE_OWNER_COMPONENTS:
@@ -253,11 +276,21 @@ def live_owner_dependency_payload(root: Path) -> dict[str, Any]:
             if actual != expected:
                 raise ValueError(f"live owner patch changed: {patch_name}")
             patches.append({"name": patch_name, "sha256": actual})
-        reconstructed = _reconstruct_live_owner_tree_sha256(
-            root,
-            name=name,
-            base_commit=base_commit,
-            patch_names=patch_names,
+        reconstructed = (
+            _reconstruct_live_owner_tree_sha256(
+                root,
+                name=name,
+                base_commit=base_commit,
+                patch_names=patch_names,
+            )
+            if materialization_root is None
+            else _materialize_live_owner_tree_sha256(
+                root,
+                target=materialization_root / name,
+                name=name,
+                base_commit=base_commit,
+                patch_names=patch_names,
+            )
         )
         if reconstructed != post_tree_sha256:
             raise ValueError(f"live owner post-tree hash changed: {name}")
@@ -274,6 +307,37 @@ def live_owner_dependency_payload(root: Path) -> dict[str, Any]:
         "domain": "redco-stage-d-live-owner-stack-v1",
         "components": components,
     }
+
+
+def live_owner_dependency_payload(root: Path) -> dict[str, Any]:
+    """Authenticate the final composable renderer/verifier owner patches."""
+
+    return _live_owner_dependency_payload(root, materialization_root=None)
+
+
+def materialize_live_owner_dependency_trees(
+    root: Path,
+    target_root: Path,
+) -> dict[str, Any]:
+    """Authenticate and materialize the live-owner stack outside the repository."""
+
+    repository = root.resolve()
+    target = target_root.resolve()
+    if target_root.exists() or target_root.is_symlink():
+        raise ValueError("dependency materialization root already exists")
+    if not target_root.parent.is_dir() or target_root.parent.is_symlink():
+        raise ValueError("dependency materialization parent must be a regular directory")
+    try:
+        target.relative_to(repository)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("dependency materialization root must be outside the repository")
+    target.mkdir()
+    return _live_owner_dependency_payload(
+        repository,
+        materialization_root=target,
+    )
 
 
 def _require_git_commit(value: object, name: str) -> str:
@@ -652,6 +716,7 @@ __all__ = [
     "StageDDependencyStackManifest",
     "canonical_tree_manifest_bytes",
     "live_owner_dependency_payload",
+    "materialize_live_owner_dependency_trees",
     "write_canonical_tree_tar",
     "write_canonical_tree_tar_gzip",
 ]
