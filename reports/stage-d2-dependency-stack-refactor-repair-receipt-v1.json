@@ -1,0 +1,175 @@
+{
+  "authorization": {
+    "candidate_selection_authorized": false,
+    "gpu_execution_authorized": false,
+    "heldout_evaluation_authorized": false,
+    "launch_authorized": false,
+    "model_calls_authorized": false,
+    "prime_authorized": false,
+    "provider_calls_authorized": false,
+    "provisioning_authorized": false,
+    "readiness_authorized": false,
+    "science_authorized": false,
+    "scientific_transition_authorized": false,
+    "source_access_authorized": false,
+    "support_launch_authorized": false,
+    "training_authorized": false,
+    "wallet_authorized": false
+  },
+  "checkpoint_1": {
+    "commit": "fb174cea06cb1e7d45a3b4eed9b33dbf6eba8e8f",
+    "parent": "158678ed4566067e0e099ff02076da2fa6cb9359",
+    "source": {
+      "bytes": 26090,
+      "git_blob": "5278115fd4e30bf09d1975214c6e8712841c7db2",
+      "path": "src/redco/analysis/stage_d_dependency_stack.py",
+      "sha256": "f41995745652c430290f0bb1d541f05654a1d2ba3b9c4fb93242394a64d57d13"
+    },
+    "tree": "6ea81ed015dc2027c44586fda895cc0f114f84d6"
+  },
+  "domain": "redco-stage-d2-dependency-stack-refactor-repair-receipt-v1",
+  "frozen_manifest_roundtrips": {
+    "entries": [
+      {
+        "bytes": 6983,
+        "git_blob": "9d56268f334a634994e372cde74aeb02b1b13496",
+        "path": "configs/stage-d/stage-d1-dependency-stack-v10.json",
+        "roundtrip_exact": true,
+        "sha256": "4ca4b4ce0f3a5a36b18aee2892165dccb2d60afade2469198674b1c06403b58c"
+      },
+      {
+        "bytes": 7316,
+        "git_blob": "f2b80fd4e0bc9656aaf8d78c7777d9f2f58d394e",
+        "path": "configs/stage-d/stage-d1-dependency-stack-v11-1.json",
+        "roundtrip_exact": true,
+        "sha256": "1e29e81f6ece0f5e20e4c6f980fd0025a49f0cd9d6e8fe5746364e682883c996"
+      },
+      {
+        "bytes": 7316,
+        "git_blob": "7c11ef394317d02b3f729be9f90ea24d358509ee",
+        "path": "configs/stage-d/stage-d1-dependency-stack-v11-2.json",
+        "roundtrip_exact": true,
+        "sha256": "681791c039804924f0bd3ccaca42653128088442bf5f803436fb11b2d53cbe47"
+      },
+      {
+        "bytes": 7316,
+        "git_blob": "cf62093b9a79ef2f15c4b97dac0f8464e820ef12",
+        "path": "configs/stage-d/stage-d1-dependency-stack-v11.json",
+        "roundtrip_exact": true,
+        "sha256": "b6ec955b71c2377101653c913f0fb5e4eb30698724c7dca45cd55aa4fd997372"
+      },
+      {
+        "bytes": 7316,
+        "git_blob": "1e80216d8475fe91f00e0d6413833e2938241bcb",
+        "path": "configs/stage-d/stage-d1-dependency-stack-v12.json",
+        "roundtrip_exact": true,
+        "sha256": "cda524c6ecea9821b1e36290da64df465aa46fad9ec174881c24d3dc895b2831"
+      },
+      {
+        "bytes": 5337,
+        "git_blob": "48a5334f18d38cb54b2b737bea9ddd2f4d675238",
+        "path": "configs/stage-d/stage-d1-dependency-stack-v2.json",
+        "roundtrip_exact": true,
+        "sha256": "aee8afa82e9a3cf2e5656409eb69d81b5bd8929414f8cda4125d333986be6cc4"
+      },
+      {
+        "bytes": 6573,
+        "git_blob": "102aedb4bd68ba225512282f2277610691e0fc3d",
+        "path": "configs/stage-d/stage-d1-dependency-stack-v3.json",
+        "roundtrip_exact": true,
+        "sha256": "15f62e4d00777ae89e2776714c7ff49015dbca32290d1a9a87294cace3f9f92d"
+      },
+      {
+        "bytes": 6573,
+        "git_blob": "6eb05661be5fff34fb5dda66a0a91c75b4e9d3a2",
+        "path": "configs/stage-d/stage-d1-dependency-stack-v4.json",
+        "roundtrip_exact": true,
+        "sha256": "a18405b7a8d12af89709a52aff33f29ea8507e40e661caf75bc07f7feb4bb8e0"
+      },
+      {
+        "bytes": 6573,
+        "git_blob": "6e203befaaa9c3b12149f64b9912cc4dabeda09f",
+        "path": "configs/stage-d/stage-d1-dependency-stack-v5.json",
+        "roundtrip_exact": true,
+        "sha256": "57993dac96a67ca512d89088b56389eba7ad058c6e2917e92782897c0559e0f4"
+      },
+      {
+        "bytes": 6774,
+        "git_blob": "6ae12ff9905f46fd03530451ffa1a75a769a429a",
+        "path": "configs/stage-d/stage-d1-dependency-stack-v7.json",
+        "roundtrip_exact": true,
+        "sha256": "8e34cb551afacfb5105afcfc0e335268d41c029a7766f134df509a6a90151625"
+      },
+      {
+        "bytes": 6774,
+        "git_blob": "675d8b6a2cd93d1b919cdef02e32dc6a05c4ee3c",
+        "path": "configs/stage-d/stage-d1-dependency-stack-v8.json",
+        "roundtrip_exact": true,
+        "sha256": "49ec5cd10c007b698f06f6336efd39079a097dc5e59398c62a679358405b88a2"
+      },
+      {
+        "bytes": 6983,
+        "git_blob": "32447da29dcfabc38580ec512ec2cab747b4d9c7",
+        "path": "configs/stage-d/stage-d1-dependency-stack-v9.json",
+        "roundtrip_exact": true,
+        "sha256": "2d55e1edd835df0db5359a34ca20a7c73b9d70caa1f53a6361bed8421042c8f1"
+      }
+    ],
+    "expected_count": 12,
+    "verified_count": 12
+  },
+  "future_launch": {
+    "requirement": "separately_reviewed_readiness_v2_lineage",
+    "satisfied_by_this_receipt": false,
+    "separate_review_required": true
+  },
+  "historical_launch_disposition": {
+    "authorized_source_sha256": "7feba4914177d9475ecc936447cd5b7aa0a6e9df891fcf7592fa84ccb9c4c95e",
+    "checkpoint_source_sha256": "f41995745652c430290f0bb1d541f05654a1d2ba3b9c4fb93242394a64d57d13",
+    "historical_launch_remains_fail_closed": true,
+    "source_matches_authorization": false
+  },
+  "predecessor_artifacts": [
+    {
+      "bytes": 23486,
+      "git_blob": "f994db5b98c2eee8bb31570d17560320d17d4c32",
+      "path": "reports/stage-d2-qa-localization-audit-v1.json",
+      "sha256": "9b6d9b1db80da5ce8c8d344923c1a009e0f13e7fa53c5df150eb556f3b684baf",
+      "source_binding_sha256": "7feba4914177d9475ecc936447cd5b7aa0a6e9df891fcf7592fa84ccb9c4c95e",
+      "state": "non_authorizing_cpu_audit_complete"
+    },
+    {
+      "bytes": 7946,
+      "git_blob": "6ab4ee158d57fd4a649836c51af3adced44794df",
+      "path": "reports/stage-d2-qa-localization-audit-v2.json",
+      "sha256": "d8baa34cbd55c74213913825e186580ab9bef69ad34174f38cebfd071460d5a9",
+      "source_binding_sha256": "1b2ad24c65c75be6e77672704e7b01468b2dd5a3cc877d37180162e765c70bb8",
+      "state": "non_authorizing_cpu_infrastructure_evidence"
+    }
+  ],
+  "schema_version": 1,
+  "sequencing": {
+    "direct_child_of_checkpoint_1_required": true,
+    "future_commit_identity_intentionally_excluded": true,
+    "receipt_self_identity_intentionally_excluded": true
+  },
+  "source_lineage": {
+    "historical_launch_source": {
+      "bytes": 24473,
+      "commit": "a1dddbc4da870fe887545b23783b029f7ce1e0a4",
+      "git_blob": "8beb54c6fb0cdc5f620633a83c2f73eec4245dbd",
+      "path": "src/redco/analysis/stage_d_dependency_stack.py",
+      "sha256": "7feba4914177d9475ecc936447cd5b7aa0a6e9df891fcf7592fa84ccb9c4c95e",
+      "tree": "4d005e667dfa47f740ca583e6e9a4a1edcac229e"
+    },
+    "refactor_parent_source": {
+      "bytes": 26387,
+      "commit": "158678ed4566067e0e099ff02076da2fa6cb9359",
+      "git_blob": "8ec559b41be2f6bc7ecfd3c231c2bdbb69ce7676",
+      "path": "src/redco/analysis/stage_d_dependency_stack.py",
+      "sha256": "1b2ad24c65c75be6e77672704e7b01468b2dd5a3cc877d37180162e765c70bb8",
+      "tree": "749d791a0fd9fadbff6416e35edcbb03e62585e4"
+    }
+  },
+  "state": "non_authorizing_repository_refactor_receipt"
+}
