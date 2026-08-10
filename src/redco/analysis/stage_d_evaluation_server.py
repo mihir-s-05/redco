@@ -23,19 +23,10 @@ from redco.analysis.stage_d_evaluation_contracts import (
 )
 from redco.analysis.stage_d_process_supervision import command_sha256, linux_process_identity
 from redco.contracts import canonical_json
+from redco.integrity import require_sha256_hex as _require_sha256
 
 _MAX_PROC_BYTES = 4 * 1024 * 1024
 _MAX_PROBE_BYTES = 1024 * 1024
-
-
-def _require_sha256(value: object, name: str) -> str:
-    if (
-        not isinstance(value, str)
-        or len(value) != 64
-        or any(character not in "0123456789abcdef" for character in value)
-    ):
-        raise ValueError(f"{name} must be a lowercase SHA-256")
-    return value
 
 
 @dataclass(frozen=True, slots=True)

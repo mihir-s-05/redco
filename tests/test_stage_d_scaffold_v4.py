@@ -2,16 +2,28 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import sys
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parents[1]))
+_PROMPT_RELATIVE = Path("configs/stage-d/stage-d0-scaffold-fewshot-v4.txt")
+_PROMPT_SHA256 = "b27653e90f52a20f26ac79e3d0569275e9ba0ed2b07abbe06f060dd2486aee73"
 
-from scripts.build_stage_d_scaffold_sft_v2 import scaffold_code
+
+def _frozen_scaffold_source() -> str:
+    raw = (Path(__file__).parents[1] / _PROMPT_RELATIVE).read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == _PROMPT_SHA256
+
+    opening = b"```python\n"
+    closing = b"\n```\n"
+    assert raw.count(opening) == 1
+    assert raw.count(closing) == 1
+    start = raw.index(opening) + len(opening)
+    stop = raw.index(closing, start)
+    return raw[start:stop].decode("utf-8")
 
 
 async def _execute(
@@ -26,10 +38,10 @@ async def _execute(
         invocation_ids.append(redco_invocation_id)
         return values[len(invocation_ids) - 1]
 
-    code = scaffold_code("What happened?").replace(
-        "'/workspace/evidence_context.txt'",
-        repr(str(paper)),
-    )
+    code = _frozen_scaffold_source()
+    workspace_path = "/workspace/evidence_context.txt"
+    assert code.count(workspace_path) == 1
+    code = code.replace(workspace_path, paper.as_posix(), 1)
     namespace = {"rlm": rlm}
     compiled = compile(
         code,

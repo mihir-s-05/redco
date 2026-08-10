@@ -5,6 +5,7 @@ import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar
@@ -174,13 +175,11 @@ def _receipt(
     ledger: StageDEvaluationLedger | None = None,
 ) -> bytes:
     actuator_pid = os.getpid() + (2 if suffix == "different" else 1)
-    actuation_attempt_id = hashlib.sha256(
-        f"{arm}:{role}:{epoch}:{suffix}".encode()
-    ).hexdigest()[:32]
+    actuation_attempt_id = hashlib.sha256(f"{arm}:{role}:{epoch}:{suffix}".encode()).hexdigest()[
+        :32
+    ]
     cgroup_root = Path(
-        "/sys/fs/cgroup"
-        if ledger is None
-        else ledger.manifest.supervisor_limits.cgroup_root
+        "/sys/fs/cgroup" if ledger is None else ledger.manifest.supervisor_limits.cgroup_root
     )
     cgroup = cgroup_root / (f"redco-{launch_record_sha256[:24]}-{actuator_pid}")
     ledger_id = _sha("6") if ledger is None else ledger.manifest.evaluation_ledger_id
@@ -189,12 +188,7 @@ def _receipt(
         if ledger is None
         else ledger.manifest.supervisor_limits.control_root
     )
-    stop_path = (
-        control_root
-        / ledger_id
-        / actuation_attempt_id
-        / "stop-request.json"
-    )
+    stop_path = control_root / ledger_id / actuation_attempt_id / "stop-request.json"
     return ActuatedProcessReceipt(
         arm=arm,
         role=role,
@@ -384,6 +378,9 @@ def test_creation_is_idempotent_only_for_exact_frozen_inputs(tmp_path: Path) -> 
         evaluation_plan_bytes=plan,
         runtime_bundle_bytes=_RUNTIME,
     )
+    first_snapshot = first.inspect()
+    assert first_snapshot.authorization_sha256 == hashlib.sha256(authorization).hexdigest()
+    assert StageDEvaluationLedger(root).inspect() == first_snapshot
     second = StageDEvaluationLedger.create(
         root,
         authorization_bytes=authorization,
@@ -391,7 +388,7 @@ def test_creation_is_idempotent_only_for_exact_frozen_inputs(tmp_path: Path) -> 
         evaluation_plan_bytes=plan,
         runtime_bundle_bytes=_RUNTIME,
     )
-    assert second.inspect() == first.inspect()
+    assert second.inspect() == first_snapshot
     with pytest.raises(ValueError):
         StageDEvaluationLedger.create(
             root,
@@ -999,6 +996,17 @@ def test_real_http_dispatch_is_never_duplicated_across_crash_boundaries(
     ledger = _new_ledger(tmp_path, monkeypatch, endpoints=endpoints)
     task, session = _start_arm(ledger, "stock")
     request = b'{"messages":[{"role":"user","content":"frozen"}]}'
+    dispatch = partial(
+        dispatch_local_http_once,
+        ledger=ledger,
+        task=task,
+        session=session,
+        event_address_bytes=event_address,
+        seed=9201,
+        cache_salt="stock-0",
+        request_body_bytes=request,
+        timeout_seconds=5.0,
+    )
 
     def crash(stage: str) -> None:
         if stage == crash_stage:
@@ -1006,45 +1014,17 @@ def test_real_http_dispatch_is_never_duplicated_across_crash_boundaries(
 
     try:
         if crash_stage is None:
-            result = dispatch_local_http_once(
-                ledger=ledger,
-                task=task,
-                session=session,
-                event_address_bytes=event_address,
-                seed=9201,
-                cache_salt="stock-0",
-                request_body_bytes=request,
-                timeout_seconds=5.0,
-            )
+            result = dispatch()
             assert result.status_code == 200
         else:
             with pytest.raises(RuntimeError, match=f"simulated {crash_stage}"):
-                dispatch_local_http_once(
-                    ledger=ledger,
-                    task=task,
-                    session=session,
-                    event_address_bytes=event_address,
-                    seed=9201,
-                    cache_salt="stock-0",
-                    request_body_bytes=request,
-                    timeout_seconds=5.0,
-                    fault_hook=crash,
-                )
+                dispatch(fault_hook=crash)
         first_count = _CountingHandler.calls
         with pytest.raises(
             RuntimeError,
             match=r"unfinished policy call|does not belong to the open task",
         ):
-            dispatch_local_http_once(
-                ledger=ledger,
-                task=task,
-                session=session,
-                event_address_bytes=event_address,
-                seed=9201,
-                cache_salt="stock-0",
-                request_body_bytes=request,
-                timeout_seconds=5.0,
-            )
+            dispatch()
         assert _CountingHandler.calls == first_count
         before_network = {"after-call-reserved", "after-dispatch-durable"}
         assert first_count == (0 if crash_stage in before_network else 1)

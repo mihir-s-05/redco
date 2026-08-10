@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import math
 import time
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from types import FunctionType
+from typing import Any, Protocol
 
 from redco.analysis.stage_d_evaluation_codec import canonical_object
 from redco.analysis.stage_d_evaluation_contracts import EvaluationRuntimeEntrypoint
 from redco.analysis.stage_d_evaluation_ledger import StageDEvaluationLedger
-from redco.analysis.stage_d_evaluation_model_port import EvaluationModelPort
+from redco.analysis.stage_d_evaluation_model_port import (
+    EvaluationModelPort,
+    RequestSerializer,
+)
 from redco.analysis.stage_d_evaluation_worker import DockerEvaluationRuntime
 from redco.analysis.stage_d_objective_binding import ArmName
 
@@ -23,6 +28,107 @@ _ENTRYPOINT_SCHEMAS = {
     "scorer": "redco-stage-d-scorer-v1",
     "request_serializer": "redco-stage-d-request-serializer-v1",
 }
+_SERIALIZER = "evaluation request serializer"
+_SCORER = "evaluation scorer"
+_SERIALIZER_SIGNATURE = (("payload",), frozenset(("seed", "cache_salt")))
+_SCORER_SIGNATURE = (
+    (),
+    frozenset(
+        ("task_attempt_id", "task_id", "seed", "terminal_output_bytes", "task_evidence_bytes")
+    ),
+)
+
+
+class _TaskScorer(Protocol):
+    def __call__(
+        self,
+        *,
+        task_attempt_id: str,
+        task_id: str,
+        seed: int,
+        terminal_output_bytes: bytes,
+        task_evidence_bytes: bytes,
+    ) -> bytes: ...
+
+
+@dataclass(frozen=True, slots=True)
+class _RequestSerializerAdapter:
+    entrypoint: Callable[..., object]
+
+    def __post_init__(self) -> None:
+        _require_signature(self.entrypoint, _SERIALIZER, _SERIALIZER_SIGNATURE)
+
+    def __call__(
+        self,
+        payload: dict[str, Any],
+        *,
+        seed: int,
+        cache_salt: str,
+    ) -> bytes:
+        return _require_immutable_bytes(
+            self.entrypoint(payload, seed=seed, cache_salt=cache_salt),
+            _SERIALIZER,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _TaskScorerAdapter:
+    entrypoint: Callable[..., object]
+
+    def __post_init__(self) -> None:
+        _require_signature(self.entrypoint, _SCORER, _SCORER_SIGNATURE)
+
+    def __call__(
+        self,
+        *,
+        task_attempt_id: str,
+        task_id: str,
+        seed: int,
+        terminal_output_bytes: bytes,
+        task_evidence_bytes: bytes,
+    ) -> bytes:
+        return _require_immutable_bytes(
+            self.entrypoint(
+                task_attempt_id=task_attempt_id,
+                task_id=task_id,
+                seed=seed,
+                terminal_output_bytes=terminal_output_bytes,
+                task_evidence_bytes=task_evidence_bytes,
+            ),
+            _SCORER,
+        )
+
+
+def _require_immutable_bytes(value: object, name: str) -> bytes:
+    if type(value) is not bytes:
+        raise TypeError(f"{name} must return immutable bytes")
+    return value
+
+
+def _require_signature(
+    entrypoint: Callable[..., object],
+    name: str,
+    expected: tuple[tuple[str, ...], frozenset[str]],
+) -> None:
+    if type(entrypoint) is not FunctionType:
+        raise TypeError(f"{name} signature differs from the frozen API")
+    code = entrypoint.__code__
+    if code.co_flags & (inspect.CO_COROUTINE | inspect.CO_GENERATOR | inspect.CO_ASYNC_GENERATOR):
+        raise TypeError(f"{name} must be synchronous")
+    positional_count = code.co_argcount
+    keyword_count = code.co_kwonlyargcount
+    observed = (
+        code.co_varnames[:positional_count],
+        frozenset(code.co_varnames[positional_count : positional_count + keyword_count]),
+    )
+    if (
+        observed != expected
+        or code.co_posonlyargcount
+        or code.co_flags & (inspect.CO_VARARGS | inspect.CO_VARKEYWORDS)
+        or entrypoint.__defaults__ is not None
+        or entrypoint.__kwdefaults__ is not None
+    ):
+        raise TypeError(f"{name} signature differs from the frozen API")
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,11 +162,12 @@ def run_evaluation_arm(
 ) -> bytes:
     session = ledger.resume_current_client_session(arm)
     runtime_path = Path(ledger.manifest.runtime_bundle_path)
-    serializer = _load_callable(
-        runtime_path,
-        _entrypoint(ledger, "request_serializer"),
+    serializer: RequestSerializer = _RequestSerializerAdapter(
+        _load_callable(runtime_path, _entrypoint(ledger, "request_serializer"))
     )
-    scorer = _load_callable(runtime_path, _entrypoint(ledger, "scorer"))
+    scorer: _TaskScorer = _TaskScorerAdapter(
+        _load_callable(runtime_path, _entrypoint(ledger, "scorer"))
+    )
     runtime = DockerEvaluationRuntime(
         manifest=ledger.manifest,
         docker_executable=docker_executable,
@@ -85,7 +192,7 @@ def run_evaluation_arm(
             ledger=ledger,
             task=task,
             session=session,
-            serialize_request=cast(Callable[..., bytes], serializer),
+            serialize_request=serializer,
             timeout_seconds=limits.call_timeout_seconds,
             max_calls=limits.max_calls_per_task,
             max_completion_tokens=limits.max_completion_tokens_per_task,
@@ -96,7 +203,7 @@ def run_evaluation_arm(
             task_attempt_id=task.task_attempt_id,
             model_port=port,
         )
-        score_bytes = cast(Callable[..., bytes], scorer)(
+        score_bytes = scorer(
             task_attempt_id=task.task_attempt_id,
             task_id=task.unit.task_id,
             seed=task.unit.seed,
@@ -141,17 +248,21 @@ def _entrypoint(
     return matches[0]
 
 
-def _load_callable(runtime_path: Path, entrypoint: EvaluationRuntimeEntrypoint) -> Any:
+def _load_callable(
+    runtime_path: Path,
+    entrypoint: EvaluationRuntimeEntrypoint,
+) -> Callable[..., object]:
     with zipfile.ZipFile(runtime_path, "r") as archive:
         source = archive.read(entrypoint.member_path)
     if hashlib.sha256(source).hexdigest() != entrypoint.source_sha256:
         raise ValueError("evaluation runtime entrypoint changed before load")
+    filename = f"{runtime_path}!/{entrypoint.member_path}"
     namespace: dict[str, Any] = {
-        "__file__": f"{runtime_path}!/{entrypoint.member_path}",
+        "__file__": filename,
         "__name__": f"_redco_frozen_{entrypoint.role}",
     }
-    exec(compile(source, namespace["__file__"], "exec"), namespace)
-    result = namespace.get(entrypoint.callable_name)
+    exec(compile(source, filename, "exec"), namespace)
+    result: object = namespace.get(entrypoint.callable_name)
     if not callable(result):
         raise ValueError("evaluation runtime entrypoint callable is absent")
     return result
@@ -167,32 +278,17 @@ def _verify_score(
     task_evidence_bytes: bytes,
 ) -> float:
     payload = canonical_object(value, "evaluation scorer evidence")
-    if set(payload) != {
-        "schema_version",
-        "domain",
-        "task_attempt_id",
-        "task_id",
-        "seed",
-        "terminal_output_sha256",
-        "task_evidence_sha256",
-        "reward",
-        "details",
-    } or (
-        payload["schema_version"],
-        payload["domain"],
-        payload["task_attempt_id"],
-        payload["task_id"],
-        payload["seed"],
-        payload["terminal_output_sha256"],
-        payload["task_evidence_sha256"],
-    ) != (
-        1,
-        "redco-stage-d-heldout-score-v1",
-        task_attempt_id,
-        task_id,
-        seed,
-        hashlib.sha256(terminal_output_bytes).hexdigest(),
-        hashlib.sha256(task_evidence_bytes).hexdigest(),
+    expected = {
+        "schema_version": 1,
+        "domain": "redco-stage-d-heldout-score-v1",
+        "task_attempt_id": task_attempt_id,
+        "task_id": task_id,
+        "seed": seed,
+        "terminal_output_sha256": hashlib.sha256(terminal_output_bytes).hexdigest(),
+        "task_evidence_sha256": hashlib.sha256(task_evidence_bytes).hexdigest(),
+    }
+    if set(payload) != {*expected, "reward", "details"} or any(
+        payload[name] != expected_value for name, expected_value in expected.items()
     ):
         raise ValueError("evaluation scorer evidence binding differs")
     reward = payload["reward"]

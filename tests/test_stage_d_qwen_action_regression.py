@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -6,11 +7,21 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+QWEN_FIXTURE = Path(__file__).parent / "fixtures" / "stage_d_qwen_tool_call_310.json"
+QWEN_FIXTURE_SHA256 = "16e1ce9493befe768539adc9057c765843c619bba1b16481ca5f5cbd080a7f54"
+
 
 def _fixture() -> dict:
-    return json.loads(
-        (Path(__file__).parent / "fixtures" / "stage_d_qwen_tool_call_310.json").read_text()
-    )
+    return json.loads(QWEN_FIXTURE.read_bytes())
+
+
+def test_qwen_fixture_has_reviewed_bytes_and_token_counts() -> None:
+    fixture_bytes = QWEN_FIXTURE.read_bytes()
+    fixture = json.loads(fixture_bytes)
+
+    assert hashlib.sha256(fixture_bytes).hexdigest() == QWEN_FIXTURE_SHA256
+    assert len(fixture["action_token_ids"]) == 310
+    assert fixture["typed_rerender_sampled_token_count"] == 314
 
 
 def test_qwen_tool_action_validates_from_310_sampled_tokens() -> None:

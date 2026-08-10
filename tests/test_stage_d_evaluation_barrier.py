@@ -26,12 +26,15 @@ from redco.analysis.stage_d_evaluation_contracts import (
     EvaluationSupervisorLimits,
     StageDEvaluationExecutionManifest,
 )
+from redco.analysis.stage_d_objective_binding import ArmName
 from redco.analysis.stage_d_protocol_manifest import (
     StageDPolicyIdentity,
     StageDProtocolManifest,
 )
 from redco.analysis.stage_d_trainer_supervisor import ArmRunState, TrainerRunSnapshot
 from redco.contracts import canonical_json
+
+_ARMS: tuple[ArmName, ...] = ("stock", "branch-global", "local")
 
 
 def _sha(character: str) -> str:
@@ -79,7 +82,7 @@ def _snapshot(
             metrics_sha256=_sha(str(index + 7)) if complete else None,
             reload_evidence_sha256=_sha(chr(ord("a") + index)) if complete else None,
         )
-        for index, arm in enumerate(("stock", "branch-global", "local"))
+        for index, arm in enumerate(_ARMS)
     )
     return TrainerRunSnapshot(
         campaign_manifest_sha256=_sha("a"),
@@ -139,7 +142,7 @@ def _protocol_bytes(config: bytes, plan: bytes) -> bytes:
         collection_plan_sha256=_sha("9"),
         evaluation_plan_sha256=hashlib.sha256(plan).hexdigest(),
         decision_rule_sha256=_sha("a"),
-        support_rules_sha256=_sha("support"),
+        support_rules_sha256=_sha("e"),
         reload_probe_sha256=_sha("b"),
         shared_initialization_sha256=_sha("c"),
         objective_authorization_sha256=_sha("d"),
@@ -188,8 +191,8 @@ def _execution_manifest_bytes(
     config: Path,
     plan: Path,
 ) -> bytes:
-    programs = []
-    for arm in ("stock", "branch-global", "local"):
+    programs: list[EvaluationProgramBinding] = []
+    for arm in _ARMS:
         state = snapshot.state(arm)
         for role in ("server", "client"):
             programs.append(
@@ -218,7 +221,7 @@ def _execution_manifest_bytes(
             )
     schedule = tuple(
         EvaluationScheduleUnit(ordinal, arm, 0, "task-1", 9101)
-        for ordinal, arm in enumerate(("stock", "branch-global", "local"))
+        for ordinal, arm in enumerate(_ARMS)
     )
     return StageDEvaluationExecutionManifest(
         evaluation_ledger_id=_sha("0"),
@@ -293,6 +296,31 @@ def _write_execution_manifest(
     return path
 
 
+def _authorized_fixture(
+    tmp_path: Path,
+) -> tuple[Path, Path, _Ledger, Path, StageDEvaluationAuthorization]:
+    config, plan, protocol, protocol_sha256 = _frozen_files(tmp_path)
+    ledger = _Ledger(_snapshot(protocol_manifest_sha256=protocol_sha256))
+    execution_manifest = _write_execution_manifest(
+        tmp_path,
+        ledger.snapshot,
+        protocol_sha256=protocol_sha256,
+        config=config,
+        plan=plan,
+    )
+    authorization_path = tmp_path / "authorization.json"
+    authorization = _authorize_heldout_evaluation_from_live_ledger(
+        ledger=ledger,  # type: ignore[arg-type]
+        protocol_manifest_path=protocol,
+        heldout_eval_config_path=config,
+        evaluation_plan_path=plan,
+        execution_manifest_path=execution_manifest,
+        handoff_training_adoption_record_sha256=_sha("f"),
+        destination=authorization_path,
+    )
+    return config, plan, ledger, authorization_path, authorization
+
+
 def _metrics_bytes(
     *,
     arm: str,
@@ -359,25 +387,7 @@ def test_evaluation_is_forbidden_until_all_three_training_commits(tmp_path: Path
 
 
 def test_authorization_binds_ledger_head_and_exact_metrics_roster(tmp_path: Path) -> None:
-    config, plan, protocol, protocol_sha256 = _frozen_files(tmp_path)
-    ledger = _Ledger(_snapshot(protocol_manifest_sha256=protocol_sha256))
-    execution_manifest = _write_execution_manifest(
-        tmp_path,
-        ledger.snapshot,
-        protocol_sha256=protocol_sha256,
-        config=config,
-        plan=plan,
-    )
-    authorization_path = tmp_path / "authorization.json"
-    authorization = _authorize_heldout_evaluation_from_live_ledger(
-        ledger=ledger,  # type: ignore[arg-type]
-        protocol_manifest_path=protocol,
-        heldout_eval_config_path=config,
-        evaluation_plan_path=plan,
-        execution_manifest_path=execution_manifest,
-        handoff_training_adoption_record_sha256=_sha("f"),
-        destination=authorization_path,
-    )
+    config, plan, ledger, authorization_path, authorization = _authorized_fixture(tmp_path)
     assert (
         StageDEvaluationAuthorization.from_bytes(authorization_path.read_bytes()) == authorization
     )
@@ -392,7 +402,7 @@ def test_authorization_binds_ledger_head_and_exact_metrics_roster(tmp_path: Path
     checkpoint_by_arm = {
         item.arm: item.checkpoint_manifest_sha256 for item in authorization.checkpoints
     }
-    for arm in ("stock", "branch-global", "local"):
+    for arm in _ARMS:
         (metrics / f"{arm}.json").write_bytes(
             _metrics_bytes(
                 arm=arm,
@@ -455,31 +465,13 @@ def test_authorization_rejects_protocol_or_plan_mismatch(tmp_path: Path) -> None
 
 
 def test_completion_rejects_extra_or_mislabeled_metrics(tmp_path: Path) -> None:
-    config, plan, protocol, protocol_sha256 = _frozen_files(tmp_path)
-    ledger = _Ledger(_snapshot(protocol_manifest_sha256=protocol_sha256))
-    execution_manifest = _write_execution_manifest(
-        tmp_path,
-        ledger.snapshot,
-        protocol_sha256=protocol_sha256,
-        config=config,
-        plan=plan,
-    )
-    authorization_path = tmp_path / "authorization.json"
-    _authorize_heldout_evaluation_from_live_ledger(
-        ledger=ledger,  # type: ignore[arg-type]
-        protocol_manifest_path=protocol,
-        heldout_eval_config_path=config,
-        evaluation_plan_path=plan,
-        execution_manifest_path=execution_manifest,
-        handoff_training_adoption_record_sha256=_sha("f"),
-        destination=authorization_path,
-    )
+    config, plan, ledger, authorization_path, _ = _authorized_fixture(tmp_path)
     metrics = tmp_path / "metrics"
     metrics.mkdir()
     raw = tmp_path / "raw"
     raw.mkdir()
     retained = tmp_path / "retained"
-    for arm in ("stock", "branch-global", "local"):
+    for arm in _ARMS:
         (metrics / f"{arm}.json").write_bytes(canonical_json({"arm": arm}))
     (metrics / "stale.json").write_bytes(b"{}")
     with pytest.raises(ValueError, match="exact three-arm roster"):

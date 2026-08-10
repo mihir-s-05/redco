@@ -16,6 +16,7 @@ from pathlib import Path
 from statistics import NormalDist
 from typing import Any, cast
 
+from redco.analysis import stage_d_v13_support_contract as support_contract
 from redco.analysis.stage_d_collection import (
     SourceCollectionSlot,
     derive_scientific_group_id,
@@ -29,6 +30,7 @@ from redco.analysis.stage_d_v13_support_contract import (
     ADDRESS_AUDIT_RELATIVE,
     ADDRESS_AUDIT_SHA256,
     AUTHENTICATED_PREDECESSOR_HASHES,
+    CANDIDATE_AUTHORITY,
     CANDIDATE_EXAMPLE_ID,
     CANDIDATE_PAPER_ID,
     CANDIDATE_QUESTION_INDEX,
@@ -38,11 +40,13 @@ from redco.analysis.stage_d_v13_support_contract import (
     CANDIDATE_SOURCE_ORDINAL,
     COLLECTION_PLAN_RELATIVE,
     COLLECTION_PLAN_SHA256,
+    COMPOSITION_AUTHORIZATION,
     COMPOSITION_RELATIVE,
     FROZEN_SUPPORT_RULES_RELATIVE,
     FROZEN_SUPPORT_RULES_SHA256,
     MASTER_SEED,
     PROTOCOL_AUDIT_RELATIVE,
+    PROTOCOL_AUTHORIZATION,
     PROTOCOL_RELATIVE,
     RETAINED_SUPPORT_RELATIVE,
     RETAINED_SUPPORT_SHA256,
@@ -66,6 +70,7 @@ from redco.analysis.stage_d_v13_support_contract import (
     SOURCE_SCHEMA_SHA256,
     SOURCE_SEMANTIC_COMMIT,
     SOURCE_SHA256,
+    SUPPORT_COHORT,
     SUPPORT_RULES_SHA256,
     SUPPORTED_DATASETS,
     SUPPORTED_PYARROW,
@@ -89,6 +94,7 @@ from redco.analysis.stage_d_v13_support_contract import (
     CandidateReadInstrumentation,
     authenticate_upstream_evidence,
     load_parquet,
+    protocol_source_binding,
     read_authenticated,
     require_supported_runtime,
     runtime_payload,
@@ -96,7 +102,8 @@ from redco.analysis.stage_d_v13_support_contract import (
     source_contract,
 )
 from redco.analysis.stage_d_v13_support_publication import (
-    check_protocol_artifacts as _check_protocol_artifacts,
+    authenticate_protocol_artifact_bytes,
+    check_protocol_artifacts,
 )
 
 
@@ -184,7 +191,6 @@ def materialize_candidate(
     parquet_path = root / SOURCE_ARTIFACT_RELATIVE
     source, parquet_file = source_contract(root, parquet_path)
     return _materialize_candidate_with_authenticated_inputs(
-        root,
         output_path,
         observer,
         upstream,
@@ -194,7 +200,6 @@ def materialize_candidate(
 
 
 def _materialize_candidate_with_authenticated_inputs(
-    root: Path,
     output_path: Path | None,
     observer: CandidateReadInstrumentation,
     upstream: Mapping[str, Any],
@@ -251,14 +256,7 @@ def _materialize_candidate_with_authenticated_inputs(
         "candidate": candidate,
         "fresh_support_rollout": rollout,
         "instrumentation": observer.to_payload(),
-        "authority": {
-            "candidate_materialized": True,
-            "source_selection_repeated": False,
-            "provider_calls_authorized": False,
-            "model_calls_authorized": False,
-            "science_authorized": False,
-            "launch_authorized": False,
-        },
+        "authority": CANDIDATE_AUTHORITY.copy(),
     }
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -306,7 +304,7 @@ def build_protocol_artifacts(root: Path, output_root: Path) -> dict[str, bytes]:
     del output_root
     if all(
         (root / relative).is_file() and not (root / relative).is_symlink()
-        for relative in REVIEWED_PROTOCOL_ARTIFACT_SHA256
+        for relative in support_contract.REVIEWED_PROTOCOL_ARTIFACT_SHA256
     ):
         return rebuild_protocol_artifacts_from_existing(root)
     upstream = authenticate_upstream_evidence(root)
@@ -315,7 +313,6 @@ def build_protocol_artifacts(root: Path, output_root: Path) -> dict[str, bytes]:
     parquet_path = root / SOURCE_ARTIFACT_RELATIVE
     source, parquet_file = source_contract(root, parquet_path)
     candidate = _materialize_candidate_with_authenticated_inputs(
-        root,
         None,
         CandidateReadInstrumentation(),
         upstream,
@@ -323,9 +320,7 @@ def build_protocol_artifacts(root: Path, output_root: Path) -> dict[str, bytes]:
         parquet_file,
     )
     candidate["sampling_contract"] = sampling_contract
-    authenticated_predecessors = cast(
-        Mapping[str, bytes], upstream["authenticated_predecessors"]
-    )
+    authenticated_predecessors = cast(Mapping[str, bytes], upstream["authenticated_predecessors"])
     retained_raw = authenticated_predecessors[RETAINED_SUPPORT_RELATIVE]
     retained_rows = [json.loads(line) for line in retained_raw.splitlines()]
     if (
@@ -342,8 +337,7 @@ def build_protocol_artifacts(root: Path, output_root: Path) -> dict[str, bytes]:
     if (
         not isinstance(address_audit, dict)
         or address_audit.get("schema_version") != 1
-        or address_audit.get("domain")
-        != "redco-stage-d-support-successor-address-audit-v1"
+        or address_audit.get("domain") != "redco-stage-d-support-successor-address-audit-v1"
         or address_audit.get("checks")
         != {
             "preserved_63_addresses_exact": True,
@@ -425,18 +419,20 @@ def build_protocol_artifacts(root: Path, output_root: Path) -> dict[str, bytes]:
     }
     if not all(nonoverlap.values()):
         raise ValueError("candidate identity overlaps a retained support identity")
+    selection_evidence = {
+        "receipt_path": SELECTION_RECEIPT_RELATIVE,
+        "receipt_sha256": SELECTION_RECEIPT_SHA256,
+        "manifest_path": SELECTION_MANIFEST_RELATIVE,
+        "manifest_sha256": upstream["selection_manifest_sha256"],
+        "claim_sha256": upstream["selection_claim_sha256"],
+        "upstream_v12_hashes": upstream["upstream_hashes"],
+    }
     composition = {
         "schema_version": 1,
         "domain": "redco-stage-d-qasper-support-successor-v8-candidate-composition-v1",
         "status": "candidate_materialized_cpu_only_no_launch",
         "sampling_contract": sampling_contract,
-        "support_cohort": {
-            "required_papers": 64,
-            "retained_support_rows": 63,
-            "authenticated_replacement_rows": 1,
-            "science_train_rows": 16,
-            "science_eval_rows": 32,
-        },
+        "support_cohort": SUPPORT_COHORT.copy(),
         "retained_base": {
             "path": RETAINED_SUPPORT_RELATIVE,
             "sha256": RETAINED_SUPPORT_SHA256,
@@ -461,14 +457,7 @@ def build_protocol_artifacts(root: Path, output_root: Path) -> dict[str, bytes]:
             "v6_manifest": {"path": V6_MANIFEST_RELATIVE, "sha256": V6_MANIFEST_SHA256},
             "address_audit": {"path": ADDRESS_AUDIT_RELATIVE, "sha256": ADDRESS_AUDIT_SHA256},
         },
-        "selection_evidence": {
-            "receipt_path": SELECTION_RECEIPT_RELATIVE,
-            "receipt_sha256": SELECTION_RECEIPT_SHA256,
-            "manifest_path": SELECTION_MANIFEST_RELATIVE,
-            "manifest_sha256": upstream["selection_manifest_sha256"],
-            "claim_sha256": upstream["selection_claim_sha256"],
-            "upstream_v12_hashes": upstream["upstream_hashes"],
-        },
+        "selection_evidence": selection_evidence.copy(),
         "authenticated_address_audit": {
             "preserved_count": len(address_audit["preserved"]),
             "retired_count": 1,
@@ -479,15 +468,7 @@ def build_protocol_artifacts(root: Path, output_root: Path) -> dict[str, bytes]:
             **nonoverlap,
             "selection_address_not_reused_for_support": True,
         },
-        "authorization": {
-            "candidate_fixed": True,
-            "provider_calls_authorized": False,
-            "science_authorized": False,
-            "launch_authorized": False,
-            "support_spend_authorized": False,
-            "exploratory_science_user_accepted": False,
-            "readiness_blocker": "exploratory_science_not_user_accepted",
-        },
+        "authorization": COMPOSITION_AUTHORIZATION.copy(),
     }
     probabilities = {
         "n": 64,
@@ -507,44 +488,11 @@ def build_protocol_artifacts(root: Path, output_root: Path) -> dict[str, bytes]:
         "sampling_contract": sampling_contract,
         "candidate": {"ordinal": CANDIDATE_SOURCE_ORDINAL, "example_id": CANDIDATE_EXAMPLE_ID},
         "selection_evidence": {
-            "receipt_path": SELECTION_RECEIPT_RELATIVE,
-            "receipt_sha256": SELECTION_RECEIPT_SHA256,
-            "manifest_path": SELECTION_MANIFEST_RELATIVE,
-            "manifest_sha256": upstream["selection_manifest_sha256"],
-            "claim_sha256": upstream["selection_claim_sha256"],
-            "upstream_v12_hashes": upstream["upstream_hashes"],
+            **selection_evidence,
             "frozen_decision_rule_sha256": upstream["decision_rule_sha256"],
             "frozen_support_rules_sha256": upstream["support_rules_sha256"],
         },
-        "source": {
-            "repository": SOURCE_REPOSITORY,
-            "revision": SOURCE_REVISION,
-            "logical_url": SOURCE_LOGICAL_URL,
-            "semantic_source_commit": SOURCE_SEMANTIC_COMMIT,
-            "path": SOURCE_PATH,
-            "local_artifact": SOURCE_ARTIFACT_RELATIVE,
-            "sha256": SOURCE_SHA256,
-            "schema_sha256": SOURCE_SCHEMA_SHA256,
-            "bytes": SOURCE_BYTES,
-            "rows": SOURCE_ROW_COUNT,
-            "logical_read_wall": (
-                "Arrow emits logical ordinals 0..180 in bounded one-row batches; only ordinal "
-                "180 is Python-converted, canonicalized, and evaluated; ordinal 181 is never "
-                "requested or emitted"
-            ),
-            "decoder": {
-                "batch_size": 1,
-                "use_threads": False,
-                "row_groups": [0],
-                "logical_readahead": False,
-                "physical_compressed_page_io_may_span_row_group": True,
-            },
-            "required_runtime": {
-                "python": SUPPORTED_PYTHON,
-                "pyarrow": SUPPORTED_PYARROW,
-                "datasets": SUPPORTED_DATASETS,
-            },
-        },
+        "source": protocol_source_binding(),
         "support_sequence": [
             "zero_call_deployment_preflight",
             "one_outcome_bearing_64_paper_support_collection",
@@ -650,16 +598,7 @@ def build_protocol_artifacts(root: Path, output_root: Path) -> dict[str, bytes]:
         "support_pass_transition": (
             "user_checkpoint_required_before_any_support_spend_or_science_transition"
         ),
-        "authorization": {
-            "provider_calls_authorized": False,
-            "model_calls_authorized": False,
-            "science_authorized": False,
-            "launch_authorized": False,
-            "format_only_sft_iteration_allowed": False,
-            "exploratory_science_user_accepted": False,
-            "support_spend_authorized": False,
-            "readiness_blocker": "exploratory_science_not_user_accepted",
-        },
+        "authorization": PROTOCOL_AUTHORIZATION.copy(),
     }
     audit = {
         "schema_version": 1,
@@ -671,14 +610,7 @@ def build_protocol_artifacts(root: Path, output_root: Path) -> dict[str, bytes]:
         "protocol_sha256": sha256_json(protocol),
         "candidate_read_wall": candidate["instrumentation"],
         "runtime": candidate["source"]["runtime"],
-        "selection_evidence": {
-            "receipt_path": SELECTION_RECEIPT_RELATIVE,
-            "receipt_sha256": SELECTION_RECEIPT_SHA256,
-            "manifest_path": SELECTION_MANIFEST_RELATIVE,
-            "manifest_sha256": upstream["selection_manifest_sha256"],
-            "claim_sha256": upstream["selection_claim_sha256"],
-            "upstream_v12_hashes": upstream["upstream_hashes"],
-        },
+        "selection_evidence": selection_evidence.copy(),
         "ready_for_live_support": False,
         "live_activity_performed": False,
         "reason": (
@@ -702,57 +634,14 @@ def rebuild_protocol_artifacts_from_existing(root: Path) -> dict[str, bytes]:
     the source decoder; the independent reviewed hash map is the authority.
     """
 
-    artifacts: dict[str, bytes] = {}
-    for relative, expected_sha256 in REVIEWED_PROTOCOL_ARTIFACT_SHA256.items():
-        path = root / relative
-        if not path.is_file() or path.is_symlink():
-            raise ValueError(f"reviewed support artifact is missing: {relative}")
-        raw = path.read_bytes()
-        if sha256_bytes(raw) != expected_sha256:
-            raise ValueError(f"reviewed support artifact changed: {relative}")
-        try:
-            value = json.loads(raw)
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ValueError(f"reviewed support artifact is not JSON: {relative}") from error
-        if not isinstance(value, dict) or canonical_json_bytes(value) != raw:
-            raise ValueError(f"reviewed support artifact is not canonical: {relative}")
-        artifacts[relative] = raw
-    dependency_stack = live_owner_dependency_payload(root)
-    sampling_contract = sampling_contract_binding(root)
-    candidate = json.loads(artifacts[CANDIDATE_RELATIVE])
-    composition = json.loads(artifacts[COMPOSITION_RELATIVE])
-    protocol = json.loads(artifacts[PROTOCOL_RELATIVE])
-    audit = json.loads(artifacts[PROTOCOL_AUDIT_RELATIVE])
-    if not all(
-        isinstance(value, dict)
-        for value in (candidate, composition, protocol, audit)
-    ):
-        raise ValueError("reviewed support protocol artifacts must be objects")
-    candidate["sampling_contract"] = sampling_contract
-    composition["sampling_contract"] = sampling_contract
-    protocol["dependency_stack"] = dependency_stack
-    protocol["sampling_contract"] = sampling_contract
-    candidate_raw = canonical_json_bytes(candidate)
-    composition_candidate = composition.get("candidate")
-    if not isinstance(composition_candidate, dict):
-        raise ValueError("reviewed support composition lacks candidate metadata")
-    composition_candidate["sha256"] = sha256_bytes(candidate_raw)
-    composition_raw = canonical_json_bytes(composition)
-    protocol_raw = canonical_json_bytes(protocol)
-    audit["candidate_sha256"] = sha256_bytes(candidate_raw)
-    audit["composition_sha256"] = sha256_bytes(composition_raw)
-    audit["protocol_sha256"] = sha256_bytes(protocol_raw)
-    audit["dependency_stack"] = dependency_stack
-    audit["sampling_contract"] = sampling_contract
-    artifacts[CANDIDATE_RELATIVE] = candidate_raw
-    artifacts[COMPOSITION_RELATIVE] = composition_raw
-    artifacts[PROTOCOL_RELATIVE] = protocol_raw
-    artifacts[PROTOCOL_AUDIT_RELATIVE] = canonical_json_bytes(audit)
+    artifacts = {
+        relative: read_authenticated(root, relative, expected_sha256)
+        for relative, expected_sha256 in (
+            support_contract.REVIEWED_PROTOCOL_ARTIFACT_SHA256.items()
+        )
+    }
+    authenticate_protocol_artifact_bytes(root, artifacts)
     return artifacts
-
-
-check_protocol_artifacts = _check_protocol_artifacts
-
 
 __all__ = [
     "ADDRESS_AUDIT_RELATIVE",

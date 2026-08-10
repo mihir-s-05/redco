@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
 
-from redco.analysis.stage_d_evaluation_codec import sha256
 from redco.analysis.stage_d_evaluation_contracts import EvaluationScheduleUnit
 from redco.analysis.stage_d_objective_binding import ArmName
+from redco.integrity import sha256_bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,7 +24,7 @@ class EvaluationClientSession:
 
     @property
     def process_receipt_sha256(self) -> str:
-        return cast(str, sha256(self.process_receipt_bytes))
+        return sha256_bytes(self.process_receipt_bytes)
 
 
 @dataclass(frozen=True, slots=True)

@@ -16,24 +16,25 @@ Tier 0 is CPU-only and intentionally independent of prime-rl:
 - deterministic full-suffix and graph-sliced replay;
 - enumerable synthetic credit probes.
 
-The deterministic Gate GB campaign is executable with:
+The deterministic Gate GB campaign is a scientific execution path. Run it only
+under its separately authorized operating procedure:
 
 ```console
-uv run python -m redco.analysis.gate_gb
+uv run --offline --frozen python -m redco.analysis.gate_gb
 ```
 
-It persists its machine-readable report under `runs/stage-b/`.
-
-Prime-rl integration and paid GPU execution require an explicit manual checkpoint.
+It writes a machine-readable report under `runs/stage-b/`. Prime integration,
+providers, models, paid GPU work, training, and scientific execution all require
+an explicit checkpoint; repository verification authorizes none of them.
 
 ## Development
 
-This repository uses `uv` exclusively.
+Redco uses `uv` exclusively. Start with the guides to
+[architecture](docs/architecture.md),
+[development and verification](docs/development.md), and
+[provenance and retention](docs/provenance.md).
 
-```console
-uv sync --all-groups
-uv run pytest
-uv run ruff check .
-uv run mypy src tests
-uv run python -m redco.analysis.replay_equivalence
-```
+The [development guide](docs/development.md) owns the exact self-contained
+verification commands and named profiles. The verifier owns import paths, test
+classification, frozen Ruff exceptions, strict affected-module typing, and
+cache-free compilation.

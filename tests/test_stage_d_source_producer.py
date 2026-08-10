@@ -75,6 +75,7 @@ from redco.analysis.stage_d_receipt_ledger import (
     LedgerError,
     SealedReceiptVerifier,
     StageDReceiptLedger,
+    StageDTrainingBatchAuthorization,
     inspect_ledger,
 )
 from redco.analysis.stage_d_returning_root_contract import (
@@ -227,6 +228,8 @@ def test_two_slot_scaffold_allows_extra_contiguous_returning_root_turns() -> Non
             root_policy_turn_count=2,
             maximum_eligible_root_policy_turn_count=4,
         )
+
+
 SOURCE_BYTES = b"source manifest"
 RUNTIME_BYTES = b"runtime manifest"
 SOURCE_EVAL_BYTES = b"source eval"
@@ -484,8 +487,7 @@ def _call(
 
 
 SAMPLING_CONTRACT_FIELDS = tuple(
-    field["name"]
-    for field in cast(list[dict[str, str]], SAMPLING_CONTRACT["fields"])
+    field["name"] for field in cast(list[dict[str, str]], SAMPLING_CONTRACT["fields"])
 )
 
 
@@ -620,9 +622,7 @@ def test_sampling_mutations_fail_at_production_owner(mutation: str) -> None:
         sampling[field] = None
     elif mutation == "retired-15":
         del sampling["reasoning_effort"]
-        sampling.update(
-            {"top_k": None, "stop": None, "ignore_eos": False, "min_tokens": 0}
-        )
+        sampling.update({"top_k": None, "stop": None, "ignore_eos": False, "min_tokens": 0})
     elif mutation == "old-seven":
         sampling = {
             "temperature": sampling["temperature"],
@@ -688,27 +688,28 @@ def test_tool_definitions_normalize_without_weakening_the_contract() -> None:
         },
     }
     wrapped = {"type": "function", "function": compact}
-    expected = [
-        {"type": "function", "function": {**compact, "strict": None}}
-    ]
+    expected = [{"type": "function", "function": {**compact, "strict": None}}]
     assert _normalize_openai_tools([compact]) == expected
     assert _normalize_openai_tools([wrapped]) == expected
     assert _normalize_openai_tools([{**compact, "strict": True}]) == [
         {"type": "function", "function": {**compact, "strict": True}}
     ]
 
-    malformed_cases: tuple[list[dict[str, object]], ...] = (
+    rejected_cases: tuple[list[dict[str, object]], ...] = (
         [{**compact, "strict": "yes"}],
         [{"type": "custom", "function": compact}],
-        [{"type": "function", "function": {**compact, "name": "shell"}}],
     )
-    for malformed in malformed_cases:
-        function = cast(dict[str, object], malformed[-1]["function"])
-        if function.get("name") == "shell":
-            assert _normalize_openai_tools(malformed) != expected
-        else:
-            with pytest.raises(ValueError, match=r"schema|boolean or null"):
-                _normalize_openai_tools(malformed)
+    for malformed in rejected_cases:
+        with pytest.raises(ValueError, match=r"schema|boolean or null"):
+            _normalize_openai_tools(malformed)
+
+    different_name = [{"type": "function", "function": {**compact, "name": "shell"}}]
+    assert _normalize_openai_tools(different_name) == [
+        {
+            "type": "function",
+            "function": {**compact, "name": "shell", "strict": None},
+        }
+    ]
 
 
 def test_real_producer_trace_matches_the_persisted_raw_schema() -> None:
@@ -963,9 +964,7 @@ def _prepared_action(
         finish_reason="length" if max_tokens else "tool_calls" if tool_call else "stop",
         prompt_tokens=len(prompt_token_ids),
         completion_tokens=2,
-        termination_kind=(
-            "max_tokens" if max_tokens else "tool_calls" if tool_call else "eos"
-        ),
+        termination_kind=("max_tokens" if max_tokens else "tool_calls" if tool_call else "eos"),
         eos_token_id=None if max_tokens or tool_call else 2,
         validate_action=_validate_prepared_action,
     )
@@ -1165,9 +1164,7 @@ def _two_turn_child_episode() -> bytes:
     returning_root_node["message"] = _tool_action(84).message
     returning_root_call["finish_reason"] = "tool_calls"
     later_prompt_index = len(trace["nodes"])
-    trace["nodes"].append(
-        _node({"role": "user", "content": "q"}, [10, 11], [False, False], [])
-    )
+    trace["nodes"].append(_node({"role": "user", "content": "q"}, [10, 11], [False, False], []))
     later_node_index = len(trace["nodes"])
     trace["nodes"].append(
         _node(
@@ -1232,20 +1229,42 @@ def _later_child_only_episode() -> bytes:
     return cast(bytes, canonical_json(episode))
 
 
-def _produce(root: Path) -> tuple[SourceRollout, StageDReceiptLedger]:
-    writer = StageDReceiptLedger.create(
-        root,
-        binding=_binding(),
-        master_seed=MASTER_SEED,
-    )
-    producer = StageDSourceRolloutProducer(
+def _fixture_ledger(root: Path) -> StageDReceiptLedger:
+    return StageDReceiptLedger.create(root, binding=_binding(), master_seed=MASTER_SEED)
+
+
+def _fixture_producer(
+    writer: StageDReceiptLedger,
+    *,
+    rollout_id: str = "rollout-live",
+) -> StageDSourceRolloutProducer:
+    return StageDSourceRolloutProducer(
         ledger=writer,
         group_id="group-1",
-        rollout_id="rollout-live",
-        child_target_roster=(_target_id(),),
+        rollout_id=rollout_id,
+        child_target_roster=(_target_id(rollout_id),),
         allow_test_fixture_roster=True,
         base_model_manifest_sha256=_sha256(b"base"),
     )
+
+
+def _intercept_returning_root(
+    producer: StageDSourceRolloutProducer,
+    action: BehaviorAction,
+) -> None:
+    producer.intercept_policy_call(
+        event_address=PolicyEventAddress(0, "root", 1, 1),
+        action_key=action.key,
+        node_kind="root",
+        target_id=None,
+        branch_selected=False,
+        forward_once=lambda _key: action,
+    )
+
+
+def _produce(root: Path) -> tuple[SourceRollout, StageDReceiptLedger]:
+    writer = _fixture_ledger(root)
+    producer = _fixture_producer(writer)
     root_action = _action(71)
     producer.intercept_policy_call(
         event_address=PolicyEventAddress(0, "root", 0, 0),
@@ -1267,6 +1286,38 @@ def _produce(root: Path) -> tuple[SourceRollout, StageDReceiptLedger]:
     return producer.finalize_episode(_episode()), writer
 
 
+def _strict_producer(
+    root: Path,
+    *,
+    root_policy_turn_count: int = 2,
+) -> tuple[StageDReceiptLedger, PolicyEventAddress, StageDSourceRolloutProducer]:
+    writer = StageDReceiptLedger.create(
+        root,
+        binding=_binding(),
+        master_seed=MASTER_SEED,
+    )
+    parent = PolicyEventAddress(0, "root", 0, 0)
+    producer = StageDSourceRolloutProducer(
+        ledger=writer,
+        group_id="group-1",
+        rollout_id="rollout-strict",
+        child_parent_event=parent,
+        child_parent_tool_call_slot=0,
+        root_policy_turn_count=root_policy_turn_count,
+        base_model_manifest_sha256=_sha256(b"base"),
+    )
+    root_action = _tool_action(81)
+    producer.intercept_policy_call(
+        event_address=parent,
+        action_key=root_action.key,
+        node_kind="root",
+        target_id=None,
+        branch_selected=False,
+        forward_once=lambda _key: root_action,
+    )
+    return writer, parent, producer
+
+
 def _freeze_target_roster(
     writer: StageDReceiptLedger,
     sources: tuple[SourceRollout, ...],
@@ -1286,19 +1337,8 @@ def test_source_finalization_failure_is_durably_terminal_after_restart(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "finalization-abort"
-    writer = StageDReceiptLedger.create(
-        root,
-        binding=_binding(),
-        master_seed=MASTER_SEED,
-    )
-    producer = StageDSourceRolloutProducer(
-        ledger=writer,
-        group_id="group-1",
-        rollout_id="rollout-live",
-        child_target_roster=(_target_id(),),
-        allow_test_fixture_roster=True,
-        base_model_manifest_sha256=_sha256(b"base"),
-    )
+    writer = _fixture_ledger(root)
+    producer = _fixture_producer(writer)
     action = _action(71)
     producer.intercept_policy_call(
         event_address=PolicyEventAddress(0, "root", 0, 0),
@@ -1327,14 +1367,7 @@ def _produce_into(
     reward: float,
     selected: bool,
 ) -> tuple[SourceRollout, BranchGroupSpec | None]:
-    producer = StageDSourceRolloutProducer(
-        ledger=writer,
-        group_id="group-1",
-        rollout_id=rollout_id,
-        child_target_roster=(_target_id(rollout_id),),
-        allow_test_fixture_roster=True,
-        base_model_manifest_sha256=_sha256(b"base"),
-    )
+    producer = _fixture_producer(writer, rollout_id=rollout_id)
     root_action = _action(root_seed)
     producer.intercept_policy_call(
         event_address=PolicyEventAddress(0, "root", 0, 0),
@@ -1411,11 +1444,7 @@ def test_two_concurrent_source_rollouts_share_one_ledger_without_id_collision(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "ledger"
-    writer = StageDReceiptLedger.create(
-        root,
-        binding=_binding(),
-        master_seed=MASTER_SEED,
-    )
+    writer = _fixture_ledger(root)
 
     def produce(arguments: tuple[str, int, int, float]) -> SourceRollout:
         rollout_id, root_seed, child_seed, reward = arguments
@@ -1588,11 +1617,7 @@ def test_global_reconstruction_qa_barrier_blocks_all_candidates(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "ledger"
-    writer = StageDReceiptLedger.create(
-        root,
-        binding=_binding(),
-        master_seed=MASTER_SEED,
-    )
+    writer = _fixture_ledger(root)
     first, first_spec = _produce_into(
         writer,
         rollout_id="rollout-qa-a",
@@ -1702,30 +1727,7 @@ def test_strict_source_uses_two_structural_slots_despite_reverse_completion(
     tmp_path: Path,
 ) -> None:
     ledger_root = tmp_path / "strict-ledger"
-    writer = StageDReceiptLedger.create(
-        ledger_root,
-        binding=_binding(),
-        master_seed=MASTER_SEED,
-    )
-    parent = PolicyEventAddress(0, "root", 0, 0)
-    producer = StageDSourceRolloutProducer(
-        ledger=writer,
-        group_id="group-1",
-        rollout_id="rollout-strict",
-        child_parent_event=parent,
-        child_parent_tool_call_slot=0,
-        root_policy_turn_count=2,
-        base_model_manifest_sha256=_sha256(b"base"),
-    )
-    root = _tool_action(81)
-    producer.intercept_policy_call(
-        event_address=parent,
-        action_key=root.key,
-        node_kind="root",
-        target_id=None,
-        branch_selected=False,
-        forward_once=lambda _key: root,
-    )
+    writer, parent, producer = _strict_producer(ledger_root)
     pending = []
     for ordinal, seed in ((0, 82), (1, 83)):
         address = PolicyEventAddress(
@@ -1753,15 +1755,7 @@ def test_strict_source_uses_two_structural_slots_despite_reverse_completion(
         pending.append((ticket, action))
     producer.complete_policy_call(pending[1][0], action=pending[1][1])
     producer.complete_policy_call(pending[0][0], action=pending[0][1])
-    returning_root = _prepared_action(84)
-    producer.intercept_policy_call(
-        event_address=PolicyEventAddress(0, "root", 1, 1),
-        action_key=returning_root.key,
-        node_kind="root",
-        target_id=None,
-        branch_selected=False,
-        forward_once=lambda _key: returning_root,
-    )
+    _intercept_returning_root(producer, _prepared_action(84))
     prepared_sources: list[bytes] = []
     store = StageDSourceArtifactStore(tmp_path / "source-artifacts")
 
@@ -1811,11 +1805,7 @@ def test_strict_source_uses_two_structural_slots_despite_reverse_completion(
         store.prepare(canonical_json(tampered))
 
     orphan_ledger_root = tmp_path / "orphan-ledger"
-    orphan_writer = StageDReceiptLedger.create(
-        orphan_ledger_root,
-        binding=_binding(),
-        master_seed=MASTER_SEED,
-    )
+    orphan_writer = _fixture_ledger(orphan_ledger_root)
     orphan_store = StageDSourceArtifactStore(tmp_path / "orphan-artifacts")
     orphan_store.prepare(prepared_sources[0])
     with pytest.raises(SourceArtifactError, match="no durable completion"):
@@ -1828,31 +1818,8 @@ def test_live_finalization_fails_closed_until_returning_root_contract_activation
     tmp_path: Path,
 ) -> None:
     ledger_root = tmp_path / "live-correspondence-ledger"
-    writer = StageDReceiptLedger.create(
-        ledger_root,
-        binding=_binding(),
-        master_seed=MASTER_SEED,
-    )
-    parent = PolicyEventAddress(0, "root", 0, 0)
     rollout_id = "rollout-strict"
-    producer = StageDSourceRolloutProducer(
-        ledger=writer,
-        group_id="group-1",
-        rollout_id=rollout_id,
-        child_parent_event=parent,
-        child_parent_tool_call_slot=0,
-        root_policy_turn_count=2,
-        base_model_manifest_sha256=_sha256(b"base"),
-    )
-    root = _tool_action(81)
-    producer.intercept_policy_call(
-        event_address=parent,
-        action_key=root.key,
-        node_kind="root",
-        target_id=None,
-        branch_selected=False,
-        forward_once=lambda _key: root,
-    )
+    writer, parent, producer = _strict_producer(ledger_root)
     pending: list[tuple[PendingSourcePolicyCall, BehaviorAction]] = []
     targets = tuple(
         structural_child_target_id(
@@ -1913,15 +1880,12 @@ def test_live_finalization_fails_closed_until_returning_root_contract_activation
     scan = inspect_ledger(ledger_root)
     assert scan.status == "active-clean"
     correspondence = [
-        receipt
-        for (kind, _), receipt in scan.receipts.items()
-        if kind == "seed_correspondence_map"
+        receipt for (kind, _), receipt in scan.receipts.items() if kind == "seed_correspondence_map"
     ]
     assert correspondence == []
     assert all(
         record["record_kind"] != "receipt"
-        or record["body"]["receipt"]["receipt_kind"]
-        != "source_rollout_completed"
+        or record["body"]["receipt"]["receipt_kind"] != "source_rollout_completed"
         for record in scan.records
     )
     writer.close()
@@ -1931,31 +1895,8 @@ def test_ineligible_max_token_source_strictly_reloads_after_restart(
     tmp_path: Path,
 ) -> None:
     ledger_root = tmp_path / "max-token-ledger"
-    writer = StageDReceiptLedger.create(
-        ledger_root,
-        binding=_binding(),
-        master_seed=MASTER_SEED,
-    )
-    parent = PolicyEventAddress(0, "root", 0, 0)
     rollout_id = "rollout-strict"
-    producer = StageDSourceRolloutProducer(
-        ledger=writer,
-        group_id="group-1",
-        rollout_id=rollout_id,
-        child_parent_event=parent,
-        child_parent_tool_call_slot=0,
-        root_policy_turn_count=3,
-        base_model_manifest_sha256=_sha256(b"base"),
-    )
-    root = _tool_action(81)
-    producer.intercept_policy_call(
-        event_address=parent,
-        action_key=root.key,
-        node_kind="root",
-        target_id=None,
-        branch_selected=False,
-        forward_once=lambda _key: root,
-    )
+    writer, parent, producer = _strict_producer(ledger_root, root_policy_turn_count=3)
     child_message: dict[str, object] = {"role": "assistant", "content": "truncated"}
     for ordinal, seed in ((0, 82), (1, 83)):
         child = _prepared_action(
@@ -1986,15 +1927,7 @@ def test_ineligible_max_token_source_strictly_reloads_after_restart(
             branch_selected=False,
             forward_once=_forward_action(child),
         )
-    returning_root = _prepared_action(84)
-    producer.intercept_policy_call(
-        event_address=PolicyEventAddress(0, "root", 1, 1),
-        action_key=returning_root.key,
-        node_kind="root",
-        target_id=None,
-        branch_selected=False,
-        forward_once=lambda _key: returning_root,
-    )
+    _intercept_returning_root(producer, _prepared_action(84))
     episode = json.loads(_strict_episode())
     child_call = episode["traces"][0]["calls"][2]
     child_call["finish_reason"] = "length"
@@ -2026,30 +1959,7 @@ def test_ineligible_max_token_source_strictly_reloads_after_restart(
 def test_completed_one_child_topology_is_durable_ineligible_evidence(
     tmp_path: Path,
 ) -> None:
-    writer = StageDReceiptLedger.create(
-        tmp_path / "ledger",
-        binding=_binding(),
-        master_seed=MASTER_SEED,
-    )
-    parent = PolicyEventAddress(0, "root", 0, 0)
-    producer = StageDSourceRolloutProducer(
-        ledger=writer,
-        group_id="group-1",
-        rollout_id="rollout-strict",
-        child_parent_event=parent,
-        child_parent_tool_call_slot=0,
-        root_policy_turn_count=2,
-        base_model_manifest_sha256=_sha256(b"base"),
-    )
-    root = _tool_action(81)
-    producer.intercept_policy_call(
-        event_address=parent,
-        action_key=root.key,
-        node_kind="root",
-        target_id=None,
-        branch_selected=False,
-        forward_once=lambda _key: root,
-    )
+    writer, parent, producer = _strict_producer(tmp_path / "ledger")
     child_address = PolicyEventAddress(
         1,
         derive_child_lineage(SpawnScope(1, "root", 0, 0, 0), spawn_ordinal=0),
@@ -2073,15 +1983,7 @@ def test_completed_one_child_topology_is_durable_ineligible_evidence(
         failure_reward=-1.0,
     )
     producer.complete_policy_call(pending, action=child)
-    returning_root = _prepared_action(84)
-    producer.intercept_policy_call(
-        event_address=PolicyEventAddress(0, "root", 1, 1),
-        action_key=returning_root.key,
-        node_kind="root",
-        target_id=None,
-        branch_selected=False,
-        forward_once=lambda _key: returning_root,
-    )
+    _intercept_returning_root(producer, _prepared_action(84))
 
     source = producer.finalize_episode(_one_child_episode())
 
@@ -2121,9 +2023,7 @@ def test_completed_one_child_topology_is_durable_ineligible_evidence(
         SourceRollout.verify_bytes(
             source.to_bytes(),
             verifier=writer,
-            evidence_loader=lambda digest: (
-                tmp_path / "ledger" / "evidence" / digest
-            ).read_bytes(),
+            evidence_loader=lambda digest: (tmp_path / "ledger" / "evidence" / digest).read_bytes(),
             render_prompt=_unexpected_prompt_render,
             validate_action=_validate_prepared_action,
         )
@@ -2171,31 +2071,7 @@ def test_completed_one_child_topology_is_durable_ineligible_evidence(
 def test_two_turn_child_finalizes_and_freezes_excluded_commitments(
     tmp_path: Path,
 ) -> None:
-    writer = StageDReceiptLedger.create(
-        tmp_path / "ledger",
-        binding=_binding(),
-        master_seed=MASTER_SEED,
-    )
-    parent = PolicyEventAddress(0, "root", 0, 0)
-    producer = StageDSourceRolloutProducer(
-        ledger=writer,
-        group_id="group-1",
-        rollout_id="rollout-strict",
-        child_parent_event=parent,
-        child_parent_tool_call_slot=0,
-        root_policy_turn_count=2,
-        maximum_eligible_root_policy_turn_count=4,
-        base_model_manifest_sha256=_sha256(b"base"),
-    )
-    root = _tool_action(81)
-    producer.intercept_policy_call(
-        event_address=parent,
-        action_key=root.key,
-        node_kind="root",
-        target_id=None,
-        branch_selected=False,
-        forward_once=lambda _key: root,
-    )
+    writer, parent, producer = _strict_producer(tmp_path / "ledger")
     child_targets: dict[int, str] = {}
     child_addresses: dict[int, PolicyEventAddress] = {}
     for spawn, seed in ((1, 83), (0, 82)):
@@ -2254,15 +2130,7 @@ def test_two_turn_child_finalizes_and_freezes_excluded_commitments(
         branch_selected=False,
         forward_once=lambda _key: continuation,
     )
-    returning_root = _tool_action(84)
-    producer.intercept_policy_call(
-        event_address=PolicyEventAddress(0, "root", 1, 1),
-        action_key=returning_root.key,
-        node_kind="root",
-        target_id=None,
-        branch_selected=False,
-        forward_once=lambda _key: returning_root,
-    )
+    _intercept_returning_root(producer, _tool_action(84))
     later_parent = PolicyEventAddress(0, "root", 1, 1)
     later_target = structural_child_target_id(
         later_parent,
@@ -2298,9 +2166,7 @@ def test_two_turn_child_finalizes_and_freezes_excluded_commitments(
     assert len(source.child_target_roster) == 3
     assert len(set(source.child_target_roster)) == 3
     continuation_decision = next(
-        decision
-        for decision in source.decisions
-        if decision.event_address == continuation_address
+        decision for decision in source.decisions if decision.event_address == continuation_address
     )
     assert continuation_decision.target_id == child_targets[0]
     assert continuation_decision.target_ordinal == 0
@@ -2313,9 +2179,7 @@ def test_two_turn_child_finalizes_and_freezes_excluded_commitments(
     assert later_decision.provenance.branch_selected is False
     malformed = json.loads(_two_turn_child_episode())
     for call_index in (2, 3):
-        malformed["traces"][0]["calls"][call_index]["rlm"][
-            "parent_session_id"
-        ] = "bogus-session"
+        malformed["traces"][0]["calls"][call_index]["rlm"]["parent_session_id"] = "bogus-session"
     with pytest.raises(ValueError, match="bind its causal parent event"):
         derive_source_trace(
             canonical_json(malformed),
@@ -2349,31 +2213,16 @@ def test_two_turn_child_finalizes_and_freezes_excluded_commitments(
 def test_later_parent_child_without_frozen_children_finalizes_ineligible(
     tmp_path: Path,
 ) -> None:
-    writer = StageDReceiptLedger.create(
-        tmp_path / "ledger",
-        binding=_binding(),
-        master_seed=MASTER_SEED,
+    writer, _, producer = _strict_producer(tmp_path / "ledger")
+    returning_root = _tool_action(84)
+    producer.intercept_policy_call(
+        event_address=PolicyEventAddress(0, "root", 1, 1),
+        action_key=returning_root.key,
+        node_kind="root",
+        target_id=None,
+        branch_selected=False,
+        forward_once=_forward_action(returning_root),
     )
-    parent = PolicyEventAddress(0, "root", 0, 0)
-    producer = StageDSourceRolloutProducer(
-        ledger=writer,
-        group_id="group-1",
-        rollout_id="rollout-strict",
-        child_parent_event=parent,
-        child_parent_tool_call_slot=0,
-        root_policy_turn_count=2,
-        maximum_eligible_root_policy_turn_count=4,
-        base_model_manifest_sha256=_sha256(b"base"),
-    )
-    for turn, action in ((0, _tool_action(81)), (1, _tool_action(84))):
-        producer.intercept_policy_call(
-            event_address=PolicyEventAddress(0, "root", turn, turn),
-            action_key=action.key,
-            node_kind="root",
-            target_id=None,
-            branch_selected=False,
-            forward_once=_forward_action(action),
-        )
     later_parent = PolicyEventAddress(0, "root", 1, 1)
     later_target = structural_child_target_id(
         later_parent,
@@ -2426,19 +2275,8 @@ def test_later_parent_child_without_frozen_children_finalizes_ineligible(
 
 
 def test_producer_refuses_finalization_while_request_is_in_flight(tmp_path: Path) -> None:
-    writer = StageDReceiptLedger.create(
-        tmp_path / "ledger",
-        binding=_binding(),
-        master_seed=MASTER_SEED,
-    )
-    producer = StageDSourceRolloutProducer(
-        ledger=writer,
-        group_id="group-1",
-        rollout_id="rollout-live",
-        child_target_roster=(_target_id(),),
-        allow_test_fixture_roster=True,
-        base_model_manifest_sha256=_sha256(b"base"),
-    )
+    writer = _fixture_ledger(tmp_path / "ledger")
+    producer = _fixture_producer(writer)
     action = _action(71)
     producer.reserve_policy_call(
         event_address=PolicyEventAddress(0, "root", 0, 0),
@@ -2464,65 +2302,33 @@ def test_exact_live_batch_authorization_is_idempotent_and_sealed(
     collection_receipt_sha256 = writer.put_evidence(b"collection receipt")
     support_report_sha256 = writer.put_evidence(b"support report")
     writer._record_verified_support_gate(support_report_sha256)
-    authorization = writer.authorize_stage_d_training_batch(
-        arm="stock",
-        training_batch_identity="8" * 64,
-        sealed_batch_sha256=sealed_batch_sha256,
-        objective_sha256="9" * 64,
-        objective_authorization_sha256=objective_authorization_sha256,
-        collection_plan_sha256=collection_plan_sha256,
-        collection_receipt_sha256=collection_receipt_sha256,
-        support_report_sha256=support_report_sha256,
-        source_sha256s=(source.source_sha256,),
-        branch_artifact_sha256s=(),
-        consumer_id="stage-d-prime:stock:step:1",
-    )
-    duplicate = writer.authorize_stage_d_training_batch(
-        arm="stock",
-        training_batch_identity="8" * 64,
-        sealed_batch_sha256=sealed_batch_sha256,
-        objective_sha256="9" * 64,
-        objective_authorization_sha256=objective_authorization_sha256,
-        collection_plan_sha256=collection_plan_sha256,
-        collection_receipt_sha256=collection_receipt_sha256,
-        support_report_sha256=support_report_sha256,
-        source_sha256s=(source.source_sha256,),
-        branch_artifact_sha256s=(),
-        consumer_id="stage-d-prime:stock:step:1",
-    )
+
+    def authorize(
+        ledger: StageDReceiptLedger,
+        consumer_id: str = "stage-d-prime:stock:step:1",
+    ) -> StageDTrainingBatchAuthorization:
+        return ledger.authorize_stage_d_training_batch(
+            arm="stock",
+            training_batch_identity="8" * 64,
+            sealed_batch_sha256=sealed_batch_sha256,
+            objective_sha256="9" * 64,
+            objective_authorization_sha256=objective_authorization_sha256,
+            collection_plan_sha256=collection_plan_sha256,
+            collection_receipt_sha256=collection_receipt_sha256,
+            support_report_sha256=support_report_sha256,
+            source_sha256s=(source.source_sha256,),
+            branch_artifact_sha256s=(),
+            consumer_id=consumer_id,
+        )
+
+    authorization = authorize(writer)
+    duplicate = authorize(writer)
     assert duplicate.receipt == authorization.receipt
     writer.close()
     writer = StageDReceiptLedger(root, master_seed=MASTER_SEED)
-    assert (
-        writer.authorize_stage_d_training_batch(
-            arm="stock",
-            training_batch_identity="8" * 64,
-            sealed_batch_sha256=sealed_batch_sha256,
-            objective_sha256="9" * 64,
-            objective_authorization_sha256=objective_authorization_sha256,
-            collection_plan_sha256=collection_plan_sha256,
-            collection_receipt_sha256=collection_receipt_sha256,
-            support_report_sha256=support_report_sha256,
-            source_sha256s=(source.source_sha256,),
-            branch_artifact_sha256s=(),
-            consumer_id="stage-d-prime:stock:step:1",
-        ).receipt
-        == authorization.receipt
-    )
+    assert authorize(writer).receipt == authorization.receipt
     with pytest.raises(LedgerError, match="different authorization"):
-        writer.authorize_stage_d_training_batch(
-            arm="stock",
-            training_batch_identity="8" * 64,
-            sealed_batch_sha256=sealed_batch_sha256,
-            objective_sha256="9" * 64,
-            objective_authorization_sha256=objective_authorization_sha256,
-            collection_plan_sha256=collection_plan_sha256,
-            collection_receipt_sha256=collection_receipt_sha256,
-            support_report_sha256=support_report_sha256,
-            source_sha256s=(source.source_sha256,),
-            branch_artifact_sha256s=(),
-            consumer_id="different-consumer",
-        )
+        authorize(writer, "different-consumer")
     seal = writer.seal()
     assert (
         SealedReceiptVerifier(root, seal)(
@@ -2535,19 +2341,8 @@ def test_exact_live_batch_authorization_is_idempotent_and_sealed(
 
 
 def test_selected_intercept_is_the_same_recorded_action_call(tmp_path: Path) -> None:
-    writer = StageDReceiptLedger.create(
-        tmp_path / "ledger",
-        binding=_binding(),
-        master_seed=MASTER_SEED,
-    )
-    producer = StageDSourceRolloutProducer(
-        ledger=writer,
-        group_id="group-1",
-        rollout_id="rollout-live",
-        child_target_roster=(_target_id(),),
-        allow_test_fixture_roster=True,
-        base_model_manifest_sha256=_sha256(b"base"),
-    )
+    writer = _fixture_ledger(tmp_path / "ledger")
+    producer = _fixture_producer(writer)
     action = _action(72)
     snapshot = writer.put_evidence(b"pre-action child snapshot")
     recorded = writer.commit_pre_action_and_reserve(
@@ -3249,30 +3044,9 @@ def test_campaign_transaction_reconstructs_after_single_terminal_seal(
         "contained-empty",
         tuple(sorted(cleanup_receipts)),
     )
-    seal_bytes = handoff.finalize_terminal(
-        terminal_status="completed",
-        terminal_phase="evaluation",
-        termination_code="success",
-        decisions=decisions,
-        decision_evidence={
-            _sha256(economic_metrics): economic_metrics,
-            _sha256(credit_metrics): credit_metrics,
-        },
-        billing=billing,
-        billing_receipts={
-            _sha256(wallet_before): wallet_before,
-            _sha256(wallet_after): wallet_after,
-            _sha256(provider_receipt): provider_receipt,
-        },
-        cleanup=cleanup,
-        cleanup_receipts=cleanup_receipts,
-        evaluation_ledger=evaluation_ledger,
-        evaluation_completion_bytes=evaluation_completion.to_bytes(),
-    )
-    assert StageDTerminalSeal.from_bytes(seal_bytes).terminal_status == "completed"
-    assert handoff.inspect().sealed
-    assert (
-        handoff.finalize_terminal(
+
+    def finalize_terminal() -> bytes:
+        return handoff.finalize_terminal(
             terminal_status="completed",
             terminal_phase="evaluation",
             termination_code="success",
@@ -3292,8 +3066,11 @@ def test_campaign_transaction_reconstructs_after_single_terminal_seal(
             evaluation_ledger=evaluation_ledger,
             evaluation_completion_bytes=evaluation_completion.to_bytes(),
         )
-        == seal_bytes
-    )
+
+    seal_bytes = finalize_terminal()
+    assert StageDTerminalSeal.from_bytes(seal_bytes).terminal_status == "completed"
+    assert handoff.inspect().sealed
+    assert finalize_terminal() == seal_bytes
     assert tuple(arm for arm, _ in bundle.prime_rollout_paths) == arms
     assert (
         StageDCampaignStore(bundle.root).persist(

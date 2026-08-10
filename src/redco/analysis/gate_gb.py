@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import tempfile
 import time
 from dataclasses import asdict, dataclass
@@ -15,8 +16,6 @@ from redco.contracts import SeedNamespace, canonical_json
 from redco.env.artifacts import ArtifactStore
 from redco.env.commands import JsonValue
 from redco.env.policy_cache import CachedPolicyAction, PolicyActionCache, PolicyCallKey
-from redco.env.snapshots import SnapshotStore
-from redco.env.trace_store import TraceStore
 from redco.env.tracer import EdgeKind, EventEdge, EventGraph, EventNode, EventNodeKind
 
 
@@ -126,13 +125,26 @@ def _audit_six_edge_closure() -> bool:
 
 def _audit_snapshot_roundtrip() -> bool:
     with tempfile.TemporaryDirectory() as directory:
-        store = SnapshotStore(ArtifactStore(Path(directory)))
+        store = ArtifactStore(Path(directory))
         original: dict[str, JsonValue] = {
             "nested": {"answer": 42, "valid": True},
             "sequence": [1, "two", None],
         }
-        snapshot = store.capture(checkpoint_id="theta-gb", state=original)
-        return canonical_json(store.restore(snapshot)) == canonical_json(original)
+        state_ref = store.put_json(original)
+        return store.get_bytes(state_ref) == canonical_json(original)
+
+
+def _write_gate_report(root: Path, name: str, payload: object) -> Path:
+    resolved_root = root.resolve()
+    resolved_root.mkdir(parents=True, exist_ok=True)
+    data = canonical_json(payload) + b"\n"
+    if not name or Path(name).name != name:
+        raise ValueError("trace file name must be a single path component")
+    path = resolved_root / name
+    temporary = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
+    temporary.write_bytes(data)
+    os.replace(temporary, path)
+    return path
 
 
 def _audit_policy_cache() -> tuple[bool, bool, bool]:
@@ -198,8 +210,11 @@ def main() -> int:
         interventions_per_program=args.interventions,
         events=args.events,
     )
-    store = TraceStore(args.output.parent)
-    path = store.write_json(args.output.name, report.signed_dict())
+    path = _write_gate_report(
+        args.output.parent,
+        args.output.name,
+        report.signed_dict(),
+    )
     print(json.dumps(report.signed_dict(), indent=2, sort_keys=True))
     print(f"wrote {path}")
     return 0 if report.passed_cpu_gate else 1

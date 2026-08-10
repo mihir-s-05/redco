@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -24,18 +25,58 @@ from redco.analysis.rlm_episode_replay import (
 from redco.analysis.stage_d_child_consumers import analyze
 from redco.integrations.signed_subprocess import sign_payload
 
+REPOSITORY_ROOT = Path(__file__).parents[1]
+REPLAY_CASSETTE = Path("tests/fixtures/stage_d_rlm_replay_cassette_v1.json")
+REPLAY_REPORT = Path("reports/stage-d-rlm-episode-replay-cpu-v1.json")
+REPLAY_CASSETTE_SHA256 = "3ba7d6fa12dbd687760311cc8c80c601f756e582681afdc1db1f47559665412c"
+REPLAY_REPORT_SHA256 = "836b2a8a71db479efc4937dc64fe82b38744e9c4c2a475b562f8951c581eacc5"
+REPLAY_PAYLOAD_SHA256 = "f06c0cef52294ee811edb4e78be97f9025e4a634ee93e77cd6e2df9e187d8cfc"
 
-def _headers(invocation_id: str) -> dict[str, str]:
+
+def _root_headers(*, turn: int = 0, session_id: str = "root") -> dict[str, str]:
     return {
-        "X-RLM-Depth": "1",
-        "X-RLM-Turn": "0",
+        "X-RLM-Depth": "0",
+        "X-RLM-Turn": str(turn),
         "X-RLM-Call-Kind": "policy",
-        "X-RLM-Session-ID": f"session-{invocation_id}",
-        "X-RLM-Parent-Session-ID": "root-session",
-        "X-RLM-Parent-Turn": "3",
-        "X-RLM-Parent-Tool-Call-ID": "call_0",
+        "X-RLM-Session-ID": session_id,
+    }
+
+
+def _child_headers(
+    *,
+    depth: int = 1,
+    turn: int = 0,
+    session_id: str = "child",
+    parent_session_id: str = "root",
+    parent_turn: int = 0,
+    parent_tool_call_id: str = "call_0",
+    invocation_id: str = "shard-0",
+) -> dict[str, str]:
+    return {
+        "X-RLM-Depth": str(depth),
+        "X-RLM-Turn": str(turn),
+        "X-RLM-Call-Kind": "policy",
+        "X-RLM-Session-ID": session_id,
+        "X-RLM-Parent-Session-ID": parent_session_id,
+        "X-RLM-Parent-Turn": str(parent_turn),
+        "X-RLM-Parent-Tool-Call-ID": parent_tool_call_id,
         "X-RLM-Invocation-ID": invocation_id,
     }
+
+
+def _event(
+    address: RLMEventAddress,
+    content: str,
+    request: Mapping[str, object] | None = None,
+) -> ScriptedEvent:
+    return ScriptedEvent(
+        address=address,
+        message={"role": "assistant", "content": content},
+        finish_reason="stop",
+        prompt_tokens=1,
+        completion_tokens=1,
+        expected_request_sha256=(None if request is None else _request_projection_sha256(request)),
+    )
 
 
 def test_recursive_address_requires_explicit_invocation_identity() -> None:
@@ -56,8 +97,8 @@ def test_request_headers_require_explicit_call_kind() -> None:
 
 def test_router_uses_invocation_id_not_duplicate_answer_text() -> None:
     child_events = tuple(
-        ScriptedEvent(
-            address=RLMEventAddress(
+        _event(
+            RLMEventAddress(
                 depth=1,
                 turn=0,
                 call_kind="policy",
@@ -66,34 +107,38 @@ def test_router_uses_invocation_id_not_duplicate_answer_text() -> None:
                 parent_tool_call_id="call_0",
                 invocation_id=invocation_id,
             ),
-            message={"role": "assistant", "content": "duplicate"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
+            "duplicate",
         )
         for invocation_id in ("shard-0", "shard-1")
     )
-    root = ScriptedEvent(
-        address=RLMEventAddress(depth=0, turn=0, call_kind="policy"),
-        message={"role": "assistant", "content": "root"},
-        finish_reason="stop",
-        prompt_tokens=1,
-        completion_tokens=1,
+    root = _event(
+        RLMEventAddress(depth=0, turn=0, call_kind="policy"),
+        "root",
     )
     events = (root, *child_events)
     router = ScriptedCompletionRouter(events)
     router.respond(
-        headers={
-            "X-RLM-Depth": "0",
-            "X-RLM-Turn": "0",
-            "X-RLM-Call-Kind": "policy",
-            "X-RLM-Session-ID": "root-session",
-        },
+        headers=_root_headers(session_id="root-session"),
         request={"model": "m", "messages": []},
     )
 
-    first = router.respond(headers=_headers("shard-1"), request={"model": "m", "messages": []})
-    second = router.respond(headers=_headers("shard-0"), request={"model": "m", "messages": []})
+    first = router.respond(
+        headers=_child_headers(
+            session_id="session-shard-1",
+            parent_session_id="root-session",
+            parent_turn=3,
+            invocation_id="shard-1",
+        ),
+        request={"model": "m", "messages": []},
+    )
+    second = router.respond(
+        headers=_child_headers(
+            session_id="session-shard-0",
+            parent_session_id="root-session",
+            parent_turn=3,
+        ),
+        request={"model": "m", "messages": []},
+    )
 
     assert first["choices"][0]["message"]["content"] == "duplicate"
     assert second["choices"][0]["message"]["content"] == "duplicate"
@@ -101,40 +146,24 @@ def test_router_uses_invocation_id_not_duplicate_answer_text() -> None:
 
 
 def test_router_rejects_changed_retry_body() -> None:
-    event = ScriptedEvent(
-        address=RLMEventAddress(depth=0, turn=0, call_kind="policy"),
-        message={"role": "assistant", "content": "done"},
-        finish_reason="stop",
-        prompt_tokens=1,
-        completion_tokens=1,
+    event = _event(
+        RLMEventAddress(depth=0, turn=0, call_kind="policy"),
+        "done",
     )
     router = ScriptedCompletionRouter((event,))
-    headers = {
-        "X-RLM-Depth": "0",
-        "X-RLM-Turn": "0",
-        "X-RLM-Call-Kind": "policy",
-        "X-RLM-Session-ID": "root",
-    }
+    headers = _root_headers()
     router.respond(headers=headers, request={"model": "one", "messages": []})
     with pytest.raises(EpisodeReplayIneligibility, match="different retry"):
         router.respond(headers=headers, request={"model": "two", "messages": []})
 
 
 def test_router_rejects_an_identical_duplicate_request() -> None:
-    event = ScriptedEvent(
-        address=RLMEventAddress(depth=0, turn=0, call_kind="policy"),
-        message={"role": "assistant", "content": "done"},
-        finish_reason="stop",
-        prompt_tokens=1,
-        completion_tokens=1,
+    event = _event(
+        RLMEventAddress(depth=0, turn=0, call_kind="policy"),
+        "done",
     )
     router = ScriptedCompletionRouter((event,))
-    headers = {
-        "X-RLM-Depth": "0",
-        "X-RLM-Turn": "0",
-        "X-RLM-Call-Kind": "policy",
-        "X-RLM-Session-ID": "root",
-    }
+    headers = _root_headers()
     request = {"model": "one", "messages": []}
     router.respond(headers=headers, request=request)
     with pytest.raises(EpisodeReplayIneligibility, match="more than once"):
@@ -276,26 +305,18 @@ def test_request_key_binds_policy_relevant_decoding_fields(field: str, changed: 
 
 
 def test_router_rejects_a_second_root_session() -> None:
-    event = ScriptedEvent(
-        address=RLMEventAddress(depth=0, turn=0, call_kind="policy"),
-        message={"role": "assistant", "content": "done"},
-        finish_reason="stop",
-        prompt_tokens=1,
-        completion_tokens=1,
+    event = _event(
+        RLMEventAddress(depth=0, turn=0, call_kind="policy"),
+        "done",
     )
     router = ScriptedCompletionRouter((event,))
-    base = {
-        "X-RLM-Depth": "0",
-        "X-RLM-Turn": "0",
-        "X-RLM-Call-Kind": "policy",
-    }
     router.respond(
-        headers={**base, "X-RLM-Session-ID": "root-one"},
+        headers=_root_headers(session_id="root-one"),
         request={"model": "one", "messages": []},
     )
     with pytest.raises(EpisodeReplayIneligibility, match="multiple root sessions"):
         router.respond(
-            headers={**base, "X-RLM-Session-ID": "root-two"},
+            headers=_root_headers(session_id="root-two"),
             request={"model": "one", "messages": []},
         )
 
@@ -304,8 +325,8 @@ def test_child_session_scope_includes_parent_event() -> None:
     events = []
     for parent_turn, tool_call_id in ((0, "call_0"), (1, "call_1")):
         events.append(
-            ScriptedEvent(
-                address=RLMEventAddress(
+            _event(
+                RLMEventAddress(
                     depth=1,
                     turn=0,
                     call_kind="policy",
@@ -314,44 +335,30 @@ def test_child_session_scope_includes_parent_event() -> None:
                     parent_tool_call_id=tool_call_id,
                     invocation_id="midpoint-shard-0",
                 ),
-                message={"role": "assistant", "content": "child"},
-                finish_reason="stop",
-                prompt_tokens=1,
-                completion_tokens=1,
+                "child",
             )
         )
     roots = tuple(
-        ScriptedEvent(
-            address=RLMEventAddress(depth=0, turn=turn, call_kind="policy"),
-            message={"role": "assistant", "content": "root"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
+        _event(
+            RLMEventAddress(depth=0, turn=turn, call_kind="policy"),
+            "root",
         )
         for turn in (0, 1)
     )
     router = ScriptedCompletionRouter((*roots, *events))
-    root_headers = {
-        "X-RLM-Depth": "0",
-        "X-RLM-Call-Kind": "policy",
-        "X-RLM-Session-ID": "root-session",
-    }
     for turn in (0, 1):
         router.respond(
-            headers={**root_headers, "X-RLM-Turn": str(turn)},
+            headers=_root_headers(turn=turn, session_id="root-session"),
             request={"model": "m", "messages": []},
         )
         router.respond(
-            headers={
-                "X-RLM-Depth": "1",
-                "X-RLM-Turn": "0",
-                "X-RLM-Call-Kind": "policy",
-                "X-RLM-Session-ID": f"child-{turn}",
-                "X-RLM-Parent-Session-ID": "root-session",
-                "X-RLM-Parent-Turn": str(turn),
-                "X-RLM-Parent-Tool-Call-ID": f"call_{turn}",
-                "X-RLM-Invocation-ID": "midpoint-shard-0",
-            },
+            headers=_child_headers(
+                session_id=f"child-{turn}",
+                parent_session_id="root-session",
+                parent_turn=turn,
+                parent_tool_call_id=f"call_{turn}",
+                invocation_id="midpoint-shard-0",
+            ),
             request={"model": "m", "messages": []},
         )
     assert router.audit()["complete"] is True
@@ -373,9 +380,18 @@ def test_child_injection_changes_only_the_structural_target() -> None:
 
 
 def test_golden_cassette_covers_retry_hidden_state_and_reverse_completion() -> None:
-    root = Path(__file__).parents[1]
-    events = load_scripted_events(str(root / "tests/fixtures/stage_d_rlm_replay_cassette_v1.json"))
+    cassette_path = REPOSITORY_ROOT / REPLAY_CASSETTE
+    cassette_sha256 = hashlib.sha256(cassette_path.read_bytes()).hexdigest()
+    events = load_scripted_events(str(cassette_path))
     addresses = {event.address.key() for event in events}
+
+    report_bytes = (REPOSITORY_ROOT / REPLAY_REPORT).read_bytes()
+    report = json.loads(report_bytes)
+    assert cassette_sha256 == REPLAY_CASSETTE_SHA256
+    assert hashlib.sha256(report_bytes).hexdigest() == REPLAY_REPORT_SHA256
+    assert report["signed_payload_sha256"] == REPLAY_PAYLOAD_SHA256
+    assert report["cassette_sha256"] == cassette_sha256
+    assert report["source_sha256"][REPLAY_CASSETTE.as_posix()] == cassette_sha256
 
     assert "depth:0:root:policy:2" in addresses
     assert "depth:1:parent:root:child:0:call_0:shard-0:policy:0" in addresses
@@ -462,8 +478,8 @@ def test_trace_cassette_is_hash_bound_and_requires_signed_precommit(
 
 
 def test_committed_injection_uses_candidate_rank_and_address() -> None:
-    event = ScriptedEvent(
-        address=RLMEventAddress(
+    event = _event(
+        RLMEventAddress(
             depth=1,
             turn=0,
             call_kind="policy",
@@ -472,10 +488,7 @@ def test_committed_injection_uses_candidate_rank_and_address() -> None:
             parent_tool_call_id="call_0",
             invocation_id="shard-0",
         ),
-        message={"role": "assistant", "content": "before"},
-        finish_reason="stop",
-        prompt_tokens=1,
-        completion_tokens=1,
+        "before",
     )
     precommit = sign_payload(
         {
@@ -514,16 +527,13 @@ def test_counterfactual_router_resamples_changed_downstream_request() -> None:
         ],
     }
     events = (
-        ScriptedEvent(
-            address=RLMEventAddress(depth=0, turn=0, call_kind="policy"),
-            message={"role": "assistant", "content": "root-0"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-            expected_request_sha256=_request_projection_sha256(root_0_request),
+        _event(
+            RLMEventAddress(depth=0, turn=0, call_kind="policy"),
+            "root-0",
+            root_0_request,
         ),
-        ScriptedEvent(
-            address=RLMEventAddress(
+        _event(
+            RLMEventAddress(
                 depth=1,
                 turn=0,
                 call_kind="policy",
@@ -532,19 +542,13 @@ def test_counterfactual_router_resamples_changed_downstream_request() -> None:
                 parent_tool_call_id="call_0",
                 invocation_id="shard-0",
             ),
-            message={"role": "assistant", "content": "old"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-            expected_request_sha256=_request_projection_sha256(child_request),
+            "old",
+            child_request,
         ),
-        ScriptedEvent(
-            address=RLMEventAddress(depth=0, turn=1, call_kind="policy"),
-            message={"role": "assistant", "content": "old-final"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-            expected_request_sha256=_request_projection_sha256(recorded_root_1),
+        _event(
+            RLMEventAddress(depth=0, turn=1, call_kind="policy"),
+            "old-final",
+            recorded_root_1,
         ),
     )
     forwarded: list[tuple[RLMEventAddress, int]] = []
@@ -576,23 +580,9 @@ def test_counterfactual_router_resamples_changed_downstream_request() -> None:
         target_id="target-one",
         generator=generate,
     )
-    root_headers = {
-        "X-RLM-Depth": "0",
-        "X-RLM-Call-Kind": "policy",
-        "X-RLM-Session-ID": "root",
-    }
-    router.respond(headers={**root_headers, "X-RLM-Turn": "0"}, request=root_0_request)
+    router.respond(headers=_root_headers(), request=root_0_request)
     child_response = router.respond(
-        headers={
-            "X-RLM-Depth": "1",
-            "X-RLM-Turn": "0",
-            "X-RLM-Call-Kind": "policy",
-            "X-RLM-Session-ID": "child",
-            "X-RLM-Parent-Session-ID": "root",
-            "X-RLM-Parent-Turn": "0",
-            "X-RLM-Parent-Tool-Call-ID": "call_0",
-            "X-RLM-Invocation-ID": "shard-0",
-        },
+        headers=_child_headers(),
         request=child_request,
     )
     changed_root_1 = {
@@ -602,7 +592,7 @@ def test_counterfactual_router_resamples_changed_downstream_request() -> None:
             {"role": "tool", "tool_call_id": "call_0", "content": "new"},
         ],
     }
-    final = router.respond(headers={**root_headers, "X-RLM-Turn": "1"}, request=changed_root_1)
+    final = router.respond(headers=_root_headers(turn=1), request=changed_root_1)
     assert child_response["choices"][0]["message"]["content"] == "new"
     assert final["choices"][0]["message"]["content"] == "fresh-final"
     assert forwarded[0][0].turn == 1
@@ -620,25 +610,19 @@ def test_terminal_intervention_is_valid_without_downstream_resampling() -> None:
         parent_tool_call_id="call_0",
         invocation_id="shard-0",
     )
-    event = ScriptedEvent(
-        address=target,
-        message={"role": "assistant", "content": "old"},
-        finish_reason="stop",
-        prompt_tokens=1,
-        completion_tokens=1,
-        expected_request_sha256=_request_projection_sha256(request),
+    event = _event(
+        target,
+        "old",
+        request,
     )
     root_request = {
         "model": "m",
         "messages": [{"role": "user", "content": "root"}],
     }
-    root_event = ScriptedEvent(
-        address=RLMEventAddress(depth=0, turn=0, call_kind="policy"),
-        message={"role": "assistant", "content": "call child"},
-        finish_reason="stop",
-        prompt_tokens=1,
-        completion_tokens=1,
-        expected_request_sha256=_request_projection_sha256(root_request),
+    root_event = _event(
+        RLMEventAddress(depth=0, turn=0, call_kind="policy"),
+        "call child",
+        root_request,
     )
 
     def no_generation(
@@ -660,25 +644,11 @@ def test_terminal_intervention_is_valid_without_downstream_resampling() -> None:
         generator=no_generation,
     )
     router.respond(
-        headers={
-            "X-RLM-Depth": "0",
-            "X-RLM-Turn": "0",
-            "X-RLM-Call-Kind": "policy",
-            "X-RLM-Session-ID": "root",
-        },
+        headers=_root_headers(),
         request=root_request,
     )
     response = router.respond(
-        headers={
-            "X-RLM-Depth": "1",
-            "X-RLM-Turn": "0",
-            "X-RLM-Call-Kind": "policy",
-            "X-RLM-Session-ID": "child",
-            "X-RLM-Parent-Session-ID": "root",
-            "X-RLM-Parent-Turn": "0",
-            "X-RLM-Parent-Tool-Call-ID": "call_0",
-            "X-RLM-Invocation-ID": "shard-0",
-        },
+        headers=_child_headers(),
         request=request,
     )
     assert response["choices"][0]["message"]["content"] == "new"
@@ -712,29 +682,20 @@ def test_duplicate_target_action_still_regenerates_causal_continuation() -> None
         invocation_id="shard-0",
     )
     events = (
-        ScriptedEvent(
-            address=RLMEventAddress(depth=0, turn=0, call_kind="policy"),
-            message={"role": "assistant", "content": "call child"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-            expected_request_sha256=_request_projection_sha256(root_0_request),
+        _event(
+            RLMEventAddress(depth=0, turn=0, call_kind="policy"),
+            "call child",
+            root_0_request,
         ),
-        ScriptedEvent(
-            address=target,
-            message={"role": "assistant", "content": "same"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-            expected_request_sha256=_request_projection_sha256(child_request),
+        _event(
+            target,
+            "same",
+            child_request,
         ),
-        ScriptedEvent(
-            address=RLMEventAddress(depth=0, turn=1, call_kind="policy"),
-            message={"role": "assistant", "content": "recorded"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-            expected_request_sha256=_request_projection_sha256(root_1_request),
+        _event(
+            RLMEventAddress(depth=0, turn=1, call_kind="policy"),
+            "recorded",
+            root_1_request,
         ),
     )
     generated: list[int] = []
@@ -765,26 +726,12 @@ def test_duplicate_target_action_still_regenerates_causal_continuation() -> None
         target_id="target",
         generator=generate,
     )
-    root_headers = {
-        "X-RLM-Depth": "0",
-        "X-RLM-Call-Kind": "policy",
-        "X-RLM-Session-ID": "root",
-    }
-    router.respond(headers={**root_headers, "X-RLM-Turn": "0"}, request=root_0_request)
+    router.respond(headers=_root_headers(), request=root_0_request)
     router.respond(
-        headers={
-            "X-RLM-Depth": "1",
-            "X-RLM-Turn": "0",
-            "X-RLM-Call-Kind": "policy",
-            "X-RLM-Session-ID": "child",
-            "X-RLM-Parent-Session-ID": "root",
-            "X-RLM-Parent-Turn": "0",
-            "X-RLM-Parent-Tool-Call-ID": "call_0",
-            "X-RLM-Invocation-ID": "shard-0",
-        },
+        headers=_child_headers(),
         request=child_request,
     )
-    final = router.respond(headers={**root_headers, "X-RLM-Turn": "1"}, request=root_1_request)
+    final = router.respond(headers=_root_headers(turn=1), request=root_1_request)
     assert final["choices"][0]["message"]["content"] == "fresh"
     assert len(generated) == 1
     assert router.audit()["resampled_policy_calls"] == 1
@@ -817,29 +764,20 @@ def _session_taint_router(
         invocation_id="target",
     )
     events = (
-        ScriptedEvent(
-            address=RLMEventAddress(depth=0, turn=0, call_kind="policy"),
-            message={"role": "assistant", "content": "call children"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-            expected_request_sha256=_request_projection_sha256(root_request),
+        _event(
+            RLMEventAddress(depth=0, turn=0, call_kind="policy"),
+            "call children",
+            root_request,
         ),
-        ScriptedEvent(
-            address=target,
-            message={"role": "assistant", "content": "same"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-            expected_request_sha256=_request_projection_sha256(target_request),
+        _event(
+            target,
+            "same",
+            target_request,
         ),
-        ScriptedEvent(
-            address=post_address,
-            message={"role": "assistant", "content": "recorded-post"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-            expected_request_sha256=_request_projection_sha256(post_request),
+        _event(
+            post_address,
+            "recorded-post",
+            post_request,
         ),
     )
     generated: list[RLMEventAddress] = []
@@ -871,25 +809,15 @@ def _session_taint_router(
         generator=generate,
     )
     router.respond(
-        headers={
-            "X-RLM-Depth": "0",
-            "X-RLM-Turn": "0",
-            "X-RLM-Call-Kind": "policy",
-            "X-RLM-Session-ID": "root",
-        },
+        headers=_root_headers(),
         request=root_request,
     )
     router.respond(
-        headers={
-            "X-RLM-Depth": "1",
-            "X-RLM-Turn": "0",
-            "X-RLM-Call-Kind": "policy",
-            "X-RLM-Session-ID": "target-child",
-            "X-RLM-Parent-Session-ID": "root",
-            "X-RLM-Parent-Turn": "0",
-            "X-RLM-Parent-Tool-Call-ID": "call-target",
-            "X-RLM-Invocation-ID": "target",
-        },
+        headers=_child_headers(
+            session_id="target-child",
+            parent_tool_call_id="call-target",
+            invocation_id="target",
+        ),
         request=target_request,
     )
     return router, root_request, target_request, generated
@@ -911,16 +839,12 @@ def test_same_child_session_continuation_is_resampled_after_intervention() -> No
     )
     router, _, _, generated = _session_taint_router(post_address, post_request)
     response = router.respond(
-        headers={
-            "X-RLM-Depth": "1",
-            "X-RLM-Turn": "1",
-            "X-RLM-Call-Kind": "policy",
-            "X-RLM-Session-ID": "target-child",
-            "X-RLM-Parent-Session-ID": "root",
-            "X-RLM-Parent-Turn": "0",
-            "X-RLM-Parent-Tool-Call-ID": "call-target",
-            "X-RLM-Invocation-ID": "target",
-        },
+        headers=_child_headers(
+            turn=1,
+            session_id="target-child",
+            parent_tool_call_id="call-target",
+            invocation_id="target",
+        ),
         request=post_request,
     )
     assert response["choices"][0]["message"]["content"] == "fresh-post"
@@ -949,16 +873,13 @@ def test_grandchild_of_target_session_is_resampled_after_intervention() -> None:
     )
     router, _, _, generated = _session_taint_router(post_address, post_request)
     response = router.respond(
-        headers={
-            "X-RLM-Depth": "2",
-            "X-RLM-Turn": "0",
-            "X-RLM-Call-Kind": "policy",
-            "X-RLM-Session-ID": "grandchild",
-            "X-RLM-Parent-Session-ID": "target-child",
-            "X-RLM-Parent-Turn": "0",
-            "X-RLM-Parent-Tool-Call-ID": "grandchild-call",
-            "X-RLM-Invocation-ID": "grandchild",
-        },
+        headers=_child_headers(
+            depth=2,
+            session_id="grandchild",
+            parent_session_id="target-child",
+            parent_tool_call_id="grandchild-call",
+            invocation_id="grandchild",
+        ),
         request=post_request,
     )
     assert response["choices"][0]["message"]["content"] == "fresh-post"
@@ -981,16 +902,11 @@ def test_independent_sibling_session_remains_eligible_for_exact_reuse() -> None:
     )
     router, _, _, generated = _session_taint_router(post_address, post_request)
     response = router.respond(
-        headers={
-            "X-RLM-Depth": "1",
-            "X-RLM-Turn": "0",
-            "X-RLM-Call-Kind": "policy",
-            "X-RLM-Session-ID": "sibling-child",
-            "X-RLM-Parent-Session-ID": "root",
-            "X-RLM-Parent-Turn": "0",
-            "X-RLM-Parent-Tool-Call-ID": "call-sibling",
-            "X-RLM-Invocation-ID": "sibling",
-        },
+        headers=_child_headers(
+            session_id="sibling-child",
+            parent_tool_call_id="call-sibling",
+            invocation_id="sibling",
+        ),
         request=post_request,
     )
     assert response["choices"][0]["message"]["content"] == "recorded-post"
@@ -1032,24 +948,18 @@ def test_independent_sibling_later_turn_and_grandchild_remain_reusable() -> None
         invocation_id="sibling",
     )
     events = (
-        ScriptedEvent(
-            address=RLMEventAddress(depth=0, turn=0, call_kind="policy"),
-            message={"role": "assistant", "content": "root"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-            expected_request_sha256=_request_projection_sha256(root_request),
+        _event(
+            RLMEventAddress(depth=0, turn=0, call_kind="policy"),
+            "root",
+            root_request,
         ),
-        ScriptedEvent(
-            address=target,
-            message={"role": "assistant", "content": "target-old"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-            expected_request_sha256=_request_projection_sha256(target_request),
+        _event(
+            target,
+            "target-old",
+            target_request,
         ),
-        ScriptedEvent(
-            address=RLMEventAddress(
+        _event(
+            RLMEventAddress(
                 depth=1,
                 turn=0,
                 call_kind="policy",
@@ -1058,14 +968,11 @@ def test_independent_sibling_later_turn_and_grandchild_remain_reusable() -> None
                 parent_tool_call_id="call-sibling",
                 invocation_id="sibling",
             ),
-            message={"role": "assistant", "content": "sibling-zero-recorded"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-            expected_request_sha256=_request_projection_sha256(sibling_0_request),
+            "sibling-zero-recorded",
+            sibling_0_request,
         ),
-        ScriptedEvent(
-            address=RLMEventAddress(
+        _event(
+            RLMEventAddress(
                 depth=1,
                 turn=1,
                 call_kind="policy",
@@ -1074,14 +981,11 @@ def test_independent_sibling_later_turn_and_grandchild_remain_reusable() -> None
                 parent_tool_call_id="call-sibling",
                 invocation_id="sibling",
             ),
-            message={"role": "assistant", "content": "sibling-one-recorded"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-            expected_request_sha256=_request_projection_sha256(sibling_1_request),
+            "sibling-one-recorded",
+            sibling_1_request,
         ),
-        ScriptedEvent(
-            address=RLMEventAddress(
+        _event(
+            RLMEventAddress(
                 depth=2,
                 turn=0,
                 call_kind="policy",
@@ -1090,11 +994,8 @@ def test_independent_sibling_later_turn_and_grandchild_remain_reusable() -> None
                 parent_tool_call_id="call-nested",
                 invocation_id="nested",
             ),
-            message={"role": "assistant", "content": "grandchild-recorded"},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-            expected_request_sha256=_request_projection_sha256(grandchild_request),
+            "grandchild-recorded",
+            grandchild_request,
         ),
     )
 
@@ -1117,55 +1018,43 @@ def test_independent_sibling_later_turn_and_grandchild_remain_reusable() -> None
         generator=no_generation,
     )
     router.respond(
-        headers={
-            "X-RLM-Depth": "0",
-            "X-RLM-Turn": "0",
-            "X-RLM-Call-Kind": "policy",
-            "X-RLM-Session-ID": "root",
-        },
+        headers=_root_headers(),
         request=root_request,
     )
     router.respond(
-        headers={
-            "X-RLM-Depth": "1",
-            "X-RLM-Turn": "0",
-            "X-RLM-Call-Kind": "policy",
-            "X-RLM-Session-ID": "target-child",
-            "X-RLM-Parent-Session-ID": "root",
-            "X-RLM-Parent-Turn": "0",
-            "X-RLM-Parent-Tool-Call-ID": "call-target",
-            "X-RLM-Invocation-ID": "target",
-        },
+        headers=_child_headers(
+            session_id="target-child",
+            parent_tool_call_id="call-target",
+            invocation_id="target",
+        ),
         request=target_request,
     )
-    sibling_headers = {
-        "X-RLM-Depth": "1",
-        "X-RLM-Call-Kind": "policy",
-        "X-RLM-Session-ID": "sibling-child",
-        "X-RLM-Parent-Session-ID": "root",
-        "X-RLM-Parent-Turn": "0",
-        "X-RLM-Parent-Tool-Call-ID": "call-sibling",
-        "X-RLM-Invocation-ID": "sibling",
-    }
     sibling_0 = router.respond(
-        headers={**sibling_headers, "X-RLM-Turn": "0"},
+        headers=_child_headers(
+            session_id="sibling-child",
+            parent_tool_call_id="call-sibling",
+            invocation_id="sibling",
+        ),
         request=sibling_0_request,
     )
     sibling_1 = router.respond(
-        headers={**sibling_headers, "X-RLM-Turn": "1"},
+        headers=_child_headers(
+            turn=1,
+            session_id="sibling-child",
+            parent_tool_call_id="call-sibling",
+            invocation_id="sibling",
+        ),
         request=sibling_1_request,
     )
     grandchild = router.respond(
-        headers={
-            "X-RLM-Depth": "2",
-            "X-RLM-Turn": "0",
-            "X-RLM-Call-Kind": "policy",
-            "X-RLM-Session-ID": "sibling-grandchild",
-            "X-RLM-Parent-Session-ID": "sibling-child",
-            "X-RLM-Parent-Turn": "1",
-            "X-RLM-Parent-Tool-Call-ID": "call-nested",
-            "X-RLM-Invocation-ID": "nested",
-        },
+        headers=_child_headers(
+            depth=2,
+            session_id="sibling-grandchild",
+            parent_session_id="sibling-child",
+            parent_turn=1,
+            parent_tool_call_id="call-nested",
+            invocation_id="nested",
+        ),
         request=grandchild_request,
     )
     assert sibling_0["choices"][0]["message"]["content"] == "sibling-zero-recorded"
@@ -1202,15 +1091,6 @@ def test_nested_transport_keys_distinguish_identical_local_ids_by_lineage() -> N
     assert nested_a.key() != nested_b.key()
     assert nested_a.key().startswith("depth:2:")
 
-    def event(address: RLMEventAddress, content: str) -> ScriptedEvent:
-        return ScriptedEvent(
-            address=address,
-            message={"role": "assistant", "content": content},
-            finish_reason="stop",
-            prompt_tokens=1,
-            completion_tokens=1,
-        )
-
     parent_a = RLMEventAddress(
         depth=1,
         turn=0,
@@ -1231,11 +1111,11 @@ def test_nested_transport_keys_distinguish_identical_local_ids_by_lineage() -> N
     )
     router = ScriptedCompletionRouter(
         (
-            event(RLMEventAddress(depth=0, turn=0, call_kind="policy"), "root"),
-            event(parent_a, "parent-a"),
-            event(parent_b, "parent-b"),
-            event(nested_a, "nested-a"),
-            event(nested_b, "nested-b"),
+            _event(RLMEventAddress(depth=0, turn=0, call_kind="policy"), "root"),
+            _event(parent_a, "parent-a"),
+            _event(parent_b, "parent-b"),
+            _event(nested_a, "nested-a"),
+            _event(nested_b, "nested-b"),
         )
     )
     router.respond(

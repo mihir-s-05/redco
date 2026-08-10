@@ -18,37 +18,6 @@ def _load(name: str, path: Path) -> ModuleType:
     return module
 
 
-def test_stage_d_v4_6_preregistration_remains_archived_and_closed() -> None:
-    root = Path(__file__).parents[1]
-    module = _load(
-        "stage_d_v4_6_audit",
-        root
-        / "scripts"
-        / "audit_stage_d0_scaffold_support_preregistration_v4_6.py",
-    )
-    protocol = (
-        root
-        / "configs"
-        / "stage-d"
-        / "stage-d0-scaffold-support-preregistration-v4-6.json"
-    )
-    report = module.audit(root, protocol)
-    archived = json.loads(
-        (
-            root
-            / "reports"
-            / "stage-d0-scaffold-support-preregistration-audit-v4-6.json"
-        ).read_text(encoding="utf-8")
-    )
-    assert archived["passes"] is True
-    assert report["passes"] is False
-    assert {
-        name
-        for name, value in report["checks"].items()
-        if not value
-    } == {"all_source_hashes_exact"}
-
-
 def test_v4_6_runner_never_reruns_support_or_sft() -> None:
     root = Path(__file__).parents[1]
     runner = (

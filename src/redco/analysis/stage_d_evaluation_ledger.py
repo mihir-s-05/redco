@@ -49,11 +49,11 @@ from redco.analysis.stage_d_evaluation_evidence import (
     reachable_evidence,
     verify_evidence_closure,
 )
+from redco.analysis.stage_d_evaluation_reducer import reduce_evaluation_records
 from redco.analysis.stage_d_evaluation_state import (
     EvaluationActuationAttempt,
     EvaluationCallState,
     EvaluationLedgerSnapshot,
-    reduce_evaluation_records,
 )
 from redco.analysis.stage_d_evaluation_transport import (
     verify_nonsecret_headers,
@@ -219,9 +219,8 @@ class StageDEvaluationLedger:
             records,
             [sha256(value) for value in values],
             manifest=manifest,
+            expected_authorization_sha256=auth.authorization_sha256,
         )
-        if snapshot.authorization_sha256 != sha256(auth_bytes):
-            raise ValueError("evaluation ledger authorization digest differs")
         evidence_roots: list[str] = []
         for record in records:
             for name, digest in record["event"].items():
@@ -573,17 +572,7 @@ class StageDEvaluationLedger:
             )
 
     def call_state(self, call: EvaluationCallAuthorization) -> EvaluationCallState:
-        snapshot = self.inspect()
-        observed = _snapshot_call(snapshot, call.call_id)
-        if call != EvaluationCallAuthorization(
-            observed.call_id,
-            observed.task_attempt_id,
-            observed.call_ordinal,
-            observed.request_sha256,
-            observed.transport_sha256,
-        ):
-            raise RuntimeError("evaluation call capability differs from its transcript")
-        return observed
+        return _verified_call(self.inspect(), call, "transcript")
 
     def finalized_response_bytes(self, call: EvaluationCallAuthorization) -> bytes | None:
         observed = self.call_state(call)
@@ -623,15 +612,7 @@ class StageDEvaluationLedger:
             snapshot = self.inspect()
             self._verify_client_session(snapshot, session)
             self._verify_server_session(snapshot, session.arm)
-            observed = _snapshot_call(snapshot, call.call_id)
-            if call != EvaluationCallAuthorization(
-                observed.call_id,
-                observed.task_attempt_id,
-                observed.call_ordinal,
-                observed.request_sha256,
-                observed.transport_sha256,
-            ):
-                raise RuntimeError("evaluation call capability differs from its reservation")
+            observed = _verified_call(snapshot, call, "reservation")
             if observed.dispatch_receipt_sha256 is not None:
                 raise RuntimeError("evaluation call was already dispatch-authorized")
             digest = self.evidence.put(receipt)
@@ -736,15 +717,7 @@ class StageDEvaluationLedger:
         with exclusive_lock(self.lock_path):
             snapshot = self.inspect()
             self._verify_client_session(snapshot, session)
-            observed = _snapshot_call(snapshot, call.call_id)
-            if call != EvaluationCallAuthorization(
-                observed.call_id,
-                observed.task_attempt_id,
-                observed.call_ordinal,
-                observed.request_sha256,
-                observed.transport_sha256,
-            ):
-                raise RuntimeError("evaluation call capability differs from its reservation")
+            observed = _verified_call(snapshot, call, "reservation")
             if observed.response_envelope_sha256 is None:
                 raise RuntimeError("evaluation call lacks a witnessed response")
             outcome = canonical_json(
@@ -948,6 +921,21 @@ def _snapshot_call(snapshot: EvaluationLedgerSnapshot, call_id: str) -> Evaluati
     if len(matches) != 1:
         raise RuntimeError("evaluation call authorization is unknown")
     return matches[0]
+
+
+def _verified_call(
+    snapshot: EvaluationLedgerSnapshot,
+    call: EvaluationCallAuthorization,
+    source: str,
+) -> EvaluationCallState:
+    observed = _snapshot_call(snapshot, call.call_id)
+    expected = EvaluationCallAuthorization(
+        observed.call_id, observed.task_attempt_id, observed.call_ordinal,
+        observed.request_sha256, observed.transport_sha256,
+    )
+    if call != expected:
+        raise RuntimeError(f"evaluation call capability differs from its {source}")
+    return observed
 
 
 __all__ = [

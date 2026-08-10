@@ -34,6 +34,7 @@ from redco.analysis.stage_d_v13_source_phase_a_decoder import (
     SUPPORTED_PYTHON,
 )
 from redco.contracts import canonical_json
+from redco.integrity import resolve_contained_file
 
 CANDIDATE_SOURCE_ORDINAL = 180
 CANDIDATE_PAPER_ID = "2001.09332"
@@ -48,9 +49,7 @@ SELECTION_RECEIPT_RELATIVE = "reports/stage-d1-support-v13-source-selection-rece
 SELECTION_MANIFEST_RELATIVE = (
     "reports/stage-d1-support-v13-source-selection-evidence-manifest-v1.json"
 )
-SELECTION_MANIFEST_SHA256 = (
-    "4fde8cb1ef189b525a2585bb6f44e8888e47e4e17c66f1a4c4ca68934201cd02"
-)
+SELECTION_MANIFEST_SHA256 = "4fde8cb1ef189b525a2585bb6f44e8888e47e4e17c66f1a4c4ca68934201cd02"
 SELECTION_CLAIM_RELATIVE = "reports/stage-d1-support-v13-source-selection-claim-v1.json"
 SELECTION_CLAIM_SHA256 = "240b30bc283c993bf007834f7ce7524a97a177da1678cddaeff04e60d7c8edac"
 SELECTION_ORIGINAL_CLAIM_RELATIVE = (
@@ -59,19 +58,13 @@ SELECTION_ORIGINAL_CLAIM_RELATIVE = (
 V12_ARCHIVE_RELATIVE = "runs/stage-d/stage-d1-support-v12-terminal.tar.gz"
 V12_ARCHIVE_SHA256 = "c2bb6713234653fc08e10778aa17815ad5a26f769406806037f50c390820b894"
 V12_EVIDENCE_MANIFEST_RELATIVE = "runs/stage-d/stage-d1-support-v12-evidence-sha256.txt"
-V12_EVIDENCE_MANIFEST_SHA256 = (
-    "90c694a45ece9887ea658adc36a8b30f6b7d78f8b111c017f54b5e5d51003671"
-)
+V12_EVIDENCE_MANIFEST_SHA256 = "90c694a45ece9887ea658adc36a8b30f6b7d78f8b111c017f54b5e5d51003671"
 V12_TERMINAL_REPORT_RELATIVE = "reports/stage-d1-support-v12-terminal.json"
 V12_TERMINAL_REPORT_SHA256 = "3b79bbf541ee4210744b37f2df49531ca4e6b601f500e0ecaa43e3fa9e8ca9ec"
 V12_FINALIZATION_AUDIT_RELATIVE = "reports/stage-d1-support-v12-finalization-audit-v1.json"
-V12_FINALIZATION_AUDIT_SHA256 = (
-    "97f743f9dfee0c5f2988073dc00efc7a83765698ead298d89c9f9ae26714a588"
-)
+V12_FINALIZATION_AUDIT_SHA256 = "97f743f9dfee0c5f2988073dc00efc7a83765698ead298d89c9f9ae26714a588"
 FROZEN_SUPPORT_RULES_RELATIVE = "configs/stage-d/stage-d1-support-rules-v1.json"
-FROZEN_SUPPORT_RULES_SHA256 = (
-    "088e3990c270881435214c725c0ca984462f9a824a1e0708d1bcbebd4264d235"
-)
+FROZEN_SUPPORT_RULES_SHA256 = "088e3990c270881435214c725c0ca984462f9a824a1e0708d1bcbebd4264d235"
 RETAINED_SUPPORT_RELATIVE = "datasets/stage-d/qasper-support-successor-v7-draft-retained-only.jsonl"
 RETAINED_SUPPORT_SHA256 = "c6f99a40578c44c20b3b703316440d54c29821911b20fc09426e0cb44e921d07"
 COLLECTION_PLAN_RELATIVE = "configs/stage-d/stage-d1-support-collection-plan-v11.json"
@@ -92,6 +85,24 @@ V12_PROTOCOL_RELATIVE = "configs/stage-d/stage-d1-support-protocol-v12.json"
 V12_PROTOCOL_SHA256 = "2be6b64916ef3620dc15fade89916b616de1ea8f54db0109c7f0ff5c3be8e9fd"
 V12_SOURCE_EVAL_RELATIVE = "configs/stage-d/stage-d1-support-source-eval-v12.toml"
 V12_SOURCE_EVAL_SHA256 = "704eca5bb15a7ee52572653110639857dcffe422a2d5cfe1a66b498959e88351"
+UPSTREAM_EVIDENCE_SHA256 = {
+    V12_ARCHIVE_RELATIVE: V12_ARCHIVE_SHA256,
+    V12_EVIDENCE_MANIFEST_RELATIVE: V12_EVIDENCE_MANIFEST_SHA256,
+    V12_TERMINAL_REPORT_RELATIVE: V12_TERMINAL_REPORT_SHA256,
+    V12_FINALIZATION_AUDIT_RELATIVE: V12_FINALIZATION_AUDIT_SHA256,
+    V12_PREREG_RELATIVE: V12_PREREG_SHA256,
+    V12_PROTOCOL_RELATIVE: V12_PROTOCOL_SHA256,
+    V12_SOURCE_EVAL_RELATIVE: V12_SOURCE_EVAL_SHA256,
+    FROZEN_SUPPORT_RULES_RELATIVE: FROZEN_SUPPORT_RULES_SHA256,
+    **AUTHENTICATED_PREDECESSOR_HASHES,
+}
+SOURCE_FREE_OPTIONAL_EVIDENCE = frozenset(
+    {
+        SELECTION_ORIGINAL_CLAIM_RELATIVE,
+        V12_ARCHIVE_RELATIVE,
+        V12_EVIDENCE_MANIFEST_RELATIVE,
+    }
+)
 SUPPORT_RULES_SHA256 = "088e3990c270881435214c725c0ca984462f9a824a1e0708d1bcbebd4264d235"
 MASTER_SEED = "redco-stage-d1-support-v1-20260802-78b65e4cc16ac31f"
 SCIENTIFIC_NAMESPACE = "redco-stage-d1-support-v1"
@@ -103,11 +114,53 @@ COMPOSITION_RELATIVE = (
 PROTOCOL_RELATIVE = "configs/stage-d/v13-draft/stage-d1-support-v13-frozen-support-protocol-v1.json"
 PROTOCOL_AUDIT_RELATIVE = "reports/stage-d1-support-v13-protocol-audit-v1.json"
 SAMPLING_CONTRACT_SOURCE_RELATIVE = "src/redco/analysis/stage_d_source_producer.py"
+ACTION_CLOSURE_RELATIVE = "configs/stage-d/stage-d1-action-closure-corpus-v2.json"
+ACTION_CLOSURE_SHA256 = "50152ebbaea6cecce63c167c13d56050c4feb50782f838d69ea34840b29670c0"
+ACTION_CLOSURE_AUDIT_RELATIVE = "reports/stage-d1-action-closure-corpus-audit-v2.json"
+ACTION_CLOSURE_AUDIT_SHA256 = "60631a5153c2434682642f5aecaf5f55e61f368c8b96d721982eea7c9c158646"
+LAUNCH_AUTHORIZATION_RELATIVE = (
+    "configs/stage-d/v13-draft/stage-d1-support-v13-launch-authorization-v1.json"
+)
+LAUNCH_AUTHORIZATION_SHA256 = "30020b15b5929af1bf668de1bd6b3eb15fe068ec86b24d2dc9a05a8b3b72a7be"
+CANDIDATE_AUTHORITY = {
+    "candidate_materialized": True,
+    "source_selection_repeated": False,
+    "provider_calls_authorized": False,
+    "model_calls_authorized": False,
+    "science_authorized": False,
+    "launch_authorized": False,
+}
+SUPPORT_COHORT = {
+    "required_papers": 64,
+    "retained_support_rows": 63,
+    "authenticated_replacement_rows": 1,
+    "science_train_rows": 16,
+    "science_eval_rows": 32,
+}
+COMPOSITION_AUTHORIZATION = {
+    "candidate_fixed": True,
+    "provider_calls_authorized": False,
+    "science_authorized": False,
+    "launch_authorized": False,
+    "support_spend_authorized": False,
+    "exploratory_science_user_accepted": False,
+    "readiness_blocker": "exploratory_science_not_user_accepted",
+}
+PROTOCOL_AUTHORIZATION = {
+    "provider_calls_authorized": False,
+    "model_calls_authorized": False,
+    "science_authorized": False,
+    "launch_authorized": False,
+    "format_only_sft_iteration_allowed": False,
+    "exploratory_science_user_accepted": False,
+    "support_spend_authorized": False,
+    "readiness_blocker": "exploratory_science_not_user_accepted",
+}
 
 
 def sampling_contract_binding(root: Path) -> dict[str, str]:
-    source = root / SAMPLING_CONTRACT_SOURCE_RELATIVE
-    if not source.is_file() or source.is_symlink():
+    source = resolve_contained_file(root, SAMPLING_CONTRACT_SOURCE_RELATIVE)
+    if source is None:
         raise ValueError("sampling contract source is missing")
     return {
         "version": SAMPLING_CONTRACT_VERSION,
@@ -115,6 +168,43 @@ def sampling_contract_binding(root: Path) -> dict[str, str]:
         "producer_source_path": SAMPLING_CONTRACT_SOURCE_RELATIVE,
         "producer_source_sha256": sha256_bytes(source.read_bytes()),
     }
+
+
+def _decoder_contract() -> dict[str, object]:
+    return {
+        "batch_size": 1, "use_threads": False,
+        "row_groups": [0], "logical_readahead": False,
+        "physical_compressed_page_io_may_span_row_group": True,
+    }
+
+
+def protocol_source_binding() -> dict[str, object]:
+    """Return the immutable source projection embedded in the reviewed protocol."""
+
+    return {
+        "repository": SOURCE_REPOSITORY,
+        "revision": SOURCE_REVISION,
+        "logical_url": SOURCE_LOGICAL_URL,
+        "semantic_source_commit": SOURCE_SEMANTIC_COMMIT,
+        "path": SOURCE_PATH,
+        "local_artifact": SOURCE_ARTIFACT_RELATIVE,
+        "sha256": SOURCE_SHA256,
+        "schema_sha256": SOURCE_SCHEMA_SHA256,
+        "bytes": SOURCE_BYTES,
+        "rows": SOURCE_ROW_COUNT,
+        "logical_read_wall": (
+            "Arrow emits logical ordinals 0..180 in bounded one-row batches; only ordinal "
+            "180 is Python-converted, canonicalized, and evaluated; ordinal 181 is never "
+            "requested or emitted"
+        ),
+        "decoder": _decoder_contract(),
+        "required_runtime": {
+            "python": SUPPORTED_PYTHON,
+            "pyarrow": SUPPORTED_PYARROW,
+            "datasets": SUPPORTED_DATASETS,
+        },
+    }
+
 
 # Independent reviewed bytes for the current candidate-null protocol set.
 # These are deliberately code-owned constants, rather than values read from
@@ -125,6 +215,11 @@ REVIEWED_PROTOCOL_ARTIFACT_SHA256 = {
     COMPOSITION_RELATIVE: "3cb26d9aec634e96fb342f87ea807711ed943a64073a9e37c5b7a546294638bc",
     PROTOCOL_RELATIVE: "65734f3dc5caeb1866e25b535d5b91d17ffbc434b69fbe0baf5efe63d339145b",
     PROTOCOL_AUDIT_RELATIVE: "6df3b0e98aa0ca27b72c7abd443cfbf003f7f99e0ce1880ec2e8b1fd3801d2f3",
+}
+LAUNCH_PREDECESSOR_BINDINGS = {
+    ACTION_CLOSURE_RELATIVE: ACTION_CLOSURE_SHA256,
+    ACTION_CLOSURE_AUDIT_RELATIVE: ACTION_CLOSURE_AUDIT_SHA256,
+    **REVIEWED_PROTOCOL_ARTIFACT_SHA256,
 }
 
 
@@ -189,7 +284,7 @@ class CandidateReadInstrumentation:
 
 def load_parquet(path: Path) -> Any:
     try:
-        import pyarrow.parquet as parquet
+        import pyarrow.parquet as parquet  # type: ignore[import-not-found]
     except ImportError as error:
         raise RuntimeError("PyArrow is required for the candidate materializer") from error
     return parquet.ParquetFile(path, memory_map=True)
@@ -260,20 +355,14 @@ def source_contract(root: Path, parquet_path: Path) -> tuple[dict[str, Any], Any
         "row_count": metadata.num_rows,
         "row_groups": metadata.num_row_groups,
         "fields": list(SOURCE_FIELDS),
-        "decoder": {
-            "batch_size": 1,
-            "use_threads": False,
-            "row_groups": [0],
-            "logical_readahead": False,
-            "physical_compressed_page_io_may_span_row_group": True,
-        },
+        "decoder": _decoder_contract(),
         "runtime": runtime,
     }, parquet_file
 
 
 def read_authenticated(root: Path, relative: str, expected_sha256: str) -> bytes:
-    path = root / relative
-    if not path.is_file() or path.is_symlink():
+    path = resolve_contained_file(root, relative)
+    if path is None:
         raise ValueError(f"authenticated upstream evidence is missing: {relative}")
     raw = path.read_bytes()
     if sha256_bytes(raw) != expected_sha256:
@@ -339,13 +428,16 @@ def authenticate_upstream_evidence(root: Path) -> dict[str, Any]:
         or receipt.get("claim_sha256") != SELECTION_CLAIM_SHA256
         or receipt.get("receipt_path") != SELECTION_RECEIPT_RELATIVE
         or receipt.get("phase_b_source_selection_authorized") is not True
-        or any(receipt.get(name) is not False for name in (
-            "launch_authorized",
-            "model_calls_authorized",
-            "prime_gpu_scientific_launch_authorized",
-            "provider_calls_authorized",
-            "science_authorized",
-        ))
+        or any(
+            receipt.get(name) is not False
+            for name in (
+                "launch_authorized",
+                "model_calls_authorized",
+                "prime_gpu_scientific_launch_authorized",
+                "provider_calls_authorized",
+                "science_authorized",
+            )
+        )
     ):
         raise ValueError("selection receipt is outside the frozen terminal contract")
     candidate = receipt.get("candidate")
@@ -385,20 +477,9 @@ def authenticate_upstream_evidence(root: Path) -> dict[str, Any]:
     ):
         raise ValueError("selection evidence manifest does not bind the receipt")
 
-    v12_hashes = {
-        V12_ARCHIVE_RELATIVE: V12_ARCHIVE_SHA256,
-        V12_EVIDENCE_MANIFEST_RELATIVE: V12_EVIDENCE_MANIFEST_SHA256,
-        V12_TERMINAL_REPORT_RELATIVE: V12_TERMINAL_REPORT_SHA256,
-        V12_FINALIZATION_AUDIT_RELATIVE: V12_FINALIZATION_AUDIT_SHA256,
-        V12_PREREG_RELATIVE: V12_PREREG_SHA256,
-        V12_PROTOCOL_RELATIVE: V12_PROTOCOL_SHA256,
-        V12_SOURCE_EVAL_RELATIVE: V12_SOURCE_EVAL_SHA256,
-        FROZEN_SUPPORT_RULES_RELATIVE: FROZEN_SUPPORT_RULES_SHA256,
-    }
-    authenticated_hashes = {**v12_hashes, **AUTHENTICATED_PREDECESSOR_HASHES}
     authenticated_predecessors: dict[str, bytes] = {}
     upstream_hashes: dict[str, str] = {}
-    for relative, expected in authenticated_hashes.items():
+    for relative, expected in UPSTREAM_EVIDENCE_SHA256.items():
         raw = read_authenticated(root, relative, expected)
         upstream_hashes[relative] = sha256_bytes(raw)
         if relative in AUTHENTICATED_PREDECESSOR_HASHES or relative in {
@@ -436,12 +517,15 @@ def authenticate_upstream_evidence(root: Path) -> dict[str, Any]:
     }
 
 
-
-
 __all__ = [
+    "ACTION_CLOSURE_AUDIT_RELATIVE",
+    "ACTION_CLOSURE_AUDIT_SHA256",
+    "ACTION_CLOSURE_RELATIVE",
+    "ACTION_CLOSURE_SHA256",
     "ADDRESS_AUDIT_RELATIVE",
     "ADDRESS_AUDIT_SHA256",
     "AUTHENTICATED_PREDECESSOR_HASHES",
+    "CANDIDATE_AUTHORITY",
     "CANDIDATE_EXAMPLE_ID",
     "CANDIDATE_PAPER_ID",
     "CANDIDATE_QUESTION_INDEX",
@@ -451,11 +535,16 @@ __all__ = [
     "CANDIDATE_SOURCE_ORDINAL",
     "COLLECTION_PLAN_RELATIVE",
     "COLLECTION_PLAN_SHA256",
+    "COMPOSITION_AUTHORIZATION",
     "COMPOSITION_RELATIVE",
     "FROZEN_SUPPORT_RULES_RELATIVE",
     "FROZEN_SUPPORT_RULES_SHA256",
+    "LAUNCH_AUTHORIZATION_RELATIVE",
+    "LAUNCH_AUTHORIZATION_SHA256",
+    "LAUNCH_PREDECESSOR_BINDINGS",
     "MASTER_SEED",
     "PROTOCOL_AUDIT_RELATIVE",
+    "PROTOCOL_AUTHORIZATION",
     "PROTOCOL_RELATIVE",
     "RETAINED_SUPPORT_RELATIVE",
     "RETAINED_SUPPORT_SHA256",
@@ -472,6 +561,7 @@ __all__ = [
     "SOURCE_ARTIFACT_RELATIVE",
     "SOURCE_BYTES",
     "SOURCE_FIELDS",
+    "SOURCE_FREE_OPTIONAL_EVIDENCE",
     "SOURCE_LOGICAL_URL",
     "SOURCE_PATH",
     "SOURCE_REPOSITORY",
@@ -483,7 +573,9 @@ __all__ = [
     "SUPPORTED_DATASETS",
     "SUPPORTED_PYARROW",
     "SUPPORTED_PYTHON",
+    "SUPPORT_COHORT",
     "SUPPORT_RULES_SHA256",
+    "UPSTREAM_EVIDENCE_SHA256",
     "V6_MANIFEST_RELATIVE",
     "V6_MANIFEST_SHA256",
     "V12_ARCHIVE_RELATIVE",
@@ -503,6 +595,7 @@ __all__ = [
     "CandidateReadInstrumentation",
     "authenticate_upstream_evidence",
     "load_parquet",
+    "protocol_source_binding",
     "read_authenticated",
     "require_supported_runtime",
     "runtime_payload",

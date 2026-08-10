@@ -3,12 +3,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import ItemsView, Iterable, Mapping
 from pathlib import Path
 
 import pytest
 
+from redco.analysis import stage_d_dependency_stack as dependency_stack
 from redco.analysis import stage_d_v13_support_contract as contract
 from redco.analysis import stage_d_v13_support_protocol as protocol
+from redco.analysis import stage_d_v13_support_publication as publication
 from redco.analysis.stage_d_v13_draft_publication import atomic_publish_set
 from redco.analysis.stage_d_v13_support_protocol import (
     CANDIDATE_EXAMPLE_ID,
@@ -21,12 +24,100 @@ from redco.analysis.stage_d_v13_support_protocol import (
     rebuild_protocol_artifacts_from_existing,
 )
 
+ROOT = Path(__file__).parents[1]
+REQUIRED_RUNTIME = {"python": "3.12.3", "pyarrow": "25.0.0", "datasets": "5.0.0"}
+AUTHENTICATED_INPUTS = (
+    contract.SELECTION_RECEIPT_RELATIVE,
+    contract.SELECTION_MANIFEST_RELATIVE,
+    contract.SELECTION_CLAIM_RELATIVE,
+    contract.SELECTION_ORIGINAL_CLAIM_RELATIVE,
+    *contract.UPSTREAM_EVIDENCE_SHA256,
+    protocol.SOURCE_ARTIFACT_RELATIVE,
+)
+
+
+def _source_free_required_paths(root: Path) -> tuple[str, ...]:
+    stack = dependency_stack.live_owner_patch_payload(root)
+    return (
+        contract.SELECTION_RECEIPT_RELATIVE,
+        contract.SELECTION_MANIFEST_RELATIVE,
+        contract.SELECTION_CLAIM_RELATIVE,
+        *(
+            relative
+            for relative in contract.UPSTREAM_EVIDENCE_SHA256
+            if relative not in contract.SOURCE_FREE_OPTIONAL_EVIDENCE
+        ),
+        contract.ACTION_CLOSURE_RELATIVE,
+        contract.ACTION_CLOSURE_AUDIT_RELATIVE,
+        contract.LAUNCH_AUTHORIZATION_RELATIVE,
+        contract.SAMPLING_CONTRACT_SOURCE_RELATIVE,
+        *(
+            f"patches/{patch['name']}"
+            for component in stack["components"]
+            for patch in component["patches"]
+        ),
+    )
+
+
+def _write_files(root: Path, files: Mapping[str, bytes]) -> None:
+    for relative, raw in files.items():
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(raw)
+
+
+def _read_files(root: Path, relatives: Iterable[str]) -> dict[str, bytes]:
+    return {relative: (root / relative).read_bytes() for relative in relatives}
+
+
+def _copy_files(source: Path, target: Path, relatives: Iterable[str]) -> None:
+    _write_files(target, _read_files(source, relatives))
+
+
+def _source_free_repository(parent: Path) -> tuple[Path, tuple[str, ...]]:
+    repository = parent / "repository"
+    required = _source_free_required_paths(ROOT)
+    _copy_files(ROOT, repository, (*protocol.REVIEWED_PROTOCOL_ARTIFACT_SHA256, *required))
+    return repository, required
+
+
+def _file_snapshot(root: Path) -> dict[str, tuple[bytes, int, int]]:
+    return {
+        path.relative_to(root).as_posix(): (
+            path.read_bytes(),
+            path.stat().st_mtime_ns,
+            path.stat().st_ino,
+        )
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+def _assert_rebuild_rejected_without_writes(repository: Path) -> None:
+    before = _file_snapshot(repository)
+    with pytest.raises(ValueError):
+        rebuild_protocol_artifacts_from_existing(repository)
+    assert _file_snapshot(repository) == before
+
+
+def _failing_replace(*failed_calls: int) -> object:
+    call = 0
+    real_replace = os.replace
+
+    def replace(source: os.PathLike[str], destination: os.PathLike[str]) -> None:
+        nonlocal call
+        call += 1
+        if call in failed_calls:
+            raise OSError("injected replacement failure")
+        real_replace(source, destination)
+
+    return replace
+
 
 def test_candidate_materializer_stops_at_authenticated_ordinal_180(tmp_path: Path) -> None:
-    root = Path(__file__).parents[1]
     observer = CandidateReadInstrumentation()
     output = tmp_path / "candidate.json"
-    payload = materialize_candidate(root, output, instrumentation=observer)
+    payload = materialize_candidate(ROOT, output, instrumentation=observer)
     assert observer.requested_ordinals == list(range(181))
     assert observer.arrow_batch_ranges == [(ordinal, ordinal) for ordinal in range(181)]
     assert observer.arrow_batch_cardinalities == [1] * 181
@@ -45,50 +136,43 @@ def test_candidate_materializer_stops_at_authenticated_ordinal_180(tmp_path: Pat
 
 
 def test_support_protocol_dual_build_is_byte_identical(tmp_path: Path) -> None:
-    root = Path(__file__).parents[1]
-    first = build_protocol_artifacts(root, tmp_path / "first")
-    second = build_protocol_artifacts(root, tmp_path / "second")
-    assert set(first) == set(second)
-    assert all(first[path] == second[path] for path in first)
-    protocol = json.loads(
-        first["configs/stage-d/v13-draft/stage-d1-support-v13-frozen-support-protocol-v1.json"]
+    first = build_protocol_artifacts(ROOT, tmp_path / "first")
+    second = build_protocol_artifacts(ROOT, tmp_path / "second")
+    assert first == second
+    published = tmp_path / "published"
+    assert atomic_publish_set(
+        published, first, manifest_path=protocol.PROTOCOL_AUDIT_RELATIVE
     )
-    assert protocol["support_rule"]["denominator"] == 64
-    assert protocol["support_rule"]["required_joint_successes"] == 58
-    assert protocol["scientific_protocol"]["arms"] == ["stock", "branch-global", "local"]
-    assert protocol["authorization"]["launch_authorized"] is False
-    assert protocol["authorization"]["provider_calls_authorized"] is False
-    assert protocol["attempt_policy"]["maximum_live_support_attempts_global"] == 1
-    assert protocol["attempt_policy"]["outcome_bearing_cohorts"] == 1
-    assert protocol["attempt_policy"]["second_outcome_bearing_attempt"] == (
-        "forbidden_unconditionally"
-    )
-    assert protocol["source"]["required_runtime"] == {
-        "python": "3.12.3",
-        "pyarrow": "25.0.0",
-        "datasets": "5.0.0",
+    expected_hashes = {
+        relative: hashlib.sha256(raw).hexdigest() for relative, raw in first.items()
     }
-    assert protocol["scientific_protocol"]["checkpoint_retention_preflight"][
-        "save_reload_reproduce_outputs"
-    ] is True
-    assert protocol["support_pass_transition"] == (
+    assert check_protocol_artifacts(ROOT, published) == expected_hashes
+    payload = json.loads(first[protocol.PROTOCOL_RELATIVE])
+    support = payload["support_rule"]
+    attempt = payload["attempt_policy"]
+    authorization = payload["authorization"]
+    assert (support["denominator"], support["required_joint_successes"]) == (64, 58)
+    assert payload["scientific_protocol"]["arms"] == ["stock", "branch-global", "local"]
+    assert authorization["launch_authorized"] is authorization["provider_calls_authorized"] is False
+    assert (
+        attempt["maximum_live_support_attempts_global"],
+        attempt["outcome_bearing_cohorts"],
+        attempt["second_outcome_bearing_attempt"],
+    ) == (1, 1, "forbidden_unconditionally")
+    assert payload["source"]["required_runtime"] == REQUIRED_RUNTIME
+    preflight = payload["scientific_protocol"]["checkpoint_retention_preflight"]
+    assert preflight["save_reload_reproduce_outputs"] is True
+    assert payload["support_pass_transition"] == (
         "user_checkpoint_required_before_any_support_spend_or_science_transition"
     )
-    assert protocol["authorization"]["readiness_blocker"] == (
-        "exploratory_science_not_user_accepted"
-    )
+    assert authorization["readiness_blocker"] == "exploratory_science_not_user_accepted"
 
 
 def test_candidate_composition_has_sixty_four_support_units_without_row_duplication(
     tmp_path: Path,
 ) -> None:
-    root = Path(__file__).parents[1]
-    artifacts = build_protocol_artifacts(root, tmp_path)
-    composition = json.loads(
-        artifacts[
-            "datasets/stage-d/qasper-support-successor-v8-candidate-composition-manifest-v1.json"
-        ]
-    )
+    artifacts = build_protocol_artifacts(ROOT, tmp_path)
+    composition = json.loads(artifacts[protocol.COMPOSITION_RELATIVE])
     assert composition["support_cohort"] == {
         "required_papers": 64,
         "retained_support_rows": 63,
@@ -97,8 +181,9 @@ def test_candidate_composition_has_sixty_four_support_units_without_row_duplicat
         "science_eval_rows": 32,
     }
     assert composition["retained_base"]["byte_identity_preserved"] is True
-    assert composition["nonoverlap"]["example_id"] is True
-    assert composition["nonoverlap"]["historical_address_identities"] is True
+    nonoverlap = composition["nonoverlap"]
+    assert nonoverlap["example_id"] is True
+    assert nonoverlap["historical_address_identities"] is True
     assert composition["authenticated_address_audit"] == {
         "preserved_count": 63,
         "retired_count": 1,
@@ -114,50 +199,52 @@ def test_candidate_composition_has_sixty_four_support_units_without_row_duplicat
     assert composition["authorization"]["science_authorized"] is False
 
 
-def test_support_check_only_authenticates_published_bytes_without_source_materialization(
-    tmp_path: Path,
-) -> None:
-    root = Path(__file__).parents[1]
-    artifacts = build_protocol_artifacts(root, tmp_path / "build")
-    for relative, data in artifacts.items():
-        path = tmp_path / "published" / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-    hashes = check_protocol_artifacts(root, tmp_path / "published")
-    assert hashes == {
-        relative: hashlib.sha256(data).hexdigest() for relative, data in artifacts.items()
-    }
-
-
 def test_support_check_only_uses_independent_reviewed_bytes_and_rejects_coordinated_tamper(
     tmp_path: Path,
 ) -> None:
     """The read-only checker cannot be blessed by rewriting its audit hash."""
 
-    root = Path(__file__).parents[1]
     output_root = tmp_path / "published"
-    for relative in protocol.REVIEWED_PROTOCOL_ARTIFACT_SHA256:
-        destination = output_root / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes((root / relative).read_bytes())
-
-    def snapshot() -> dict[str, tuple[bytes, int, int]]:
-        return {
-            path.relative_to(output_root).as_posix(): (
-                path.read_bytes(),
-                path.stat().st_mtime_ns,
-                path.stat().st_ino,
-            )
-            for path in output_root.rglob("*")
-            if path.is_file()
-        }
-
-    before = snapshot()
-    assert protocol.check_protocol_artifacts(root, output_root) == (
+    _copy_files(ROOT, output_root, protocol.REVIEWED_PROTOCOL_ARTIFACT_SHA256)
+    before = _file_snapshot(output_root)
+    assert protocol.check_protocol_artifacts(ROOT, output_root) == (
         protocol.REVIEWED_PROTOCOL_ARTIFACT_SHA256
     )
-    assert snapshot() == before
+    assert _file_snapshot(output_root) == before
 
+    reviewed = _read_files(output_root, protocol.REVIEWED_PROTOCOL_ARTIFACT_SHA256)
+    changed = dict(reviewed)
+    changed_candidate = json.loads(changed[protocol.CANDIDATE_RELATIVE])
+    changed_candidate["unknown_null"] = None
+    changed[protocol.CANDIDATE_RELATIVE] = protocol.canonical_json_bytes(changed_candidate)
+
+    class ChangingArtifacts(dict[str, bytes]):
+        def __init__(self) -> None:
+            super().__init__(reviewed)
+            self.item_reads = 0
+
+        def items(self) -> ItemsView[str, bytes]:
+            self.item_reads += 1
+            return (reviewed if self.item_reads == 1 else changed).items()
+
+    stateful = ChangingArtifacts()
+    assert publication.authenticate_protocol_artifact_bytes(ROOT, stateful) == (
+        protocol.REVIEWED_PROTOCOL_ARTIFACT_SHA256
+    )
+    assert stateful.item_reads == 1
+
+    unexpected = output_root / "unexpected-dangling-link"
+    unexpected.symlink_to(output_root / "absent-target")
+    with pytest.raises(ValueError, match="unexpected file"):
+        protocol.check_protocol_artifacts(ROOT, output_root)
+    unexpected.unlink()
+    assert _file_snapshot(output_root) == before
+    output_alias = tmp_path / "published-alias"
+    output_alias.symlink_to(output_root, target_is_directory=True)
+    with pytest.raises(ValueError, match="output root must be a non-symlink directory"):
+        protocol.check_protocol_artifacts(ROOT, output_alias)
+    output_alias.unlink()
+    assert _file_snapshot(output_root) == before
     candidate = output_root / protocol.CANDIDATE_RELATIVE
     candidate_payload = json.loads(candidate.read_bytes())
     candidate_payload["unknown_null"] = None
@@ -166,126 +253,207 @@ def test_support_check_only_uses_independent_reviewed_bytes_and_rejects_coordina
     audit_payload = json.loads(audit.read_bytes())
     audit_payload["candidate_sha256"] = hashlib.sha256(candidate.read_bytes()).hexdigest()
     audit.write_bytes(protocol.canonical_json_bytes(audit_payload))
-    tampered = snapshot()
+    tampered = _file_snapshot(output_root)
     with pytest.raises(ValueError, match="reviewed byte set"):
-        protocol.check_protocol_artifacts(root, output_root)
-    assert snapshot() == tampered
-
-    audit.write_bytes((root / protocol.PROTOCOL_AUDIT_RELATIVE).read_bytes())
+        protocol.check_protocol_artifacts(ROOT, output_root)
+    assert _file_snapshot(output_root) == tampered
     audit.unlink()
-    missing = snapshot()
+    missing = _file_snapshot(output_root)
     with pytest.raises(ValueError, match="published support artifact is missing"):
-        protocol.check_protocol_artifacts(root, output_root)
-    assert snapshot() == missing
+        protocol.check_protocol_artifacts(ROOT, output_root)
+    assert _file_snapshot(output_root) == missing
 
 
-def test_source_free_protocol_rebuild_is_deterministic(tmp_path: Path) -> None:
-    root = Path(__file__).parents[1]
-    first = rebuild_protocol_artifacts_from_existing(root)
-    second = rebuild_protocol_artifacts_from_existing(root)
-    assert first == second
-    assert {relative: hashlib.sha256(raw).hexdigest() for relative, raw in first.items()} == (
-        protocol.REVIEWED_PROTOCOL_ARTIFACT_SHA256
+def test_source_free_verifier_passes_in_minimal_git_free_export(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, _ = _source_free_repository(tmp_path)
+    output = tmp_path / "published"
+    _copy_files(ROOT, output, protocol.REVIEWED_PROTOCOL_ARTIFACT_SHA256)
+    absent = {".git", "external", contract.SOURCE_ARTIFACT_RELATIVE}
+    absent.update(contract.SOURCE_FREE_OPTIONAL_EVIDENCE)
+    assert all(not (repository / relative).exists() for relative in absent)
+    repository_before = _file_snapshot(repository)
+    output_before = _file_snapshot(output)
+    real_read_bytes = Path.read_bytes
+    repository_root = repository.resolve()
+    output_root = output.resolve()
+
+    def reject_forbidden_read(path: Path) -> bytes:
+        resolved = path.resolve()
+        if resolved.is_relative_to(output_root):
+            return real_read_bytes(path)
+        try:
+            relative = resolved.relative_to(repository_root)
+        except ValueError as error:
+            raise AssertionError(f"source-free verifier opened {resolved}") from error
+        if relative == Path(contract.SOURCE_ARTIFACT_RELATIVE) or (
+            relative.parts and relative.parts[0] == "external"
+        ):
+            raise AssertionError(f"source-free verifier opened {relative.as_posix()}")
+        return real_read_bytes(path)
+
+    def reject_subprocess(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("source-free verifier invoked a dependency subprocess")
+
+    monkeypatch.setattr(Path, "read_bytes", reject_forbidden_read)
+    monkeypatch.setattr(dependency_stack.subprocess, "run", reject_subprocess)
+    artifacts = _read_files(repository, protocol.REVIEWED_PROTOCOL_ARTIFACT_SHA256)
+    reviewed = protocol.REVIEWED_PROTOCOL_ARTIFACT_SHA256
+    assert publication.authenticate_protocol_artifact_bytes(repository, artifacts) == reviewed
+    assert check_protocol_artifacts(repository, output) == reviewed
+    rebuilt = rebuild_protocol_artifacts_from_existing(repository)
+    assert rebuilt == artifacts
+    assert rebuild_protocol_artifacts_from_existing(repository) == rebuilt
+    assert _file_snapshot(repository) == repository_before
+    assert _file_snapshot(output) == output_before
+
+
+@pytest.mark.parametrize(
+    "escaped_parent",
+    ("reports", "src/redco/analysis", "patches"),
+)  # type: ignore[untyped-decorator]
+def test_source_free_verifier_rejects_parent_symlink_escape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    escaped_parent: str,
+) -> None:
+    repository, _ = _source_free_repository(tmp_path)
+    artifacts = _read_files(repository, protocol.REVIEWED_PROTOCOL_ARTIFACT_SHA256)
+    output = tmp_path / "published"
+    _write_files(output, artifacts)
+    source = repository / escaped_parent
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    escaped = source.rename(outside / source.name)
+    source.symlink_to(escaped, target_is_directory=True)
+    repository_before = _file_snapshot(repository)
+    output_before = _file_snapshot(output)
+    real_read_bytes = Path.read_bytes
+    escaped_root = escaped.resolve()
+
+    def reject_escaped_read(path: Path) -> bytes:
+        if path.resolve().is_relative_to(escaped_root):
+            raise AssertionError(f"source-free verifier opened escaped path {path}")
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_escaped_read)
+
+    entrypoints = (
+        lambda: publication.authenticate_protocol_artifact_bytes(repository, artifacts),
+        lambda: check_protocol_artifacts(repository, output),
+        lambda: rebuild_protocol_artifacts_from_existing(repository),
     )
+    for entrypoint in entrypoints:
+        with pytest.raises(ValueError, match="missing"):
+            entrypoint()
+        assert _file_snapshot(repository) == repository_before
+        assert _file_snapshot(output) == output_before
 
 
-def test_support_check_only_rejects_tamper_or_missing_without_writes(
+def test_source_free_verifier_rejects_every_required_repository_binding(
     tmp_path: Path,
 ) -> None:
-    root = Path(__file__).parents[1]
-    output_root = tmp_path / "published"
-    artifacts = build_protocol_artifacts(root, tmp_path / "build")
-    atomic_publish_set(
-        output_root,
-        artifacts,
-        manifest_path=protocol.PROTOCOL_AUDIT_RELATIVE,
-    )
-    before = {
-        relative: (output_root / relative).read_bytes()
-        for relative in artifacts
+    repository, required = _source_free_repository(tmp_path)
+    for relative in required:
+        path = repository / relative
+        raw = path.read_bytes()
+        path.unlink()
+        _assert_rebuild_rejected_without_writes(repository)
+        path.write_bytes(raw + b" ")
+        _assert_rebuild_rejected_without_writes(repository)
+        path.write_bytes(raw)
+
+
+def test_source_free_optional_evidence_is_absent_or_exact(
+    tmp_path: Path,
+) -> None:
+    repository, _ = _source_free_repository(tmp_path)
+    expected = rebuild_protocol_artifacts_from_existing(repository)
+    original_claim = repository / contract.SELECTION_ORIGINAL_CLAIM_RELATIVE
+    original_claim.parent.mkdir(parents=True, exist_ok=True)
+    original_claim.write_bytes((repository / contract.SELECTION_CLAIM_RELATIVE).read_bytes())
+    assert rebuild_protocol_artifacts_from_existing(repository) == expected
+    original_claim.unlink()
+    for relative in contract.SOURCE_FREE_OPTIONAL_EVIDENCE:
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"wrong retained-local evidence")
+        _assert_rebuild_rejected_without_writes(repository)
+        path.unlink()
+        path.mkdir()
+        _assert_rebuild_rejected_without_writes(repository)
+        path.rmdir()
+        path.symlink_to(repository / contract.SELECTION_CLAIM_RELATIVE)
+        _assert_rebuild_rejected_without_writes(repository)
+        path.unlink()
+
+
+def test_rebuild_and_check_share_semantic_verifier(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, _ = _source_free_repository(tmp_path)
+    artifacts = _read_files(repository, protocol.REVIEWED_PROTOCOL_ARTIFACT_SHA256)
+    candidate = json.loads(artifacts[protocol.CANDIDATE_RELATIVE])
+    candidate["authority"]["provider_calls_authorized"] = True
+    artifacts[protocol.CANDIDATE_RELATIVE] = protocol.canonical_json_bytes(candidate)
+    composition = json.loads(artifacts[protocol.COMPOSITION_RELATIVE])
+    composition["candidate"]["sha256"] = hashlib.sha256(
+        artifacts[protocol.CANDIDATE_RELATIVE]
+    ).hexdigest()
+    artifacts[protocol.COMPOSITION_RELATIVE] = protocol.canonical_json_bytes(composition)
+    audit = json.loads(artifacts[protocol.PROTOCOL_AUDIT_RELATIVE])
+    audit["candidate_sha256"] = composition["candidate"]["sha256"]
+    audit["composition_sha256"] = protocol.sha256_json(composition)
+    artifacts[protocol.PROTOCOL_AUDIT_RELATIVE] = protocol.canonical_json_bytes(audit)
+    replacement_hashes = {
+        relative: hashlib.sha256(raw).hexdigest() for relative, raw in artifacts.items()
     }
-
-    candidate_path = output_root / protocol.CANDIDATE_RELATIVE
-    candidate_path.write_bytes(candidate_path.read_bytes() + b" ")
-    with pytest.raises(ValueError):
-        check_protocol_artifacts(root, output_root)
-    assert candidate_path.read_bytes() == before[protocol.CANDIDATE_RELATIVE] + b" "
-
-    candidate_path.write_bytes(before[protocol.CANDIDATE_RELATIVE])
-    audit_path = output_root / protocol.PROTOCOL_AUDIT_RELATIVE
-    audit_bytes = audit_path.read_bytes()
-    audit_path.unlink()
-    with pytest.raises(ValueError, match="published support artifact is missing"):
-        check_protocol_artifacts(root, output_root)
-    assert not audit_path.exists()
-    assert candidate_path.read_bytes() == before[protocol.CANDIDATE_RELATIVE]
-    assert audit_bytes == before[protocol.PROTOCOL_AUDIT_RELATIVE]
+    monkeypatch.setattr(contract, "REVIEWED_PROTOCOL_ARTIFACT_SHA256", replacement_hashes)
+    output = tmp_path / "published"
+    _write_files(repository, artifacts)
+    _write_files(output, artifacts)
+    for verify in (
+        lambda: publication.authenticate_protocol_artifact_bytes(repository, artifacts),
+        lambda: check_protocol_artifacts(repository, output),
+        lambda: rebuild_protocol_artifacts_from_existing(repository),
+    ):
+        with pytest.raises(ValueError, match="authenticated materialization"):
+            verify()
 
 
 def test_atomic_support_publication_check_only_is_read_only_and_rolls_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = tmp_path / "publication"
-    root.mkdir()
     payloads = {
         "candidate.json": b'{"candidate":null}',
         "audit.json": b'{"status":"candidate-null"}',
     }
-    for relative, data in payloads.items():
-        path = root / relative
-        path.write_bytes(data)
-    before = {
-        relative: (
-            (root / relative).read_bytes(),
-            (root / relative).stat().st_mtime_ns,
-            (root / relative).stat().st_ino,
-        )
-        for relative in payloads
-    }
+    _write_files(root, payloads)
+    before = _file_snapshot(root)
     assert atomic_publish_set(root, payloads, manifest_path="audit.json", check_only=True)
-    after = {
-        relative: (
-            (root / relative).read_bytes(),
-            (root / relative).stat().st_mtime_ns,
-            (root / relative).stat().st_ino,
-        )
-        for relative in payloads
-    }
-    assert after == before
-
+    assert _file_snapshot(root) == before
     (root / "candidate.json").write_bytes(b'{"candidate":"tampered"}')
     tampered_before = (root / "candidate.json").read_bytes()
     with pytest.raises(ValueError, match="publication bytes differ"):
         atomic_publish_set(root, payloads, manifest_path="audit.json", check_only=True)
     assert (root / "candidate.json").read_bytes() == tampered_before
-
     (root / "audit.json").unlink()
-    missing_before = (root / "candidate.json").read_bytes()
+    missing_before = _file_snapshot(root)
     with pytest.raises(ValueError, match="published output is missing"):
         atomic_publish_set(root, payloads, manifest_path="audit.json", check_only=True)
-    assert not (root / "audit.json").exists()
-    assert (root / "candidate.json").read_bytes() == missing_before
-
-    (root / "candidate.json").write_bytes(payloads["candidate.json"])
-    (root / "audit.json").write_bytes(payloads["audit.json"])
-    replace_count = 0
-    real_replace = os.replace
-
-    def fail_second_replace(source: os.PathLike[str], destination: os.PathLike[str]) -> None:
-        nonlocal replace_count
-        replace_count += 1
-        if replace_count == 2:
-            raise OSError("injected publication failure")
-        real_replace(source, destination)
-
-    monkeypatch.setattr(os, "replace", fail_second_replace)
-    with pytest.raises(OSError, match="injected publication failure"):
+    assert _file_snapshot(root) == missing_before
+    _write_files(root, payloads)
+    monkeypatch.setattr(os, "replace", _failing_replace(2))
+    with pytest.raises(OSError, match="injected replacement failure"):
         atomic_publish_set(root, payloads, manifest_path="audit.json")
-    assert {relative: (root / relative).read_bytes() for relative in payloads} == payloads
-
+    assert _read_files(root, payloads) == payloads
     fresh = tmp_path / "fresh-publication-root"
     assert atomic_publish_set(fresh, payloads, manifest_path="audit.json")
-    assert {relative: (fresh / relative).read_bytes() for relative in payloads} == payloads
+    assert _read_files(fresh, payloads) == payloads
 
 
 def test_atomic_publication_restores_with_staged_replacements_when_rollback_is_interrupted(
@@ -293,64 +461,27 @@ def test_atomic_publication_restores_with_staged_replacements_when_rollback_is_i
 ) -> None:
     root = tmp_path / "rollback"
     payloads = {"a.json": b'{"a":1}', "manifest.json": b'{"manifest":1}'}
-    root.mkdir()
-    for relative, data in payloads.items():
-        (root / relative).write_bytes(data.replace(b"1", b"0"))
-    before = {relative: (root / relative).read_bytes() for relative in payloads}
-    calls = 0
-    real_replace = os.replace
-
-    def fail_publish_and_first_rollback(
-        source: os.PathLike[str], destination: os.PathLike[str]
-    ) -> None:
-        nonlocal calls
-        calls += 1
-        if calls in {2, 3}:
-            raise OSError("injected replacement failure")
-        real_replace(source, destination)
-
-    monkeypatch.setattr(os, "replace", fail_publish_and_first_rollback)
+    _write_files(root, {relative: raw.replace(b"1", b"0") for relative, raw in payloads.items()})
+    before = _read_files(root, payloads)
+    monkeypatch.setattr(os, "replace", _failing_replace(2, 3))
     with pytest.raises(OSError, match="injected replacement failure"):
         atomic_publish_set(root, payloads, manifest_path="manifest.json")
-    assert {relative: (root / relative).read_bytes() for relative in payloads} == before
+    assert _read_files(root, payloads) == before
 
 
-@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
-    "relative",
-    [
-        protocol.SELECTION_RECEIPT_RELATIVE,
-        protocol.SELECTION_MANIFEST_RELATIVE,
-        protocol.SELECTION_CLAIM_RELATIVE,
-        protocol.SELECTION_ORIGINAL_CLAIM_RELATIVE,
-        protocol.V12_ARCHIVE_RELATIVE,
-        protocol.V12_EVIDENCE_MANIFEST_RELATIVE,
-        protocol.V12_TERMINAL_REPORT_RELATIVE,
-        protocol.V12_FINALIZATION_AUDIT_RELATIVE,
-        protocol.V12_PREREG_RELATIVE,
-        protocol.V12_PROTOCOL_RELATIVE,
-        protocol.V12_SOURCE_EVAL_RELATIVE,
-        protocol.FROZEN_SUPPORT_RULES_RELATIVE,
-        protocol.RETAINED_SUPPORT_RELATIVE,
-        protocol.COLLECTION_PLAN_RELATIVE,
-        protocol.V6_MANIFEST_RELATIVE,
-        protocol.ADDRESS_AUDIT_RELATIVE,
-        protocol.SOURCE_ARTIFACT_RELATIVE,
-    ],
-)
+@pytest.mark.parametrize("relative", AUTHENTICATED_INPUTS)  # type: ignore[untyped-decorator]
 def test_upstream_input_failure_precedes_candidate_output(
     relative: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    root = Path(__file__).parents[1]
     original_reader = contract.read_authenticated
 
-    def reject_mutated_input(
-        input_root: Path, input_relative: str, expected_sha256: str
-    ) -> bytes:
+    def reject_mutated_input(input_root: Path, input_relative: str, expected_sha256: str) -> bytes:
         if input_relative == relative:
             raise ValueError(f"authenticated upstream evidence changed: {relative}")
         return original_reader(input_root, input_relative, expected_sha256)
 
     if relative == protocol.SOURCE_ARTIFACT_RELATIVE:
+
         def reject_source_contract(*_args: object, **_kwargs: object) -> object:
             raise ValueError(f"authenticated upstream evidence changed: {relative}")
 
@@ -359,39 +490,17 @@ def test_upstream_input_failure_precedes_candidate_output(
         monkeypatch.setattr(contract, "read_authenticated", reject_mutated_input)
     output = tmp_path / "candidate.json"
     with pytest.raises(ValueError, match="authenticated upstream evidence changed"):
-        protocol.materialize_candidate(root, output)
+        protocol.materialize_candidate(ROOT, output)
     assert not output.exists()
 
 
-@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
-    "relative",
-    [
-        protocol.SELECTION_RECEIPT_RELATIVE,
-        protocol.SELECTION_MANIFEST_RELATIVE,
-        protocol.SELECTION_CLAIM_RELATIVE,
-        protocol.SELECTION_ORIGINAL_CLAIM_RELATIVE,
-        protocol.V12_ARCHIVE_RELATIVE,
-        protocol.V12_EVIDENCE_MANIFEST_RELATIVE,
-        protocol.V12_TERMINAL_REPORT_RELATIVE,
-        protocol.V12_FINALIZATION_AUDIT_RELATIVE,
-        protocol.V12_PREREG_RELATIVE,
-        protocol.V12_PROTOCOL_RELATIVE,
-        protocol.V12_SOURCE_EVAL_RELATIVE,
-        protocol.FROZEN_SUPPORT_RULES_RELATIVE,
-        protocol.RETAINED_SUPPORT_RELATIVE,
-        protocol.COLLECTION_PLAN_RELATIVE,
-        protocol.V6_MANIFEST_RELATIVE,
-        protocol.ADDRESS_AUDIT_RELATIVE,
-        protocol.SOURCE_ARTIFACT_RELATIVE,
-    ],
-)
+@pytest.mark.parametrize("relative", AUTHENTICATED_INPUTS)  # type: ignore[untyped-decorator]
 def test_support_outputs_reject_hard_link_to_every_authenticated_input(
     relative: str, tmp_path: Path
 ) -> None:
     from redco.analysis.stage_d_v13_draft_publication import validate_output_paths
 
     root = tmp_path / "repository"
-    root.mkdir()
     source = root / relative
     source.parent.mkdir(parents=True, exist_ok=True)
     source.write_bytes(b"immutable-input")
@@ -407,23 +516,16 @@ def test_support_outputs_reject_hard_link_to_every_authenticated_input(
 
 
 @pytest.mark.parametrize(  # type: ignore[untyped-decorator]
-    "runtime_field",
-    ["python", "pyarrow", "datasets"],
+    "runtime_field", tuple(REQUIRED_RUNTIME)
 )
 def test_runtime_mismatch_fails_before_source_access(
     runtime_field: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    root = Path(__file__).parents[1]
-    expected = {
-        "python": "3.12.3",
-        "pyarrow": "25.0.0",
-        "datasets": "5.0.0",
-        "supported": True,
-    }
+    expected = {**REQUIRED_RUNTIME, "supported": True}
     expected[runtime_field] = "mismatch"
     expected["supported"] = False
     monkeypatch.setattr(contract, "runtime_payload", lambda: expected)
-    source_path = (root / protocol.SOURCE_ARTIFACT_RELATIVE).resolve()
+    source_path = (ROOT / protocol.SOURCE_ARTIFACT_RELATIVE).resolve()
     original_read_bytes = Path.read_bytes
 
     def reject_source_read(path: Path) -> bytes:
@@ -434,5 +536,5 @@ def test_runtime_mismatch_fails_before_source_access(
     monkeypatch.setattr(Path, "read_bytes", reject_source_read)
     output = tmp_path / "candidate.json"
     with pytest.raises(RuntimeError, match=r"Python 3\.12\.3"):
-        materialize_candidate(root, output)
+        materialize_candidate(ROOT, output)
     assert not output.exists()

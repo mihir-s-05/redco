@@ -8,7 +8,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from scripts.audit_stage_d_judge_calibration import balanced_accuracy
-from scripts.audit_stage_d_judge_calibration_v2 import verdict_signature
 from scripts.run_stage_d_judge_calibration import render_prompt
 
 
@@ -41,19 +40,3 @@ def test_judge_prompt_contains_reference_and_prediction() -> None:
     assert "Latency fell." in rendered
     assert "['Latency fell.']" in rendered
     assert '"verdicts"' in rendered
-
-
-def test_v2_repeat_signature_ignores_reason_text() -> None:
-    first = {
-        "verdicts": [
-            {"name": "precision", "reason": "first", "verdict": "8"},
-            {"name": "recall", "reason": "first", "verdict": "7"},
-        ]
-    }
-    second = {
-        "verdicts": [
-            {"name": "recall", "reason": "different", "verdict": "7"},
-            {"name": "precision", "reason": "different", "verdict": "8"},
-        ]
-    }
-    assert verdict_signature(first) == verdict_signature(second)

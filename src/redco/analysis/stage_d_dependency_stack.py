@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import gzip
-import hashlib
 import io
 import json
 import os
@@ -13,9 +12,11 @@ import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, cast
+from typing import Any
 
 from redco.contracts import canonical_json
+from redco.integrity import resolve_contained_file
+from redco.integrity import sha256_bytes as _sha256
 
 _DOMAIN = "redco-stage-d-dependency-stack-v1"
 _COMPONENT_PATCHES = {
@@ -62,28 +63,13 @@ _LIVE_OWNER_COMPONENTS = (
     (
         "renderers",
         "bdb96b0c84a307e2b71c6a366c9d718c3ac7fe78",
-        (
-            "renderers-stage-d-prepared-observer-v1.patch",
-            "renderers-stage-d-replay-directives-v1.patch",
-            "renderers-stage-d-watchdog-owner-v1.patch",
-        ),
+        (*_COMPONENT_PATCHES["renderers"], "renderers-stage-d-watchdog-owner-v1.patch"),
         "bd43d515c12dcaa1e1c0279941a1397d4ffba31a1557d6d7342a1322b195fcc4",
     ),
     (
         "verifiers",
         "b13ba60da63cea91389e7575766b7270d0d11fc5",
-        (
-            "verifiers-stage-d-provenance-baseline-v1.patch",
-            "verifiers-stage-d-prepared-observer-v1.patch",
-            "verifiers-stage-d-replay-directives-v1.patch",
-            "verifiers-stage-d-sampling-director-v1.patch",
-            "verifiers-stage-d-isolated-docker-v1.patch",
-            "verifiers-stage-d-pre-generation-preflight-v1.patch",
-            "verifiers-stage-d-patched-rlm-archive-v1.patch",
-            "verifiers-stage-d-frozen-rlm-install-v1.patch",
-            "verifiers-stage-d-observer-failfast-v1.patch",
-            "verifiers-stage-d-watchdog-owner-v1.patch",
-        ),
+        (*_COMPONENT_PATCHES["verifiers"], "verifiers-stage-d-watchdog-owner-v1.patch"),
         "9dcf9e98dea73c2487d2165cd6cae35dc61fb66e00d377d85d5466886b3ea4e0",
     ),
 )
@@ -139,11 +125,6 @@ _LEGACY_VERIFIERS_COMPONENT_SHA256S = frozenset(
         "a92032d021336d9a99e6ed4f8c28b20fb4d6df4516cebf7579950b4d0a410d9c",
     }
 )
-
-
-def _sha256(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
 
 def _require_sha256(value: object, name: str) -> str:
     if (
@@ -258,24 +239,50 @@ def _git_tracked_modes(root: Path) -> dict[str, str]:
     return modes
 
 
-def _live_owner_dependency_payload(
-    root: Path,
-    *,
-    materialization_root: Path | None,
-) -> dict[str, Any]:
+def live_owner_patch_payload(root: Path) -> dict[str, Any]:
+    """Authenticate repository-owned patches without opening dependency checkouts."""
+
     root = root.resolve()
     components: list[dict[str, Any]] = []
     for name, base_commit, patch_names, post_tree_sha256 in _LIVE_OWNER_COMPONENTS:
         patches: list[dict[str, str]] = []
         for patch_name in patch_names:
-            path = root / "patches" / patch_name
-            if not path.is_file() or path.is_symlink():
+            path = resolve_contained_file(root, Path("patches") / patch_name)
+            if path is None:
                 raise ValueError(f"missing live owner patch: {patch_name}")
             actual = _sha256(path.read_bytes())
             expected = _LIVE_OWNER_PATCH_SHA256S[patch_name]
             if actual != expected:
                 raise ValueError(f"live owner patch changed: {patch_name}")
             patches.append({"name": patch_name, "sha256": actual})
+        components.append(
+            {
+                "base_commit": base_commit,
+                "name": name,
+                "patches": patches,
+                "post_tree_sha256": post_tree_sha256,
+            }
+        )
+    return {
+        "schema_version": 1,
+        "domain": "redco-stage-d-live-owner-stack-v1",
+        "components": components,
+    }
+
+
+def _live_owner_dependency_payload(
+    root: Path,
+    *,
+    materialization_root: Path | None,
+) -> dict[str, Any]:
+    root = root.resolve()
+    payload = live_owner_patch_payload(root)
+    for component, (_, base_commit, patch_names, post_tree_sha256) in zip(
+        payload["components"],
+        _LIVE_OWNER_COMPONENTS,
+        strict=True,
+    ):
+        name = component["name"]
         reconstructed = (
             _reconstruct_live_owner_tree_sha256(
                 root,
@@ -294,19 +301,7 @@ def _live_owner_dependency_payload(
         )
         if reconstructed != post_tree_sha256:
             raise ValueError(f"live owner post-tree hash changed: {name}")
-        components.append(
-            {
-                "base_commit": base_commit,
-                "name": name,
-                "patches": patches,
-                "post_tree_sha256": post_tree_sha256,
-            }
-        )
-    return {
-        "schema_version": 1,
-        "domain": "redco-stage-d-live-owner-stack-v1",
-        "components": components,
-    }
+    return payload
 
 
 def live_owner_dependency_payload(root: Path) -> dict[str, Any]:
@@ -421,15 +416,12 @@ def canonical_tree_manifest_bytes(
         )
     if not entries:
         raise ValueError("dependency tree contains no regular files")
-    return cast(
-        bytes,
-        canonical_json(
-            {
-                "schema_version": 1,
-                "domain": "redco-stage-d-canonical-tree-v1",
-                "entries": entries,
-            }
-        ),
+    return canonical_json(
+        {
+            "schema_version": 1,
+            "domain": "redco-stage-d-canonical-tree-v1",
+            "entries": entries,
+        }
     )
 
 
@@ -631,25 +623,23 @@ class StageDDependencyStackManifest:
         return _sha256(self.to_bytes())
 
     def to_bytes(self) -> bytes:
-        return cast(
-            bytes,
-            canonical_json(
-                {
-                    "schema_version": 1,
-                    "domain": _DOMAIN,
-                    "redco_commit": self.redco_commit,
-                    "redco_tree_sha256": self.redco_tree_sha256,
-                    "components": [component.to_payload() for component in self.components],
-                    "rlm_archive_sha256": self.rlm_archive_sha256,
-                    "rlm_uv_binary_sha256": self.rlm_uv_binary_sha256,
-                    "rlm_executable_sha256": self.rlm_executable_sha256,
-                    "uv_lock_sha256": self.uv_lock_sha256,
-                    "container_image": self.container_image,
-                    "runtime_manifest_sha256": self.runtime_manifest_sha256,
-                    "imported_modules": [item.to_payload() for item in self.imported_modules],
-                    "program_sha256s": dict(self.program_sha256s),
-                }
-            ),
+        return canonical_json(
+            {
+                "schema_version": 1,
+                "domain": _DOMAIN,
+                "redco_commit": self.redco_commit,
+                "redco_tree_sha256": self.redco_tree_sha256,
+                "components": [component.to_payload() for component in self.components],
+                "rlm_archive_sha256": self.rlm_archive_sha256,
+                "rlm_uv_binary_sha256": self.rlm_uv_binary_sha256,
+                "rlm_uv_cache_archive_sha256": self.rlm_uv_cache_archive_sha256,
+                "rlm_executable_sha256": self.rlm_executable_sha256,
+                "uv_lock_sha256": self.uv_lock_sha256,
+                "container_image": self.container_image,
+                "runtime_manifest_sha256": self.runtime_manifest_sha256,
+                "imported_modules": [item.to_payload() for item in self.imported_modules],
+                "program_sha256s": dict(self.program_sha256s),
+            }
         )
 
     @classmethod
@@ -694,9 +684,7 @@ class StageDDependencyStackManifest:
         return cls(
             redco_commit=payload["redco_commit"],
             redco_tree_sha256=payload["redco_tree_sha256"],
-            components=tuple(
-                ComponentBinding.from_payload(item) for item in payload["components"]
-            ),
+            components=tuple(ComponentBinding.from_payload(item) for item in payload["components"]),
             rlm_archive_sha256=payload["rlm_archive_sha256"],
             rlm_uv_binary_sha256=payload["rlm_uv_binary_sha256"],
             rlm_uv_cache_archive_sha256=payload["rlm_uv_cache_archive_sha256"],
@@ -716,6 +704,7 @@ __all__ = [
     "StageDDependencyStackManifest",
     "canonical_tree_manifest_bytes",
     "live_owner_dependency_payload",
+    "live_owner_patch_payload",
     "materialize_live_owner_dependency_trees",
     "write_canonical_tree_tar",
     "write_canonical_tree_tar_gzip",

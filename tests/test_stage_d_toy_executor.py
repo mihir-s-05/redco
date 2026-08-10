@@ -49,12 +49,40 @@ from redco.contracts import ActualEvaluationCost, canonical_json
 
 MASTER_SEED = "toy-executor-master"
 WORKER_PYTHON = str(getattr(sys, "_base_executable", sys.executable))
+WINDOWS_JOB_OBJECT_ONLY = pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="requires Windows Job Object process-tree containment",
+)
 MATCHED = PolicyEventAddress(0, "root", 2, 2)
 DYNAMIC = PolicyEventAddress(1, "root/dynamic", 0, 0)
 
 
 def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def _limits(wall_seconds: float = 1.0) -> ReplayResourceLimits:
+    return ReplayResourceLimits(
+        wall_seconds=wall_seconds,
+        policy_calls=4,
+        prompt_tokens=32,
+        completion_tokens=32,
+        worker_output_bytes=4096,
+        workspace_snapshot_bytes=4096,
+        workspace_entries=64,
+    )
+
+
+def _assert_windows_pids_dead(pids: Sequence[int]) -> None:
+    for pid in pids:
+        probe = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=10.0,
+        )
+        assert f',"{pid}",' not in probe.stdout
 
 
 def test_expired_callback_deadline_never_dispatches() -> None:
@@ -523,16 +551,7 @@ def _make_fixture(
         config_sha256=config_sha256,
         scorer_sha256=scorer_sha256,
         workspace=manifest,
-        limits=limits
-        or ReplayResourceLimits(
-            wall_seconds=1.0,
-            policy_calls=4,
-            prompt_tokens=32,
-            completion_tokens=32,
-            worker_output_bytes=4096,
-            workspace_snapshot_bytes=4096,
-            workspace_entries=64,
-        ),
+        limits=limits or _limits(),
     )
     scratch = tmp_path / "scratch"
     scratch.mkdir()
@@ -559,16 +578,18 @@ def _executor(
     fixture: Fixture,
     mode: str,
     *,
+    writer: StageDReceiptLedger | None = None,
+    context: ToyExecutionContext | None = None,
     resolver: ProvenanceResolver = _resolve,
     scorer: DeterministicScorer | None = None,
 ) -> ToySubprocessArmExecutor:
     return ToySubprocessArmExecutor(
-        writer=fixture.writer,
+        writer=fixture.writer if writer is None else writer,
         gateway=fixture.gateway,
         provenance_resolver=resolver,
         scorer=scorer or fixture.scorer,
         cas=fixture.cas,
-        context=fixture.context,
+        context=fixture.context if context is None else context,
         worker_command=(WORKER_PYTHON, str(fixture.worker), mode),
         scratch_root=fixture.scratch,
     )
@@ -597,6 +618,7 @@ def _run(
     )
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 def test_full_c1_group_runs_through_toy_subprocess_and_sealed_ledger(
     tmp_path: Path,
 ) -> None:
@@ -638,6 +660,7 @@ def test_full_c1_group_runs_through_toy_subprocess_and_sealed_ledger(
     assert loaded == artifact
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 def test_terminal_without_downstream_is_a_valid_scientific_outcome(
     tmp_path: Path,
 ) -> None:
@@ -652,6 +675,7 @@ def test_terminal_without_downstream_is_a_valid_scientific_outcome(
     )
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 @pytest.mark.parametrize(
     ("mode", "kind"),
     [
@@ -680,6 +704,7 @@ def test_pre_dispatch_worker_failures_are_retained_in_denominator(
     assert all(outcome.reward == -1.0 for arm in artifact.arms for outcome in arm.outcomes)
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 def test_duplicate_event_address_poisoning_is_not_recast_as_a_clean_failure(
     tmp_path: Path,
 ) -> None:
@@ -691,6 +716,7 @@ def test_duplicate_event_address_poisoning_is_not_recast_as_a_clean_failure(
         fixture.writer.seal()
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 def test_gateway_crash_after_write_ahead_dispatch_leaves_nonrepairable_attempt(
     tmp_path: Path,
 ) -> None:
@@ -703,6 +729,7 @@ def test_gateway_crash_after_write_ahead_dispatch_leaves_nonrepairable_attempt(
         fixture.writer.seal()
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 def test_candidate_gateway_must_execute_the_exact_ledgered_request(
     tmp_path: Path,
 ) -> None:
@@ -748,6 +775,7 @@ def test_candidate_gateway_binding_is_rechecked_at_dispatch(tmp_path: Path) -> N
         )
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 def test_hung_candidate_gateway_returns_control_and_leaves_dangling_call(
     tmp_path: Path,
 ) -> None:
@@ -762,6 +790,7 @@ def test_hung_candidate_gateway_returns_control_and_leaves_dangling_call(
         fixture.writer.seal()
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 def test_call_count_limit_precedes_any_provenance_callback(tmp_path: Path) -> None:
     fixture = _make_fixture(tmp_path)
     artifact = _run(fixture, "many_calls", resolver=CrashResolver())
@@ -774,6 +803,7 @@ def test_call_count_limit_precedes_any_provenance_callback(tmp_path: Path) -> No
     )
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 def test_executor_callable_binding_is_rechecked_before_each_arm(tmp_path: Path) -> None:
     fixture = _make_fixture(tmp_path)
     executor = _executor(fixture, "success")
@@ -784,6 +814,7 @@ def test_executor_callable_binding_is_rechecked_before_each_arm(tmp_path: Path) 
     assert fixture.gateway.continuation_calls == []
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 def test_continuation_must_echo_the_ledgered_schedule(tmp_path: Path) -> None:
     fixture = _make_fixture(tmp_path)
     fixture.gateway.wrong_continuation_binding = True
@@ -794,6 +825,7 @@ def test_continuation_must_echo_the_ledgered_schedule(tmp_path: Path) -> None:
         fixture.writer.seal()
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 def test_resolver_and_scorer_runtime_errors_are_retained_when_no_call_is_dangling(
     tmp_path: Path,
 ) -> None:
@@ -821,18 +853,11 @@ def test_resolver_and_scorer_runtime_errors_are_retained_when_no_call_is_danglin
     assert scorer_artifact.ledger.actual_downstream_policy_calls == 2
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 def test_supervisor_callback_timeout_poison_stops_the_group(tmp_path: Path) -> None:
     fixture = _make_fixture(
         tmp_path,
-        limits=ReplayResourceLimits(
-            wall_seconds=0.5,
-            policy_calls=4,
-            prompt_tokens=32,
-            completion_tokens=32,
-            worker_output_bytes=4096,
-            workspace_snapshot_bytes=4096,
-            workspace_entries=64,
-        ),
+        limits=_limits(wall_seconds=0.5),
     )
 
     started = time.monotonic()
@@ -847,20 +872,13 @@ def test_supervisor_callback_timeout_poison_stops_the_group(tmp_path: Path) -> N
         fixture.writer.seal()
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 def test_hung_gateway_returns_control_but_keeps_dispatch_dangling(
     tmp_path: Path,
 ) -> None:
     fixture = _make_fixture(
         tmp_path,
-        limits=ReplayResourceLimits(
-            wall_seconds=1.0,
-            policy_calls=4,
-            prompt_tokens=32,
-            completion_tokens=32,
-            worker_output_bytes=4096,
-            workspace_snapshot_bytes=4096,
-            workspace_entries=64,
-        ),
+        limits=_limits(),
     )
     fixture.gateway.continuation_delay = 5.0
     started = time.monotonic()
@@ -871,7 +889,7 @@ def test_hung_gateway_returns_control_but_keeps_dispatch_dangling(
         fixture.writer.seal()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows process-tree contract")
+@WINDOWS_JOB_OBJECT_ONLY
 def test_normal_worker_exit_terminates_descendants_before_next_arm(
     tmp_path: Path,
 ) -> None:
@@ -884,20 +902,11 @@ def test_normal_worker_exit_terminates_descendants_before_next_arm(
         list(fixture.scratch.iterdir()),
     )
     roots_and_pids = [tuple(map(int, value.split(":"))) for value in fixture.scorer.answers]
-    pids = [pid for _, pid in roots_and_pids]
-    for pid in pids:
-        probe = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-            capture_output=True,
-            check=False,
-            text=True,
-            timeout=10.0,
-        )
-        assert f',"{pid}",' not in probe.stdout
+    _assert_windows_pids_dead([pid for _, pid in roots_and_pids])
     assert not any(fixture.scratch.iterdir())
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows process-tree contract")
+@WINDOWS_JOB_OBJECT_ONLY
 def test_orphaned_grandchild_is_killed_by_worker_job(tmp_path: Path) -> None:
     fixture = _make_fixture(tmp_path)
     artifact = _run(fixture, "orphaned_descendant")
@@ -905,16 +914,7 @@ def test_orphaned_grandchild_is_killed_by_worker_job(tmp_path: Path) -> None:
     assert all(
         outcome.kind is OutcomeKind.SUCCESS for arm in artifact.arms for outcome in arm.outcomes
     )
-    pids = [int(value.split(":")[1]) for value in fixture.scorer.answers]
-    for pid in pids:
-        probe = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-            capture_output=True,
-            check=False,
-            text=True,
-            timeout=10.0,
-        )
-        assert f',"{pid}",' not in probe.stdout
+    _assert_windows_pids_dead([int(value.split(":")[1]) for value in fixture.scorer.answers])
     assert not any(fixture.scratch.iterdir())
 
 
@@ -934,9 +934,7 @@ def test_cas_and_workspace_validation_fail_closed(tmp_path: Path) -> None:
         verify_workspace(root, manifest)
 
 
-def test_workspace_contract_rejects_paths_symlinks_and_wrong_ledger(
-    tmp_path: Path,
-) -> None:
+def test_workspace_contract_rejects_unsafe_paths_and_links(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="beneath"):
         WorkspaceFile("../escape", "1" * 64, 0o644)
     with pytest.raises(ValueError, match="unique nonempty"):
@@ -976,55 +974,34 @@ def test_workspace_contract_rejects_paths_symlinks_and_wrong_ledger(
                     ContentAddressedStore(tmp_path / "junction-cas"),
                 )
 
+
+@WINDOWS_JOB_OBJECT_ONLY
+def test_executor_rejects_context_bound_to_different_ledger(tmp_path: Path) -> None:
     first = _make_fixture(tmp_path / "first")
     second_writer = StageDReceiptLedger.create(
         tmp_path / "second-ledger",
         binding=first.writer.genesis_binding,
         master_seed=MASTER_SEED,
     )
-    with pytest.raises(ValueError, match="different durable ledger"):
-        ToySubprocessArmExecutor(
-            writer=second_writer,
-            gateway=first.gateway,
-            provenance_resolver=_resolve,
-            scorer=first.scorer,
-            cas=first.cas,
-            context=first.context,
-            worker_command=(WORKER_PYTHON, str(first.worker), "success"),
-            scratch_root=first.scratch,
-        )
-    first.writer.close()
-    second_writer.close()
+    try:
+        with pytest.raises(ValueError, match="different durable ledger"):
+            _executor(first, "success", writer=second_writer)
+    finally:
+        first.writer.close()
+        second_writer.close()
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 def test_runtime_config_and_scorer_bytes_are_cas_and_genesis_bound(
     tmp_path: Path,
 ) -> None:
     fixture = _make_fixture(tmp_path)
     wrong = replace(fixture.context, runtime_sha256=fixture.context.scorer_sha256)
     with pytest.raises(ValueError, match="genesis binding"):
-        ToySubprocessArmExecutor(
-            writer=fixture.writer,
-            gateway=fixture.gateway,
-            provenance_resolver=_resolve,
-            scorer=fixture.scorer,
-            cas=fixture.cas,
-            context=wrong,
-            worker_command=(WORKER_PYTHON, str(fixture.worker), "success"),
-            scratch_root=fixture.scratch,
-        )
+        _executor(fixture, "success", context=wrong)
 
     fixture.worker.write_text("raise SystemExit(0)", encoding="utf-8")
-    executor = ToySubprocessArmExecutor(
-        writer=fixture.writer,
-        gateway=fixture.gateway,
-        provenance_resolver=_resolve,
-        scorer=fixture.scorer,
-        cas=fixture.cas,
-        context=fixture.context,
-        worker_command=(WORKER_PYTHON, str(fixture.worker), "success"),
-        scratch_root=fixture.scratch,
-    )
+    executor = _executor(fixture, "success")
     artifact = _run(fixture, "success", executor=executor)
     assert all(
         outcome.kind is OutcomeKind.SUCCESS for arm in artifact.arms for outcome in arm.outcomes
@@ -1034,19 +1011,11 @@ def test_runtime_config_and_scorer_bytes_are_cas_and_genesis_bound(
     scorer_path = fixture.cas.root / fixture.context.scorer_sha256
     scorer_path.write_bytes(b"corrupt")
     with pytest.raises(ValueError, match="digest mismatch"):
-        ToySubprocessArmExecutor(
-            writer=fixture.writer,
-            gateway=fixture.gateway,
-            provenance_resolver=_resolve,
-            scorer=fixture.scorer,
-            cas=fixture.cas,
-            context=fixture.context,
-            worker_command=(WORKER_PYTHON, str(fixture.worker), "success"),
-            scratch_root=fixture.scratch,
-        )
+        _executor(fixture, "success")
     fixture.writer.close()
 
 
+@WINDOWS_JOB_OBJECT_ONLY
 def test_cas_is_reverified_immediately_before_each_arm_launch(tmp_path: Path) -> None:
     fixture = _make_fixture(tmp_path)
     executor = _executor(fixture, "success")

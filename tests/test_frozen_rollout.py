@@ -5,12 +5,14 @@ import json
 from hashlib import sha256
 from pathlib import Path
 
-from redco.analysis.deterministic_replay import evaluate_stock_stage
+import pytest
+
 from redco.analysis.frozen_rollout import (
     ADAPTER_RELATIVE_PATH,
     ARMS,
     BATCH_RELATIVE_PATH,
     evaluate,
+    evaluate_stock_precondition,
     prepare,
 )
 from redco.analysis.noop_confirmation import (
@@ -127,17 +129,32 @@ def test_evaluate_requires_exact_metrics_and_adapter_bytes(
     assert not failing["passed_frozen_rollout_gate"]
 
 
-def test_deterministic_stage_stops_before_redco_when_stock_differs(
+@pytest.mark.parametrize(
+    "stock_b_grad_norm, stock_b_adapter, redco_artifact, expected_pass",
+    [
+        (0.25, b"adapter", False, True),
+        (0.250001, b"adapter", False, False),
+        (0.25, b"different", True, False),
+    ],
+)
+def test_stock_precondition_controls_redco_execution(
     tmp_path: Path,
+    stock_b_grad_norm: float,
+    stock_b_adapter: bytes,
+    redco_artifact: bool,
+    expected_pass: bool,
 ) -> None:
     root = tmp_path / "deterministic"
-    for arm, grad_norm in (("stock-a", 0.25), ("stock-b", 0.250001)):
+    for arm, grad_norm, adapter_bytes in (
+        ("stock-a", 0.25, b"adapter"),
+        ("stock-b", stock_b_grad_norm, stock_b_adapter),
+    ):
         batch = root / arm / BATCH_RELATIVE_PATH
         batch.parent.mkdir(parents=True)
         batch.write_bytes(b"batch")
         adapter = root / arm / ADAPTER_RELATIVE_PATH
         adapter.parent.mkdir(parents=True)
-        adapter.write_bytes(arm.encode())
+        adapter.write_bytes(adapter_bytes)
         (root / arm / "metrics.jsonl").write_text(
             json.dumps(
                 {
@@ -153,10 +170,18 @@ def test_deterministic_stage_stops_before_redco_when_stock_differs(
         json.dumps({"source_batch_sha256": sha256(b"batch").hexdigest()}),
         encoding="utf-8",
     )
-    result = evaluate_stock_stage(root, root / "result.json")
-    assert not result["passed_stock_determinism_stage"]
-    assert result["conditional_stop_honored"]
-    assert not result["redco_executed"]
+    if redco_artifact:
+        redco_metrics = root / "redco" / "metrics.jsonl"
+        redco_metrics.parent.mkdir()
+        redco_metrics.write_text("{}\n", encoding="utf-8")
+
+    result = evaluate_stock_precondition(root, root / "result.json")
+    assert all(arm["batch_matches_source"] for arm in result["arms"].values())
+    assert result["stock_repeat"]["core_metrics_exact"] is (stock_b_grad_norm == 0.25)
+    assert result["stock_repeat"]["adapter_bytes_exact"] is (stock_b_adapter == b"adapter")
+    assert result["passed_stock_determinism_stage"] is expected_pass
+    assert result["redco_executed"] is redco_artifact
+    assert result["conditional_stop_honored"] is (not expected_pass and not redco_artifact)
 
 
 def test_stock_noise_calibration_freezes_double_observed_maximum(

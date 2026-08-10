@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -18,6 +17,8 @@ from redco.analysis.stage_d_objective_binding import ArmName
 from redco.analysis.stage_d_protocol_manifest import StageDProtocolManifest
 from redco.analysis.stage_d_trainer_supervisor import StageDTrainerRunLedger
 from redco.contracts import canonical_json
+from redco.integrity import require_sha256_hex as _require_sha256
+from redco.integrity import sha256_bytes as _sha256
 
 if TYPE_CHECKING:
     from redco.analysis.stage_d_evaluation_ledger import StageDEvaluationLedger
@@ -29,20 +30,6 @@ _METRICS_DOMAIN = "redco-stage-d-heldout-metrics-v1"
 _PLAN_DOMAIN = "redco-stage-d-evaluation-plan-v1"
 _ARMS: tuple[ArmName, ...] = ("stock", "branch-global", "local")
 FaultHook = Callable[[str, Path], None]
-
-
-def _sha256(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
-def _require_sha256(value: object, name: str) -> str:
-    if (
-        not isinstance(value, str)
-        or len(value) != 64
-        or any(character not in "0123456789abcdef" for character in value)
-    ):
-        raise ValueError(f"{name} must be a lowercase SHA-256")
-    return value
 
 
 @dataclass(frozen=True, slots=True)

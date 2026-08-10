@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import cast
 import pytest
 
 from redco.analysis import stage_d_collection as collection
+from redco.analysis import stage_d_v13_support_launch as support_launch
 from redco.analysis.stage_d_action_closure import (
     ABORT_DISPOSITIONS,
     ACCEPTED_TERMINATION_KINDS,
@@ -28,6 +30,78 @@ from redco.analysis.stage_d_exact_action import BehaviorAction
 from redco.analysis.stage_d_source_contracts import SourceRollout
 from redco.analysis.stage_d_v13_support_contract import sampling_contract_binding
 from redco.contracts import canonical_json
+
+_ACCEPTED_CASE_IDS = (
+    "eos",
+    "exact-cap",
+    "tool-calls",
+    "empty-string-content",
+    "textual-refusal",
+    "multi-turn-child",
+    "concurrent-child-order-a",
+    "concurrent-child-order-b",
+)
+
+
+class _CollectionTaskData:
+    def model_dump(self, *, mode: str) -> dict[str, object]:
+        assert mode == "json"
+        return {"scientific_group_id": "group", "example_id": "example", "rollout_slot": 0}
+
+
+def _collection_fixture(
+    tmp_path: Path,
+) -> tuple[SimpleNamespace, SimpleNamespace, SimpleNamespace]:
+    task = SimpleNamespace(data=_CollectionTaskData())
+    retries = SimpleNamespace(max_retries=0)
+    environment = SimpleNamespace(
+        master_seed="master",
+        max_concurrent=1,
+        retries=retries,
+        agent=SimpleNamespace(retries=retries),
+        taskset=SimpleNamespace(select=lambda _count, _shuffle: [task]),
+    )
+    config = SimpleNamespace(
+        server=False,
+        num_rollouts=1,
+        num_tasks=1,
+        shuffle=False,
+        resume=None,
+        push=False,
+        rich=False,
+        max_concurrent=1,
+        output_dir=tmp_path / "fresh",
+        env=environment,
+    )
+    return task, environment, config
+
+
+class _DelayedExitProcess:
+    returncode = None
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.waits = 0
+
+    def terminate(self) -> None:
+        self.calls.append("term")
+
+    async def wait(self) -> None:
+        self.waits += 1
+        if self.waits == 1:
+            await asyncio.sleep(0.01)
+
+    def kill(self) -> None:
+        self.calls.append("kill")
+
+
+class _CountedRuntime:
+    def __init__(self, process: _DelayedExitProcess) -> None:
+        self._background = [process]
+        self.stop_count = 0
+
+    async def stop(self) -> None:
+        self.stop_count += 1
 
 
 def test_bounded_closure_manifest_is_stable_and_complete() -> None:
@@ -148,19 +222,7 @@ def _run_real_source_owner_case(
     return cast(SourceRollout, producer.finalize_episode(canonical_json(episode)))
 
 
-@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
-    "case_id",
-    [
-        "eos",
-        "exact-cap",
-        "tool-calls",
-        "empty-string-content",
-        "textual-refusal",
-        "multi-turn-child",
-        "concurrent-child-order-a",
-        "concurrent-child-order-b",
-    ],
-)
+@pytest.mark.parametrize("case_id", _ACCEPTED_CASE_IDS)  # type: ignore[untyped-decorator]
 def test_every_accepted_vector_reaches_real_action_finalizer_and_ledger(
     case_id: str, tmp_path: Path
 ) -> None:
@@ -222,9 +284,7 @@ def test_invalid_vectors_reach_the_named_production_owner(
                 finish_reason="length" if field == "finish_reason" else action.finish_reason,
                 prompt_tokens=action.prompt_tokens,
                 completion_tokens=(
-                    action.completion_tokens + 1
-                    if field == "usage"
-                    else action.completion_tokens
+                    action.completion_tokens + 1 if field == "usage" else action.completion_tokens
                 ),
                 termination_kind=action.termination_kind,
                 eos_token_id=action.eos_token_id,
@@ -271,19 +331,7 @@ def _observer_response(action: BehaviorAction) -> SimpleNamespace:
     )
 
 
-@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
-    "case_id",
-    [
-        "eos",
-        "exact-cap",
-        "tool-calls",
-        "empty-string-content",
-        "textual-refusal",
-        "multi-turn-child",
-        "concurrent-child-order-a",
-        "concurrent-child-order-b",
-    ],
-)
+@pytest.mark.parametrize("case_id", _ACCEPTED_CASE_IDS)  # type: ignore[untyped-decorator]
 def test_every_accepted_vector_reaches_interception_response_owner(
     case_id: str, tmp_path: Path
 ) -> None:
@@ -313,6 +361,7 @@ def test_every_accepted_vector_reaches_interception_response_owner(
             ),
             max_tokens=case_id == "exact-cap",
         )
+
     root_action = make_action(
         71,
         tool=case_id
@@ -375,9 +424,7 @@ def test_every_accepted_vector_reaches_interception_response_owner(
                     tickets[index], _observer_response(child_actions[index])
                 )
 
-            await observer.run_concurrent_children(
-                asyncio.gather(deliver(1), deliver(0))
-            )
+            await observer.run_concurrent_children(asyncio.gather(deliver(1), deliver(0)))
         else:
             child_ticket = await observer.before_forward(
                 _prepared(72, "child", _child_rlm(0, "closure-child"), trace_id="rollout-live")
@@ -386,9 +433,9 @@ def test_every_accepted_vector_reaches_interception_response_owner(
             await observer.after_response(child_ticket, _observer_response(child_actions[0]))
 
     asyncio.run(scenario())
-    expected_completed = 3 if (
-        case_id == "multi-turn-child" or case_id.startswith("concurrent-child-order")
-    ) else 2
+    expected_completed = (
+        3 if (case_id == "multi-turn-child" or case_id.startswith("concurrent-child-order")) else 2
+    )
     assert len(producer._completed) == expected_completed
     assert not producer._pending
     ledger.close()
@@ -404,9 +451,7 @@ def test_every_accepted_vector_reaches_interception_response_owner(
         "zero_token_response",
     ],
 )
-def test_abort_vectors_use_observer_abort_owner_once(
-    disposition: str, tmp_path: Path
-) -> None:
+def test_abort_vectors_use_observer_abort_owner_once(disposition: str, tmp_path: Path) -> None:
     """Every terminal transport/schema disposition poisons the real owner once."""
 
     from test_stage_d_live_observer import _observer, _prepared, _root_rlm
@@ -422,6 +467,7 @@ def test_abort_vectors_use_observer_abort_owner_once(
         )
         boundary_error: BaseException
         if disposition == "cancellation":
+
             async def cancelled_provider() -> None:
                 raise asyncio.CancelledError()
 
@@ -429,6 +475,7 @@ def test_abort_vectors_use_observer_abort_owner_once(
                 await observer.run_provider_call(cancelled_provider())
             boundary_error = caught.value
         elif disposition == "transport_error":
+
             async def failed_provider() -> None:
                 raise ConnectionError("provider transport failed")
 
@@ -498,12 +545,10 @@ def test_concurrent_children_owner_proves_overlap_and_awaits_both() -> None:
 
 def test_retained_raw_fixture_manifest_authenticates_exactly_fourteen() -> None:
     root = Path(__file__).parents[1]
-    config = json.loads(
-        (root / "configs/stage-d/stage-d1-action-closure-corpus-v2.json").read_bytes()
-    )
-    report = json.loads(
-        (root / "reports/stage-d1-action-closure-corpus-audit-v2.json").read_bytes()
-    )
+    config_raw = (root / "configs/stage-d/stage-d1-action-closure-corpus-v2.json").read_bytes()
+    report_raw = (root / "reports/stage-d1-action-closure-corpus-audit-v2.json").read_bytes()
+    config = json.loads(config_raw)
+    report = json.loads(report_raw)
     audited = audit_raw_response_fixtures(root, config["raw_response_fixtures"])
     assert audited["fixture_count"] == 14
     assert audited["total_bytes"] > 0
@@ -517,8 +562,29 @@ def test_retained_raw_fixture_manifest_authenticates_exactly_fourteen() -> None:
     assert report["historical_semantic_replayed_versions"] == [4, 7, 8, 9, 10]
     assert report["semantic_renderer_observer_replay_count"] == 14
     assert report["completed_action_reload_count"] == 12
-    assert config["sampling_contract"] == sampling_contract_binding(root)
-    assert report["sampling_contract"] == sampling_contract_binding(root)
+    historical_sampling = config["sampling_contract"]
+    assert historical_sampling == report["sampling_contract"]
+    assert historical_sampling == {
+        "version": "redco-stage-d-per-call-sampling-v2",
+        "sha256": "819222244a81565a67331826be3dd362e14e1481043d60fccb569551a4471f6d",
+        "producer_source_path": "src/redco/analysis/stage_d_source_producer.py",
+        "producer_source_sha256": (
+            "de27fd3b1d8c74d9a2cd6e47c20bee3871c2f98a1e38272351c5340a44e08171"
+        ),
+    }
+    assert support_launch.EXPECTED_PRODUCER_SHA256 == (
+        "45ececee92acd46857c37e0d7ec08c036604789f308e3fc1e4629029e7a7090c"
+    )
+    assert sampling_contract_binding(root) == {
+        **historical_sampling,
+        "producer_source_sha256": support_launch.EXPECTED_PRODUCER_SHA256,
+    }
+    assert support_launch.FROZEN_ROOT_HASHES[support_launch.ACTION_CONFIG_RELATIVE] == (
+        hashlib.sha256(config_raw).hexdigest()
+    )
+    assert support_launch.FROZEN_ROOT_HASHES[support_launch.ACTION_AUDIT_RELATIVE] == (
+        hashlib.sha256(report_raw).hexdigest()
+    )
     assert report["frozen_v1_audit_sha256"] == (
         "25c777aa9c121b818f3315bed5b13fe98336fe14aba31fe9c46f6e53808e6b6c"
     )
@@ -527,32 +593,7 @@ def test_retained_raw_fixture_manifest_authenticates_exactly_fourteen() -> None:
 def test_collection_path_owns_watchdog_and_notifies_once(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    class Data:
-        def model_dump(self, *, mode: str) -> dict[str, object]:
-            assert mode == "json"
-            return {"scientific_group_id": "group", "example_id": "example", "rollout_slot": 0}
-
-    task = SimpleNamespace(data=Data())
-    retries = SimpleNamespace(max_retries=0)
-    env = SimpleNamespace(
-        master_seed="master",
-        max_concurrent=1,
-        retries=retries,
-        agent=SimpleNamespace(retries=retries),
-        taskset=SimpleNamespace(select=lambda _count, _shuffle: [task]),
-    )
-    config = SimpleNamespace(
-        server=False,
-        num_rollouts=1,
-        num_tasks=1,
-        shuffle=False,
-        resume=None,
-        push=False,
-        rich=False,
-        max_concurrent=1,
-        output_dir=tmp_path / "fresh",
-        env=env,
-    )
+    task, env, config = _collection_fixture(tmp_path)
     events: list[str] = []
     watchdog_events: list[tuple[str, str]] = []
     persisted: list[bytes] = []
@@ -565,9 +606,7 @@ def test_collection_path_owns_watchdog_and_notifies_once(
     monkeypatch.setattr(collection, "verify_collection_outcomes", lambda *_args: b"receipt")
     watchdog = ActionClosureWatchdog(
         deadlines=WatchdogDeadlines(episode=1.0),
-        terminal_callback=lambda phase, disposition: watchdog_events.append(
-            (phase, disposition)
-        ),
+        terminal_callback=lambda phase, disposition: watchdog_events.append((phase, disposition)),
         terminal_record_callback=terminal_records.append,
     )
     plan, episodes, receipt = asyncio.run(
@@ -597,32 +636,7 @@ def test_collection_path_owns_watchdog_and_notifies_once(
 
 
 def test_collection_episode_timeout_cancels_and_records_once(tmp_path: Path) -> None:
-    class Data:
-        def model_dump(self, *, mode: str) -> dict[str, object]:
-            assert mode == "json"
-            return {"scientific_group_id": "group", "example_id": "example", "rollout_slot": 0}
-
-    task = SimpleNamespace(data=Data())
-    retries = SimpleNamespace(max_retries=0)
-    env = SimpleNamespace(
-        master_seed="master",
-        max_concurrent=1,
-        retries=retries,
-        agent=SimpleNamespace(retries=retries),
-        taskset=SimpleNamespace(select=lambda _count, _shuffle: [task]),
-    )
-    config = SimpleNamespace(
-        server=False,
-        num_rollouts=1,
-        num_tasks=1,
-        shuffle=False,
-        resume=None,
-        push=False,
-        rich=False,
-        max_concurrent=1,
-        output_dir=tmp_path / "fresh",
-        env=env,
-    )
+    task, env, config = _collection_fixture(tmp_path)
     persisted: list[bytes] = []
     terminal_records: list[bytes] = []
 
@@ -774,34 +788,8 @@ def test_terminal_publication_failure_can_be_replaced_by_one_failure_record() ->
 
 
 def test_watchdog_timeout_stops_the_bound_launcher_runtime_once() -> None:
-    class Process:
-        returncode = None
-
-        def __init__(self) -> None:
-            self.calls: list[str] = []
-            self.waits = 0
-
-        def terminate(self) -> None:
-            self.calls.append("term")
-
-        async def wait(self) -> None:
-            self.waits += 1
-            if self.waits == 1:
-                await asyncio.sleep(0.01)
-
-        def kill(self) -> None:
-            self.calls.append("kill")
-
-    class Runtime:
-        def __init__(self, process: Process) -> None:
-            self._background = [process]
-            self.stop_count = 0
-
-        async def stop(self) -> None:
-            self.stop_count += 1
-
-    process = Process()
-    runtime = Runtime(process)
+    process = _DelayedExitProcess()
+    runtime = _CountedRuntime(process)
     watchdog = ActionClosureWatchdog(
         deadlines=WatchdogDeadlines(provider_call=0.001),
         runtime_term_timeout=0.001,
@@ -819,49 +807,21 @@ def test_watchdog_timeout_stops_the_bound_launcher_runtime_once() -> None:
 
 
 def test_timeout_teardown_survives_first_and_replacement_terminal_failures() -> None:
-    class Process:
-        returncode = None
-
-        def __init__(self) -> None:
-            self.calls: list[str] = []
-            self.waits = 0
-
-        def terminate(self) -> None:
-            self.calls.append("term")
-
-        async def wait(self) -> None:
-            self.waits += 1
-            if self.waits == 1:
-                await asyncio.sleep(0.01)
-
-        def kill(self) -> None:
-            self.calls.append("kill")
-
-    class Runtime:
-        def __init__(self, process: Process) -> None:
-            self._background = [process]
-            self.stop_count = 0
-
-        async def stop(self) -> None:
-            self.stop_count += 1
-
     attempts = 0
     provider_posts = 0
 
     def terminal_writer(_value: bytes) -> None:
         nonlocal attempts
         attempts += 1
-        raise OSError(
-            "first durable failure" if attempts == 1 else "replacement durable failure"
-        )
+        raise OSError("first durable failure" if attempts == 1 else "replacement durable failure")
 
     async def provider() -> None:
         nonlocal provider_posts
         provider_posts += 1
         await asyncio.sleep(0.05)
 
-    process = Process()
-    runtime = Runtime(process)
+    process = _DelayedExitProcess()
+    runtime = _CountedRuntime(process)
     watchdog = ActionClosureWatchdog(
         deadlines=WatchdogDeadlines(provider_call=0.001),
         runtime_term_timeout=0.001,
@@ -890,59 +850,17 @@ def test_timeout_teardown_survives_first_and_replacement_terminal_failures() -> 
 
 
 def test_process_teardown_uses_term_then_kill() -> None:
-    class Process:
-        def __init__(self) -> None:
-            self.calls: list[str] = []
-            self.waits = 0
-
-        def terminate(self) -> None:
-            self.calls.append("term")
-
-        async def wait(self) -> None:
-            self.waits += 1
-            if self.waits == 1:
-                await asyncio.sleep(0.01)
-
-        def kill(self) -> None:
-            self.calls.append("kill")
-
-    process = Process()
+    process = _DelayedExitProcess()
     assert asyncio.run(terminate_process_then_kill(process, term_timeout=0.001)) == "kill"
     assert process.calls == ["term", "kill"]
 
 
 def test_launcher_owns_process_teardown_and_terminal_record_once(tmp_path: Path) -> None:
-    class Process:
-        returncode = None
-
-        def __init__(self) -> None:
-            self.calls: list[str] = []
-            self.waits = 0
-
-        def terminate(self) -> None:
-            self.calls.append("term")
-
-        async def wait(self) -> None:
-            self.waits += 1
-            if self.waits == 1:
-                await asyncio.sleep(0.01)
-
-        def kill(self) -> None:
-            self.calls.append("kill")
-
-    class Runtime:
-        def __init__(self, process: Process) -> None:
-            self._background = [process]
-            self.stopped = False
-
-        async def stop(self) -> None:
-            self.stopped = True
-
-    process = Process()
-    runtime = Runtime(process)
+    process = _DelayedExitProcess()
+    runtime = _CountedRuntime(process)
     asyncio.run(stop_owned_runtime(runtime, term_timeout=0.001))
     assert process.calls == ["term", "kill"]
-    assert runtime.stopped is True
+    assert runtime.stop_count == 1
 
     record_path = tmp_path / "terminal.json"
     write_record = atomic_terminal_record_writer(record_path)

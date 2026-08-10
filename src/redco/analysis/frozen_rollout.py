@@ -13,6 +13,7 @@ from typing import Any
 from redco.contracts import canonical_json
 
 ARMS = ("stock-a", "stock-b", "redco")
+STOCK_ARMS = ("stock-a", "stock-b")
 CORE_PREFIXES = (
     "entropy/",
     "is_masked",
@@ -108,17 +109,7 @@ def evaluate(root: Path, output: Path) -> dict[str, Any]:
     """Require exact stock-repeat and stock-versus-no-op trainer equivalence."""
     manifest = json.loads((root / "source-manifest.json").read_bytes())
     source_hash = str(manifest["source_batch_sha256"])
-    arms: dict[str, dict[str, Any]] = {}
-    for arm in ARMS:
-        batch = root / arm / BATCH_RELATIVE_PATH
-        adapter = root / arm / ADAPTER_RELATIVE_PATH
-        metrics = _core_metrics(root / arm / "metrics.jsonl")
-        arms[arm] = {
-            "batch_sha256": _sha256(batch),
-            "batch_matches_source": _sha256(batch) == source_hash,
-            "adapter_sha256": _sha256(adapter),
-            "core_metrics": metrics,
-        }
+    arms = {arm: _arm_result(root, arm, source_hash) for arm in ARMS}
 
     comparisons = {
         "stock_repeat": _comparison(arms["stock-a"], arms["stock-b"]),
@@ -141,6 +132,52 @@ def evaluate(root: Path, output: Path) -> dict[str, Any]:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(canonical_json(payload) + b"\n")
     return payload
+
+
+def evaluate_stock_precondition(root: Path, output: Path) -> dict[str, Any]:
+    """Evaluate stock-repeat determinism before running the ReDCO arm."""
+    manifest = json.loads((root / "source-manifest.json").read_bytes())
+    source_hash = str(manifest["source_batch_sha256"])
+    arms = {arm: _arm_result(root, arm, source_hash) for arm in STOCK_ARMS}
+
+    comparison = _comparison(arms["stock-a"], arms["stock-b"])
+    passed = (
+        all(bool(arm["batch_matches_source"]) for arm in arms.values())
+        and bool(comparison["core_metrics_exact"])
+        and bool(comparison["adapter_bytes_exact"])
+    )
+    redco_executed = (root / "redco" / "metrics.jsonl").is_file()
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "source_batch_sha256": source_hash,
+        "deterministic_settings": {
+            "torch_deterministic_algorithms": True,
+            "warn_only": False,
+            "cublas_workspace_config": ":4096:8",
+            "tf32": False,
+            "matmul_precision": "highest",
+        },
+        "arms": arms,
+        "stock_repeat": comparison,
+        "passed_stock_determinism_stage": passed,
+        "redco_executed": redco_executed,
+        "conditional_stop_honored": not passed and not redco_executed,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(canonical_json(payload) + b"\n")
+    return payload
+
+
+def _arm_result(root: Path, arm: str, source_hash: str) -> dict[str, Any]:
+    arm_root = root / arm
+    batch = arm_root / BATCH_RELATIVE_PATH
+    batch_hash = _sha256(batch)
+    return {
+        "batch_sha256": batch_hash,
+        "batch_matches_source": batch_hash == source_hash,
+        "adapter_sha256": _sha256(arm_root / ADAPTER_RELATIVE_PATH),
+        "core_metrics": _core_metrics(arm_root / "metrics.jsonl"),
+    }
 
 
 def _comparison(

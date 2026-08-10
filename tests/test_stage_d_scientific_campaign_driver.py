@@ -3,15 +3,18 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 ENV_ROOT = Path(__file__).parents[1] / "environments" / "redco_evidence_selection_v2"
 sys.path.insert(0, str(ENV_ROOT))
 
-from test_stage_d_exact_action import _action, _prepared_key  # noqa: E402
+from test_stage_d_exact_action import _prepared_key  # noqa: E402
 
+from redco.analysis.stage_d_exact_action import BehaviorAction  # noqa: E402
 from redco.analysis.stage_d_scientific_branch_group import (  # noqa: E402
     PreActionTargetCommitment,
 )
@@ -22,8 +25,28 @@ from redco.analysis.stage_d_spawn_provenance import PolicyEventAddress  # noqa: 
 from redco.contracts import canonical_json  # noqa: E402
 
 
-def _fixture() -> tuple[bytes, PreActionTargetCommitment, object, bytes]:
-    action = _action(key=_prepared_key())
+def _validate_prepared_action(
+    _request: Mapping[str, Any],
+    _message: Mapping[str, Any],
+    action_ids: Sequence[int],
+) -> None:
+    if tuple(action_ids) != (20, 2):
+        raise ValueError("prepared action IDs changed")
+
+
+def _fixture() -> tuple[bytes, PreActionTargetCommitment, BehaviorAction, bytes]:
+    action = BehaviorAction.build(
+        key=_prepared_key(),
+        action_token_ids=(20, 2),
+        behavior_logprobs=(-0.2, -0.1),
+        raw_transport_message={"role": "assistant", "content": "ok"},
+        finish_reason="stop",
+        prompt_tokens=2,
+        completion_tokens=2,
+        termination_kind="eos",
+        eos_token_id=2,
+        validate_action=_validate_prepared_action,
+    )
     trace_id = "rollout-driver"
     address = PolicyEventAddress(0, "root", 0, 0)
     runtime = canonical_json(

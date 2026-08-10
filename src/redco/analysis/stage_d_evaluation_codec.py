@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import importlib
 import json
 import os
@@ -13,13 +12,15 @@ from pathlib import Path
 from typing import Any
 
 from redco.contracts import canonical_json
+from redco.integrity import sha256_bytes
 
 _RECORD_DOMAIN = "redco-stage-d-evaluation-ledger-record-v1"
 FaultHook = Callable[[str, Path], None]
 
 
 def sha256(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
+    """Compatibility name for the evaluation codec's public digest helper."""
+    return sha256_bytes(value)
 
 
 def canonical_object(value: bytes, name: str) -> dict[str, Any]:
@@ -164,7 +165,7 @@ def exclusive_lock(path: Path) -> Iterator[None]:
     handle = path.open("a+b")
     try:
         if os.name == "nt":
-            import msvcrt
+            msvcrt = importlib.import_module("msvcrt")
 
             if os.fstat(handle.fileno()).st_size == 0:
                 handle.write(b"\0")
@@ -177,7 +178,7 @@ def exclusive_lock(path: Path) -> Iterator[None]:
         yield
     finally:
         if os.name == "nt":
-            import msvcrt
+            msvcrt = importlib.import_module("msvcrt")
 
             handle.seek(0)
             msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
