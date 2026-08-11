@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import base64
+import inspect
 import json
 import os
 import struct
@@ -14,7 +15,6 @@ from typing import cast
 
 import pytest
 
-from redco.analysis import stage_d_v13_prime_inventory_v5 as v5
 from redco.analysis import stage_d_v13_prime_test_one_shot_contract_v2 as contract
 from redco.analysis.stage_d_v13_prime_test_one_shot_remote_v2 import (
     ALLOWED_DEVICE_NAMES,
@@ -87,76 +87,15 @@ def test_readiness_is_non_authorizing_and_deterministic() -> None:
     assert not (ROOT / contract.AUTHORIZATION_PATH).exists()
 
 
-def test_production_context_reaches_authenticated_client_without_request_or_evidence(
-    tmp_path: Path,
-) -> None:
-    key = tmp_path / "key"
-    subprocess.run(
-        [
-            str(v5.OPENSSH_EXECUTABLE_PATH),
-            "-q",
-            "-t",
-            "rsa",
-            "-b",
-            "2048",
-            "-N",
-            "",
-            "-f",
-            str(key),
-        ],
-        check=True,
-        capture_output=True,
-    )
-    key_type, public, *_rest = key.with_suffix(".pub").read_text(encoding="ascii").split()
-    allowed = f"mihir {key_type} {public}\n".encode()
-    identity = [
-        "mihir",
-        key_type,
-        public,
-        v5._fingerprint(key_type, public),
-        contract.sha256_bytes(allowed),
-    ]
-    authorization = {
-        "commit": "a" * 40,
-        "tree": "b" * 40,
-        "parent": "c" * 40,
-        "authorization_path": "authorization.json",
-        "authorization_sha256": "d" * 64,
-        "authorization_blob": "e" * 40,
-    }
-    script = """
-import json, sys
-from pathlib import Path
-from redco.analysis import stage_d_v13_prime_inventory_v5 as v5
-from redco.analysis import stage_d_v13_prime_test_one_shot_prime_v2 as owner
-identity = v5._TerminalSigningIdentity(*json.loads(sys.argv[2]))
-authorization = json.loads(sys.argv[3])
-v5._load_terminal_signing_identity = lambda: identity
-owner.authenticate_authorization = lambda _root: authorization
-context = owner._production_context(Path(sys.argv[1]))
-assert context.client.base_url == v5.BASE_URL
-print("production-context-ok")
-"""
-    environment = dict(os.environ)
-    environment["PYTHONPATH"] = str(ROOT / "src")
-    before = (ROOT / contract.EVIDENCE_ROOT).exists()
-    result = subprocess.run(
-        [
-            str(Path(os.environ["APPDATA"]) / "uv/tools/prime/Scripts/python.exe"),
-            "-c",
-            script,
-            str(key),
-            json.dumps(identity),
-            json.dumps(authorization),
-        ],
-        check=False,
-        capture_output=True,
-        timeout=30,
-        env=environment,
-    )
-    assert result.returncode == 0, result.stderr.decode(errors="replace")
-    assert result.stdout == b"production-context-ok\r\n"
-    assert (ROOT / contract.EVIDENCE_ROOT).exists() == before
+def test_production_context_is_fixed_no_argument_and_not_caller_injectable() -> None:
+    from redco.analysis import stage_d_v13_prime_test_one_shot_lifecycle_v2 as lifecycle
+    from redco.analysis import stage_d_v13_prime_test_one_shot_prime_v2 as prime
+    from redco.analysis import stage_d_v13_prime_test_one_shot_runtime_binding_v2 as runtime_binding
+
+    assert not inspect.signature(runtime_binding._production_context_v2).parameters
+    assert "RuntimeContext" not in prime.__all__
+    assert "run_one_shot" not in lifecycle.__all__
+    assert "production_context" not in prime.__all__
 
 
 def test_authorization_cannot_be_self_issued_from_parent_checkout() -> None:

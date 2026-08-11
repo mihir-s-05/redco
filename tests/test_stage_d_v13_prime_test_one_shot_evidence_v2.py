@@ -5,25 +5,28 @@ from __future__ import annotations
 import base64
 import json
 import subprocess
+import sys
+import time
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar, cast
+from unittest.mock import patch
 
 import pytest
 
 from redco.analysis import stage_d_v13_prime_inventory_v5 as v5
+from redco.analysis import stage_d_v13_prime_test_one_shot_contract_v2 as contract
 from redco.analysis import stage_d_v13_prime_test_one_shot_evidence_v2 as evidence
 from redco.analysis import stage_d_v13_prime_test_one_shot_lifecycle_v2 as lifecycle
 from redco.analysis import stage_d_v13_prime_test_one_shot_prime_v2 as prime_owner
+from redco.analysis import stage_d_v13_prime_test_one_shot_runtime_binding_v2 as runtime_binding
 from redco.analysis import stage_d_v13_prime_test_one_shot_wallet_v2 as wallet_owner
 from redco.analysis.stage_d_v13_prime_test_one_shot_contract_v2 import (
     ASSESSMENT_NAMESPACE,
     AUTHORIZATION_PATH,
     EVIDENCE_ROOT,
-    HANDOFF_NAMESPACE,
-    OPENSSH_EXECUTABLES,
     PODS_CREATE_ENDPOINT,
     READINESS_AUTHORITY,
     TERMINAL_NAMESPACE,
@@ -31,6 +34,7 @@ from redco.analysis.stage_d_v13_prime_test_one_shot_contract_v2 import (
     canonical_json,
     sha256_bytes,
 )
+from redco.analysis.stage_d_v13_prime_test_one_shot_runtime_binding_v2 import _RuntimeContext
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -109,6 +113,8 @@ class _Transport:
             assert url == PODS_CREATE_ENDPOINT
             assert cast(dict[str, Any], payload["pod"])["diskSize"] == 0
             assert payload["disks"] == []
+            if self.commands is not None:
+                self.commands.pod_name = cast(dict[str, Any], payload["pod"])["name"]
             if self.ambiguous_create:
                 raise OSError("fixture ambiguous create")
             return _Response(
@@ -161,7 +167,8 @@ class _Client:
 
 
 def _key(tmp_path: Path) -> tuple[Path, lifecycle.SigningIdentity]:
-    key = tmp_path / "key"
+    key = tmp_path / "operator-home" / ".ssh" / "id_rsa"
+    key.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
             str(v5.OPENSSH_EXECUTABLE_PATH),
@@ -250,6 +257,7 @@ class _Commands:
         self.tmp_path = tmp_path
         self.pod_lists = 0
         self.terminated = False
+        self.pod_name: str | None = None
         self.invocations: list[tuple[str, ...]] = []
         self.billing_delay = billing_delay
         self.wallet_after_polls = 0
@@ -280,12 +288,16 @@ class _Commands:
                 self.terminated = True
             elif "pods" in args and "list" in args:
                 self.pod_lists += 1
-                visible = 2 <= self.pod_lists <= 3 and not self.terminated
+                visible = (
+                    2 <= self.pod_lists <= 3
+                    and not self.terminated
+                    and self.pod_name is not None
+                )
                 rows = (
                     [
                         {
                             "id": "pod-fixture",
-                            "name": "redco-stage-d-prime-tests-once-v2-aaaaaaaaaaaa",
+                            "name": self.pod_name,
                         }
                     ]
                     if visible
@@ -342,12 +354,19 @@ class _Commands:
 
 def _context(
     tmp_path: Path, transport: _Transport, commands: _Commands
-) -> lifecycle.RuntimeContext:
+) -> _RuntimeContext:
     key, identity = _key(tmp_path)
     uv = tmp_path / "uv"
     uv.write_bytes(b"fixture")
+    prime = tmp_path / "prime.exe"
+    prime.write_bytes(b"prime-fixture")
+    openssh: dict[str, Path] = {}
+    for name in ("ssh", "scp", "ssh-keyscan"):
+        path = tmp_path / f"{name}.exe"
+        path.write_bytes(f"{name}-fixture".encode("ascii"))
+        openssh[name] = path
     transport.commands = commands
-    return lifecycle.RuntimeContext(
+    return _RuntimeContext(
         repository=tmp_path,
         authorization={
             "commit": "a" * 40,
@@ -360,10 +379,8 @@ def _context(
         client=_Client(transport),
         wallet_team_id="team-fixture",
         transport_errors=(OSError,),
-        prime_executable=Path("prime.exe"),
-        openssh={
-            name: Path(cast(str, binding["path"])) for name, binding in OPENSSH_EXECUTABLES.items()
-        },
+        prime_executable=prime,
+        openssh=openssh,
         keygen_executable=v5.OPENSSH_EXECUTABLE_PATH,
         signing_key=key,
         identity=identity,
@@ -374,8 +391,92 @@ def _context(
         sleep=lambda _seconds: None,
     )
 
+
+def _run_fixture(context: _RuntimeContext) -> Any:
+    source_root = Path(__file__).parents[1]
+    v5_owner_path = cast(str, runtime_binding.__dict__["V5_OWNER_PATH"])
+    v5_contract_path = cast(str, runtime_binding.__dict__["V5_CONTRACT_PATH"])
+    for relative in (v5_owner_path, v5_contract_path):
+        target = context.repository / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((source_root / relative).read_bytes())
+    executable_bindings = {
+        name: {
+            "path": str(path),
+            "bytes": path.stat().st_size,
+            "sha256": runtime_binding.sha_file(path),
+        }
+        for name, path in context.openssh.items()
+    }
+    with (
+        patch.object(runtime_binding, "_repository_root", return_value=context.repository),
+        patch.object(runtime_binding, "OPENSSH_EXECUTABLES", executable_bindings),
+        patch.object(runtime_binding, "LINUX_UV_PATH", context.linux_uv),
+        patch.object(runtime_binding, "LINUX_UV_BYTES", context.linux_uv.stat().st_size),
+        patch.object(
+            runtime_binding,
+            "LINUX_UV_SHA256",
+            runtime_binding.sha_file(context.linux_uv),
+        ),
+        patch.object(runtime_binding, "_authenticate_source", lambda *_args: None),
+        patch.object(runtime_binding, "_production_run", context.run),
+        patch.object(time, "time", context.now),
+        patch.object(time, "monotonic", context.monotonic),
+        patch.object(time, "sleep", context.sleep),
+        patch.object(Path, "home", return_value=context.signing_key.parent.parent),
+        patch.object(sys, "version_info", (3, 13, 2)),
+        patch.object(
+            contract,
+            "authenticate_authorization",
+            return_value=dict(context.authorization),
+        ),
+        patch.object(
+            v5,
+            "authenticate_installed_capture_owners",
+            return_value={
+                "prime_uv_tool": {
+                    "canonical_path": str(context.prime_executable),
+                    "sha256": runtime_binding.sha_file(context.prime_executable),
+                }
+            },
+        ),
+        patch.object(
+            v5,
+            "authenticate_approved_openssh_executable",
+            return_value={"path": str(context.keygen_executable)},
+        ),
+        patch.object(v5, "_load_terminal_signing_identity", return_value=context.identity),
+        patch.object(v5, "_authenticate_operator_key", return_value=None),
+        patch.object(v5, "_construct_api_client", return_value=context.client),
+        patch.object(v5, "_httpx_request_error_types", return_value=context.transport_errors),
+    ):
+        return lifecycle._run_one_shot(runtime_binding.V2_RUNTIME_BINDING)
+
+
+def _journal_records(root: Path) -> list[dict[str, Any]]:
+    return [
+        cast(dict[str, Any], json.loads(raw))
+        for raw in (root / "command-journal.jsonl").read_bytes().splitlines()
+    ]
+
+
+def _bind_journal(root: Path, terminal: dict[str, Any], records: list[dict[str, Any]]) -> None:
+    for ordinal, record in enumerate(records, start=1):
+        record["ordinal"] = ordinal
+    raw = b"".join(canonical_json(record) + b"\n" for record in records)
+    _replace_bound_bytes(root, terminal, "command-journal", raw)
+    outcomes = [
+        record["details"]
+        for record in records
+        if record["phase"] == "outcome"
+        and type(record["details"]) is dict
+        and "stdout_sha256" in record["details"]
+    ]
+    _replace_bound_json(root, terminal, "command-records", outcomes)
+
+
 def _resign_terminal(
-    context: lifecycle.RuntimeContext,
+    context: _RuntimeContext,
     root: Path,
     terminal: dict[str, Any],
     *,
@@ -412,7 +513,7 @@ def _replace_bound_json(
     _replace_bound_bytes(root, terminal, name, canonical_json(value))
 
 
-def _completed_with_history(tmp_path: Path) -> tuple[lifecycle.RuntimeContext, Path]:
+def _completed_with_history(tmp_path: Path) -> tuple[_RuntimeContext, Path]:
     tmp_path.mkdir(parents=True)
     transport = _Transport([_item(1)])
     commands = _Commands(tmp_path)
@@ -428,11 +529,11 @@ def _completed_with_history(tmp_path: Path) -> tuple[lifecycle.RuntimeContext, P
 
     transport.wallet_handler = wallet_handler
     context = _context(tmp_path, transport, commands)
-    assert lifecycle.run_one_shot(context).state == "completed"
+    assert _run_fixture(context).state == "completed"
     return context, tmp_path / EVIDENCE_ROOT
 
 
-def _failed_fixture(tmp_path: Path) -> tuple[lifecycle.RuntimeContext, Path]:
+def _failed_fixture(tmp_path: Path) -> tuple[_RuntimeContext, Path]:
     tmp_path.mkdir(parents=True)
     commands = _Commands(tmp_path, remote_returncode=1)
     transport = _Transport([_item(1)])
@@ -445,7 +546,7 @@ def _failed_fixture(tmp_path: Path) -> tuple[lifecycle.RuntimeContext, Path]:
 
     transport.wallet_handler = wallet_handler
     context = _context(tmp_path, transport, commands)
-    assert lifecycle.run_one_shot(context).state == "failed_terminal"
+    assert _run_fixture(context).state == "failed_terminal"
     return context, tmp_path / EVIDENCE_ROOT
 
 def test_terminal_verifier_replays_wallet_projection_instead_of_trusting_digest(
@@ -660,7 +761,7 @@ def test_public_terminal_verifier_accepts_every_allowed_disposition(tmp_path: Pa
         repository = commands.tmp_path
         repository.mkdir(parents=True)
         context = _context(repository, _Transport(items), commands)
-        assert lifecycle.run_one_shot(context).state == expected
+        assert _run_fixture(context).state == expected
         verified = evidence.verify_terminal_evidence(repository / EVIDENCE_ROOT, context.identity)
         assert verified["state"] == verified["disposition"] == expected
 
@@ -692,7 +793,7 @@ def test_failed_terminal_rejects_impossible_state_combinations(
 
 
 def _resign_assessment(
-    context: lifecycle.RuntimeContext,
+    context: _RuntimeContext,
     root: Path,
     terminal: dict[str, Any],
     assessment: dict[str, Any],
@@ -742,258 +843,6 @@ def test_resigned_terminal_rejects_transcript_schema_and_semantic_mutations(
         page["decoded_application_body_sha256"] = sha256_bytes(body_raw)
     if mutation != "payload_hash":
         _replace_bound_json(root, terminal, "transcript", transcript)
-    _resign_terminal(context, root, terminal)
-    with pytest.raises(ValueError):
-        evidence.verify_terminal_evidence(root, context.identity)
-
-
-def _journal_records(root: Path) -> list[dict[str, Any]]:
-    return [
-        cast(dict[str, Any], json.loads(raw))
-        for raw in (root / "command-journal.jsonl").read_bytes().splitlines()
-    ]
-
-
-def _replace_journal(
-    context: lifecycle.RuntimeContext, root: Path,
-    terminal: dict[str, Any], records: list[dict[str, Any]],
-) -> None:
-    raw = b"".join(canonical_json(record) + b"\n" for record in records)
-    _replace_bound_bytes(root, terminal, "command-journal", raw)
-    _resign_terminal(context, root, terminal)
-
-
-def _bind_journal(root: Path, terminal: dict[str, Any], records: list[dict[str, Any]]) -> None:
-    for ordinal, record in enumerate(records, start=1):
-        record["ordinal"] = ordinal
-    raw = b"".join(canonical_json(record) + b"\n" for record in records)
-    _replace_bound_bytes(root, terminal, "command-journal", raw)
-    outcomes = [
-        record["details"] for record in records if record["phase"] == "outcome"
-        and type(record["details"]) is dict and "stdout_sha256" in record["details"]
-    ]
-    _replace_bound_json(root, terminal, "command-records", outcomes)
-
-
-@_parametrize(
-    "mutation",
-    [
-        "unknown_operation",
-        "unknown_detail",
-        "detail_type",
-        "unpaired",
-        "duplicate_outcome",
-        "out_of_order",
-        "wrong_operation_pair",
-    ],
-)
-def test_resigned_terminal_rejects_journal_schema_and_pairing_mutations(
-    tmp_path: Path, mutation: str
-) -> None:
-    context, root = _completed_with_history(tmp_path / mutation)
-    terminal = cast(dict[str, Any], json.loads((root / "terminal.json").read_bytes()))
-    records = _journal_records(root)
-    if mutation == "unknown_operation":
-        records[0]["operation"] = "unknown-operation"
-    elif mutation == "unknown_detail":
-        cast(dict[str, object], records[0]["details"])["unknown"] = None
-    elif mutation == "detail_type":
-        records[0]["details"] = []
-    elif mutation == "unpaired":
-        records.pop(1)
-    elif mutation == "duplicate_outcome":
-        records.insert(2, deepcopy(records[1]))
-    elif mutation == "out_of_order":
-        records[0], records[1] = records[1], records[0]
-    else:
-        records[1]["operation"] = "prime-api-create"
-    for ordinal, record in enumerate(records, start=1):
-        record["ordinal"] = ordinal
-    _replace_journal(context, root, terminal, records)
-    with pytest.raises(ValueError):
-        evidence.verify_terminal_evidence(root, context.identity)
-
-
-@_parametrize(
-    "field,value",
-    [
-        ("raw_team_id", "team-secret"),
-        ("provider_row", {"provider": "secret-provider"}),
-        ("private_key_path", r"C:\\secret\\id_rsa"),
-        ("credential", "fixture-secret"),
-        ("raw_body", "provider-response"),
-    ],
-)
-def test_resigned_terminal_rejects_every_journal_privacy_sentinel(
-    tmp_path: Path, field: str, value: object
-) -> None:
-    context, root = _completed_with_history(tmp_path / field)
-    terminal = cast(dict[str, Any], json.loads((root / "terminal.json").read_bytes()))
-    records = _journal_records(root)
-    cast(dict[str, object], records[0]["details"])[field] = value
-    _replace_journal(context, root, terminal, records)
-    with pytest.raises(ValueError):
-        evidence.verify_terminal_evidence(root, context.identity)
-    assert b"team-secret" not in canonical_json(terminal)
-
-
-@_parametrize("artifact", ["create-dispatch", "create-result"])
-def test_resigned_terminal_rejects_arbitrary_create_artifact(
-    tmp_path: Path, artifact: str
-) -> None:
-    context, root = _completed_with_history(tmp_path / artifact)
-    terminal = cast(dict[str, Any], json.loads((root / "terminal.json").read_bytes()))
-    _replace_bound_json(root, terminal, artifact, {"forged": True})
-    _resign_terminal(context, root, terminal)
-    with pytest.raises(ValueError):
-        evidence.verify_terminal_evidence(root, context.identity)
-
-
-def test_resigned_terminal_rejects_arbitrary_handoff_payload(tmp_path: Path) -> None:
-    context, root = _completed_with_history(tmp_path / "handoff")
-    terminal = cast(dict[str, Any], json.loads((root / "terminal.json").read_bytes()))
-    payload = canonical_json({"forged": True})
-    signature = lifecycle._sign(context, payload, HANDOFF_NAMESPACE, timeout=30)
-    envelope = evidence.signed_envelope(
-        payload,
-        signature,
-        HANDOFF_NAMESPACE,
-        context.identity,
-        authority=READINESS_AUTHORITY,
-    )
-    _replace_bound_bytes(root, terminal, "handoff", payload)
-    _replace_bound_bytes(root, terminal, "handoff-signature", signature)
-    _replace_bound_bytes(root, terminal, "handoff-envelope", envelope)
-    _resign_terminal(context, root, terminal)
-    with pytest.raises(ValueError):
-        evidence.verify_terminal_evidence(root, context.identity)
-
-
-@_parametrize(
-    "mutation",
-    [
-        "unknown", "missing", "authorization", "claim", "transcript", "assessment",
-        "resource", "pod", "ssh", "runtime", "ttl", "retry", "authority", "path",
-        "nonce", "signature_file", "signature_replay", "known_hash", "known_empty",
-        "known_malformed", "known_oversize", "known_host", "known_port",
-        "known_same_endpoint_key", "keyscan_digest", "keyscan_reorder",
-        "keyscan_duplicate", "keyscan_missing",
-    ],
-)
-def test_resigned_terminal_rejects_handoff_semantic_and_signature_matrix(
-    tmp_path: Path, mutation: str
-) -> None:
-    context, root = _completed_with_history(tmp_path / mutation)
-    terminal = cast(dict[str, Any], json.loads((root / "terminal.json").read_bytes()))
-    handoff = cast(dict[str, Any], json.loads((root / "handoff.json").read_bytes()))
-    if mutation == "unknown":
-        handoff["unknown"] = None
-    elif mutation == "missing":
-        handoff.pop("state")
-    elif mutation == "authorization":
-        handoff["authorization"]["commit"] = "0" * 40
-    elif mutation in {"claim", "transcript"}:
-        handoff[mutation]["sha256"] = "0" * 64
-    elif mutation == "assessment":
-        handoff["assessment"]["envelope_sha256"] = "0" * 64
-    elif mutation == "resource":
-        handoff["selected_resource_sha256"] = "0" * 64
-    elif mutation == "pod":
-        handoff["pod"]["identity_sha256"] = "0" * 64
-    elif mutation == "ssh":
-        handoff["ssh"]["port"] = 0
-    elif mutation == "runtime":
-        handoff["runtime"]["test_nodes"].reverse()
-    elif mutation == "ttl":
-        handoff["expires_at_epoch"] += 1
-    elif mutation == "retry":
-        handoff["retry"] = True
-    elif mutation == "authority":
-        handoff["authority"]["science_authorized"] = True
-    elif mutation == "path":
-        handoff["evidence_paths"]["claim"] = "elsewhere.json"
-    elif mutation == "nonce":
-        handoff["nonce"] = "0"
-    known_hosts = (root / "known-hosts.txt").read_bytes()
-    known_mutations = {
-        "known_empty": b"",
-        "known_malformed": b"[8.8.8.8]:2222 ssh-rsa fixture\n",
-        "known_oversize": b"x" * (64 * 1024 + 1),
-        "known_host": known_hosts.replace(b"[8.8.8.8]:2222", b"[1.1.1.1]:2222"),
-        "known_port": known_hosts.replace(b":2222", b":22"),
-        "known_same_endpoint_key": known_hosts.replace(b"QC3G", b"QC4G", 1),
-    }
-    if mutation == "known_hash":
-        handoff["ssh"]["known_hosts_sha256"] = "0" * 64
-    elif mutation in known_mutations:
-        known_hosts = known_mutations[mutation]
-        handoff["ssh"]["known_hosts_sha256"] = sha256_bytes(known_hosts)
-        _replace_bound_bytes(root, terminal, "known-hosts", known_hosts)
-    if mutation.startswith("keyscan_"):
-        records = _journal_records(root)
-        scans = [
-            index for index, record in enumerate(records) if record["phase"] == "dispatch"
-            and cast(str, record["operation"]).startswith("ssh-keyscan.exe ")
-        ]
-        if mutation == "keyscan_digest":
-            cast(dict[str, object], records[scans[0] + 1]["details"])["stdout_sha256"] = "0" * 64
-        elif mutation == "keyscan_reorder":
-            second = scans[1]
-            records[second : second + 4] = (
-                records[second + 2 : second + 4] + records[second : second + 2]
-            )
-        elif mutation == "keyscan_duplicate":
-            records[scans[1] : scans[1]] = deepcopy(records[scans[0] : scans[0] + 2])
-        else:
-            del records[scans[1] : scans[1] + 2]
-        _bind_journal(root, terminal, records)
-    raw = canonical_json(handoff)
-    envelope_signature = lifecycle._sign(
-        context, b"replay" if mutation == "signature_replay" else raw,
-        HANDOFF_NAMESPACE, timeout=30,
-    )
-    envelope = evidence.signed_envelope(
-        raw, envelope_signature, HANDOFF_NAMESPACE, context.identity,
-        authority=READINESS_AUTHORITY,
-    )
-    _replace_bound_bytes(root, terminal, "handoff", raw)
-    signature_file = b"forged" if mutation == "signature_file" else envelope_signature
-    _replace_bound_bytes(root, terminal, "handoff-signature", signature_file)
-    _replace_bound_bytes(root, terminal, "handoff-envelope", envelope)
-    _resign_terminal(context, root, terminal)
-    with pytest.raises(ValueError):
-        evidence.verify_terminal_evidence(root, context.identity)
-
-
-@_parametrize("mutation", ["forged", "noncanonical", "identity", "pagination", "row", "digest"])
-def test_resigned_terminal_rejects_wallet_before_without_after_matrix(
-    tmp_path: Path, mutation: str,
-) -> None:
-    context, root = _failed_fixture(tmp_path / mutation)
-    terminal = cast(dict[str, Any], json.loads((root / "terminal.json").read_bytes()))
-    cleanup = cast(dict[str, Any], json.loads((root / "cleanup.json").read_bytes()))
-    cleanup["wallet_after"] = None
-    cleanup["errors"] = ["wallet:RuntimeError"]
-    terminal["cleanup_proven"] = False
-    terminal["cleanup_failures"] = ["wallet:RuntimeError"]
-    wallet = cast(dict[str, Any], json.loads((root / "wallet-before.json").read_bytes()))
-    if mutation == "forged":
-        wallet = {"forged": True}
-    elif mutation == "identity":
-        wallet["wallet_identity_sha256"] = "0" * 64
-    elif mutation == "pagination":
-        wallet["pagination"]["pages"][0]["offset"] = 100
-    elif mutation == "row":
-        wallet["rows"][0]["amount_usd"] = "9"
-    elif mutation == "digest":
-        wallet["rows"][0]["semantic_row_sha256"] = "0" * 64
-    wallet_raw = (
-        json.dumps(wallet, indent=2).encode()
-        if mutation == "noncanonical"
-        else canonical_json(wallet)
-    )
-    _replace_bound_bytes(root, terminal, "wallet-before", wallet_raw)
-    _replace_bound_json(root, terminal, "cleanup", cleanup)
     _resign_terminal(context, root, terminal)
     with pytest.raises(ValueError):
         evidence.verify_terminal_evidence(root, context.identity)

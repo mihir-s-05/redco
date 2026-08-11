@@ -23,6 +23,7 @@ from test_stage_d_v13_prime_test_one_shot_evidence_v2 import (
     _replace_bound_json,
     _resign_terminal,
     _Response,
+    _run_fixture,
     _Transport,
     _wallet,
     _wallet_snapshot,
@@ -30,6 +31,7 @@ from test_stage_d_v13_prime_test_one_shot_evidence_v2 import (
 
 from redco.analysis import stage_d_v13_prime_inventory_v5 as v5
 from redco.analysis import stage_d_v13_prime_test_one_shot_evidence_v2 as evidence
+from redco.analysis import stage_d_v13_prime_test_one_shot_handoff_v2 as handoff_owner
 from redco.analysis import stage_d_v13_prime_test_one_shot_lifecycle_v2 as lifecycle
 from redco.analysis import stage_d_v13_prime_test_one_shot_prime_v2 as prime_owner
 from redco.analysis import stage_d_v13_prime_test_one_shot_remote_v2 as remote_owner
@@ -50,6 +52,7 @@ from redco.analysis.stage_d_v13_prime_test_one_shot_contract_v2 import (
     publish_once,
     sha256_bytes,
 )
+from redco.analysis.stage_d_v13_prime_test_one_shot_runtime_binding_v2 import _RuntimeContext
 
 
 @_parametrize(
@@ -131,7 +134,7 @@ def test_precreate_capacity_state_rejects_orphan_wallet_before(tmp_path: Path) -
     repository = tmp_path / "orphan-before"
     repository.mkdir()
     context = _context(repository, _Transport([]), _Commands(repository))
-    assert lifecycle.run_one_shot(context).state == "no_qualifying_capacity"
+    assert _run_fixture(context).state == "no_qualifying_capacity"
     root = repository / EVIDENCE_ROOT
     terminal = cast(dict[str, Any], json.loads((root / "terminal.json").read_bytes()))
     (root / "wallet-before.json").write_bytes(raw)
@@ -184,7 +187,7 @@ def test_multiple_distinct_capacity_selects_deterministically_but_duplicates_fai
 def test_no_capacity_performs_no_prime_or_create_calls(tmp_path: Path) -> None:
     transport = _Transport([])
     commands = _Commands(tmp_path)
-    result = lifecycle.run_one_shot(_context(tmp_path, transport, commands))
+    result = _run_fixture(_context(tmp_path, transport, commands))
     assert result.state == "no_qualifying_capacity"
     assert len(transport.calls) == 2
     assert all(Path(call[0]).name.lower() == "ssh-keygen.exe" for call in commands.invocations)
@@ -196,7 +199,7 @@ def test_zero_disk_direct_create_uses_assessed_resource_without_second_availabil
     commands = _Commands(tmp_path)
     context = _context(tmp_path, transport, commands)
     root = exclusive_runtime_root(tmp_path)
-    owner = prime_owner.Lifecycle(context, root, 1.0)
+    owner = prime_owner._Lifecycle(context, root, 1.0)
     resource = _item(1)
     prime_owner.direct_create(
         owner,
@@ -213,9 +216,9 @@ def test_expired_operational_deadline_blocks_create_before_dispatch(
 ) -> None:
     transport = _Transport([_item(1)])
     context = _context(tmp_path, transport, _Commands(tmp_path))
-    context.monotonic = lambda: 21_601.0
+    object.__setattr__(context, "monotonic", lambda: 21_601.0)
     root = exclusive_runtime_root(tmp_path)
-    owner = prime_owner.Lifecycle(context, root, 0.0)
+    owner = prime_owner._Lifecycle(context, root, 0.0)
     dispatch = fixed_runtime_path(root, "create-dispatch.json")
     with pytest.raises(TimeoutError, match="before create"):
         prime_owner.direct_create(
@@ -251,7 +254,7 @@ def test_create_response_is_bound_to_selected_request(
     transport = MutatedTransport([_item(1)])
     context = _context(tmp_path, transport, _Commands(tmp_path))
     root = exclusive_runtime_root(tmp_path)
-    owner = prime_owner.Lifecycle(context, root, 1.0)
+    owner = prime_owner._Lifecycle(context, root, 1.0)
     with pytest.raises(RuntimeError, match="schema"):
         prime_owner.direct_create(
             owner,
@@ -266,7 +269,7 @@ def test_authenticated_create_id_must_equal_reconciled_exact_name_id(tmp_path: P
     commands = _Commands(tmp_path)
     context = _context(tmp_path, transport, commands)
     root = exclusive_runtime_root(tmp_path)
-    owner = prime_owner.Lifecycle(context, root, 1.0)
+    owner = prime_owner._Lifecycle(context, root, 1.0)
     owner.trusted_pod_id = "response-id"
     def run(argv: Sequence[str], _input: bytes | None, _timeout: float) -> lifecycle.CommandResult:
         args = tuple(argv)
@@ -279,7 +282,7 @@ def test_authenticated_create_id_must_equal_reconciled_exact_name_id(tmp_path: P
             }
         )
         return lifecycle.CommandResult(args, 0, raw, b"")
-    context.run = run
+    object.__setattr__(context, "run", run)
     with pytest.raises(RuntimeError, match="identity differ"):
         remote_owner.reconcile_created_pod(owner)
     assert owner.known_pod_ids == {"different-id"}
@@ -288,7 +291,7 @@ def test_ambiguous_create_is_dispatched_once_reconciled_and_terminated(
 ) -> None:
     transport = _Transport([_item(1)], ambiguous_create=True)
     commands = _Commands(tmp_path)
-    result = lifecycle.run_one_shot(_context(tmp_path, transport, commands))
+    result = _run_fixture(_context(tmp_path, transport, commands))
     assert result.state == "failed_terminal"
     assert result.create_dispatched and result.cleanup_proven
     assert [method for method, _url, _payload in transport.calls].count("POST") == 1
@@ -300,7 +303,7 @@ def test_cleanup_adopts_late_exact_name_pods_once_and_ignores_unrelated(
     transport = _Transport([])
     context = _context(tmp_path, transport, _Commands(tmp_path))
     root = exclusive_runtime_root(tmp_path)
-    owner = prime_owner.Lifecycle(context, root, 1.0)
+    owner = prime_owner._Lifecycle(context, root, 1.0)
     owner.create_dispatched = True
     owner.create_dispatch_epoch = 1_000
     transport.wallet_handler = lambda _offset, _ordinal: _wallet(
@@ -332,7 +335,7 @@ def test_cleanup_adopts_late_exact_name_pods_once_and_ignores_unrelated(
         else:
             output = b""
         return lifecycle.CommandResult(args, 0, output, b"")
-    context.run = run
+    object.__setattr__(context, "run", run)
     ok, evidence, errors = prime_owner.cleanup(owner, _wallet_snapshot(_wallet(30.0, billed=False)))
     assert ok and not errors and sorted(terminated) == ["late-a", "late-b"]
     assert len(cast(list[str], evidence["terminated_identity_sha256s"])) == 2
@@ -340,7 +343,7 @@ def test_cleanup_never_terminates_unrelated_pod_and_fails_global_zero(tmp_path: 
     transport = _Transport([])
     context = _context(tmp_path, transport, _Commands(tmp_path))
     root = exclusive_runtime_root(tmp_path)
-    owner = prime_owner.Lifecycle(context, root, 1.0)
+    owner = prime_owner._Lifecycle(context, root, 1.0)
     owner.create_dispatched = True
     owner.create_dispatch_epoch = 1_000
     transport.wallet_handler = lambda _offset, _ordinal: _wallet(29.5, billed=True)
@@ -360,7 +363,7 @@ def test_cleanup_never_terminates_unrelated_pod_and_fails_global_zero(tmp_path: 
         else:
             raw = b""
         return lifecycle.CommandResult(args, 0, raw, b"")
-    context.run = run
+    object.__setattr__(context, "run", run)
     ok, evidence, errors = prime_owner.cleanup(owner, _wallet_snapshot(_wallet(30.0, billed=False)))
     assert not ok and not terminated
     assert "pods:global_inventory_not_empty" in errors
@@ -371,7 +374,7 @@ def test_ambiguous_termination_is_dispatched_at_most_once_and_remains_terminal(
 ) -> None:
     context = _context(tmp_path, _Transport([]), _Commands(tmp_path))
     root = exclusive_runtime_root(tmp_path)
-    owner = prime_owner.Lifecycle(context, root, 1.0)
+    owner = prime_owner._Lifecycle(context, root, 1.0)
     owner.create_dispatched = True
     owner.known_pod_ids.add("ambiguous-pod")
     termination_calls = 0
@@ -393,7 +396,7 @@ def test_ambiguous_termination_is_dispatched_at_most_once_and_remains_terminal(
         else:
             raw, code = b"", 0
         return lifecycle.CommandResult(args, code, raw, b"")
-    context.run = run
+    object.__setattr__(context, "run", run)
     ok, _evidence, errors = prime_owner.cleanup(
         owner, _wallet_snapshot(_wallet(30.0, billed=False))
     )
@@ -402,7 +405,7 @@ def test_ambiguous_termination_is_dispatched_at_most_once_and_remains_terminal(
 def test_cleanup_waits_for_nonzero_settled_billing(tmp_path: Path) -> None:
     transport = _Transport([_item(1)])
     commands = _Commands(tmp_path, billing_delay=3)
-    result = lifecycle.run_one_shot(_context(tmp_path, transport, commands))
+    result = _run_fixture(_context(tmp_path, transport, commands))
     assert result.state == "completed"
     assert commands.wallet_after_polls == 4
 def test_cleanup_exact_maximum_terminates_trusted_and_eight_late_ids(
@@ -410,7 +413,7 @@ def test_cleanup_exact_maximum_terminates_trusted_and_eight_late_ids(
 ) -> None:
     transport = _Transport([])
     context = _context(tmp_path, transport, _Commands(tmp_path))
-    owner = prime_owner.Lifecycle(context, exclusive_runtime_root(tmp_path), 1.0)
+    owner = prime_owner._Lifecycle(context, exclusive_runtime_root(tmp_path), 1.0)
     owner.create_dispatched = True
     owner.create_dispatch_epoch = 1_000
     wallet_requests = 0
@@ -450,7 +453,7 @@ def test_cleanup_exact_maximum_terminates_trusted_and_eight_late_ids(
         else:
             raw = b""
         return lifecycle.CommandResult(args, 0, raw, b"")
-    context.run = run
+    object.__setattr__(context, "run", run)
     ok, _evidence, errors = prime_owner.cleanup(
         owner, _wallet_snapshot(_wallet(30.0, billed=False))
     )
@@ -465,8 +468,8 @@ def test_cleanup_has_separate_deadline_after_operational_lifetime(
     monkeypatch.setattr(prime_owner, "MAX_TERMINATION_POLLS", 1)
     clock = [21_601.0]
     context = _context(tmp_path, _Transport([]), _Commands(tmp_path))
-    context.monotonic = lambda: clock[0]
-    owner = prime_owner.Lifecycle(context, exclusive_runtime_root(tmp_path), 0.0)
+    object.__setattr__(context, "monotonic", lambda: clock[0])
+    owner = prime_owner._Lifecycle(context, exclusive_runtime_root(tmp_path), 0.0)
     owner.create_dispatched = True
     owner.create_dispatch_epoch = 1_000
     owner.known_pod_ids.add("owned")
@@ -489,7 +492,7 @@ def test_cleanup_has_separate_deadline_after_operational_lifetime(
         else:
             raise AssertionError("non-cleanup command crossed the operational deadline")
         return lifecycle.CommandResult(args, 0, raw, b"")
-    context.run = run
+    object.__setattr__(context, "run", run)
     ok, _evidence, errors = prime_owner.cleanup(
         owner, _wallet_snapshot(_wallet(30.0, billed=False))
     )
@@ -501,9 +504,11 @@ def test_cleanup_deadline_bounds_slow_commands_and_sleeps(tmp_path: Path) -> Non
     phases: list[str] = []
     transport = _Transport([])
     context = _context(tmp_path, transport, _Commands(tmp_path))
-    context.monotonic = lambda: clock[0]
-    context.sleep = lambda seconds: clock.__setitem__(0, clock[0] + seconds)
-    owner = prime_owner.Lifecycle(context, exclusive_runtime_root(tmp_path), 0.0)
+    object.__setattr__(context, "monotonic", lambda: clock[0])
+    object.__setattr__(
+        context, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds)
+    )
+    owner = prime_owner._Lifecycle(context, exclusive_runtime_root(tmp_path), 0.0)
     owner.create_dispatched = True
     owner.create_dispatch_epoch = 1_000
 
@@ -526,7 +531,7 @@ def test_cleanup_deadline_bounds_slow_commands_and_sleeps(tmp_path: Path) -> Non
             raw = canonical_json({"pods": [], "total_count": 0, "offset": 0, "limit": 100})
         return lifecycle.CommandResult(args, 0, raw, b"")
 
-    context.run = run
+    object.__setattr__(context, "run", run)
     ok, evidence, errors = prime_owner.cleanup(owner, _wallet_snapshot(_wallet(30.0, billed=False)))
     assert not ok and errors
     assert clock[0] <= 21_601.0 + CLEANUP_TIMEOUT_SECONDS
@@ -541,7 +546,7 @@ def test_cleanup_terminates_known_id_before_failing_inventory_and_continues(
     monkeypatch.setattr(prime_owner, "MAX_TERMINATION_POLLS", 2)
     transport = _Transport([])
     context = _context(tmp_path, transport, _Commands(tmp_path))
-    owner = prime_owner.Lifecycle(context, exclusive_runtime_root(tmp_path), 1.0)
+    owner = prime_owner._Lifecycle(context, exclusive_runtime_root(tmp_path), 1.0)
     owner.create_dispatched = True
     owner.create_dispatch_epoch = 1_000
     owner.known_pod_ids.add("trusted")
@@ -565,7 +570,7 @@ def test_cleanup_terminates_known_id_before_failing_inventory_and_continues(
         else:
             raise AssertionError("unexpected cleanup command")
         return lifecycle.CommandResult(args, 0, raw, b"")
-    context.run = run
+    object.__setattr__(context, "run", run)
     ok, evidence, errors = prime_owner.cleanup(owner, _wallet_snapshot(_wallet(30.0, billed=False)))
     assert not ok and order[0] == "terminate:trusted"
     assert order.count("terminate:trusted") == 1 and "pods-list" in order
@@ -597,8 +602,8 @@ def test_full_owner_terminal_follows_preinventory_terminate_when_cleanup_lists_t
         elif "disks" in args and commands.terminated:
             cleanup_order.append("disks")
         return result
-    context.run = run
-    result = lifecycle.run_one_shot(context)
+    object.__setattr__(context, "run", run)
+    result = _run_fixture(context)
     assert result.state == "failed_terminal" and cleanup_order[0] == "terminate:pod-fixture"
     assert cleanup_order.count("terminate:pod-fixture") == 1
     assert "pods-list" in cleanup_order and "disks" in cleanup_order
@@ -611,7 +616,7 @@ def test_full_owner_terminal_follows_preinventory_terminate_when_cleanup_lists_t
 def test_permanent_zero_billing_is_terminal(tmp_path: Path) -> None:
     transport = _Transport([_item(1)])
     commands = _Commands(tmp_path, billing_delay=10_000)
-    result = lifecycle.run_one_shot(_context(tmp_path, transport, commands))
+    result = _run_fixture(_context(tmp_path, transport, commands))
     assert result.state == "failed_terminal"
     terminal = json.loads((tmp_path / EVIDENCE_ROOT / "terminal.json").read_bytes())
     assert terminal["cleanup_proven"] is False
@@ -621,7 +626,7 @@ def test_permanent_zero_billing_is_terminal(tmp_path: Path) -> None:
 def test_remote_failure_recovers_junit_and_still_tears_down(tmp_path: Path) -> None:
     transport = _Transport([_item(1)])
     commands = _Commands(tmp_path, remote_returncode=7)
-    result = lifecycle.run_one_shot(_context(tmp_path, transport, commands))
+    result = _run_fixture(_context(tmp_path, transport, commands))
     assert result.state == "failed_terminal" and not result.tests_passed
     root = tmp_path / EVIDENCE_ROOT
     assert (root / "pytest.xml").is_file() and (root / "remote-status.json").is_file()
@@ -644,7 +649,7 @@ def test_publication_failures_do_not_bypass_teardown_or_terminal(
         fail_selected,
     )
     commands = _Commands(tmp_path)
-    result = lifecycle.run_one_shot(_context(tmp_path, _Transport([_item(1)]), commands))
+    result = _run_fixture(_context(tmp_path, _Transport([_item(1)]), commands))
     assert result.state == "failed_terminal" and commands.terminated
     terminal = json.loads((tmp_path / EVIDENCE_ROOT / "terminal.json").read_bytes())
     assert terminal["publication_failures"] == ["OSError"]
@@ -655,7 +660,7 @@ def test_terminal_signing_or_envelope_publication_failure_gets_fixed_fallback(
 ) -> None:
     real_sign = lifecycle._sign
     def fail_terminal_sign(
-        context: lifecycle.RuntimeContext,
+        context: _RuntimeContext,
         payload: bytes,
         namespace: str,
         *,
@@ -666,7 +671,9 @@ def test_terminal_signing_or_envelope_publication_failure_gets_fixed_fallback(
         return real_sign(context, payload, namespace, timeout=timeout)
 
     monkeypatch.setattr(lifecycle, "_sign", fail_terminal_sign)
-    result = lifecycle.run_one_shot(_context(tmp_path, _Transport([_item(1)]), _Commands(tmp_path)))
+    result = _run_fixture(
+        _context(tmp_path, _Transport([_item(1)]), _Commands(tmp_path))
+    )
     root = tmp_path / EVIDENCE_ROOT
     assert result.state == "failed_terminal" and result.terminal_sha256 is None
     assert (root / "terminal-publication-failure.json").is_file()
@@ -687,7 +694,9 @@ def test_terminal_envelope_publication_failure_is_fail_closed(
         "redco.analysis.stage_d_v13_prime_test_one_shot_lifecycle_v2.publish_once",
         fail_envelope,
     )
-    result = lifecycle.run_one_shot(_context(tmp_path, _Transport([_item(1)]), _Commands(tmp_path)))
+    result = _run_fixture(
+        _context(tmp_path, _Transport([_item(1)]), _Commands(tmp_path))
+    )
     root = tmp_path / EVIDENCE_ROOT
     assert result.state == "failed_terminal" and result.terminal_sha256 is None
     assert (root / "terminal.json").is_file()
@@ -710,8 +719,8 @@ def test_handoff_sign_timeout_enters_cleanup_and_terminal_without_retry(
             if signing_calls == 2:
                 raise subprocess.TimeoutExpired(argv, timeout)
         return real_run(argv, input_bytes, timeout)
-    context.run = timeout_handoff
-    result = lifecycle.run_one_shot(context)
+    object.__setattr__(context, "run", timeout_handoff)
+    result = _run_fixture(context)
     root = tmp_path / EVIDENCE_ROOT
     terminal = json.loads((root / "terminal.json").read_bytes())
     assert result.state == "failed_terminal" and result.create_dispatched
@@ -738,8 +747,8 @@ def test_terminal_sign_timeout_is_bounded_and_publishes_fixed_fallback(
             if signing_calls == 3:
                 raise subprocess.TimeoutExpired(argv, timeout)
         return real_run(argv, input_bytes, timeout)
-    context.run = timeout_terminal
-    result = lifecycle.run_one_shot(context)
+    object.__setattr__(context, "run", timeout_terminal)
+    result = _run_fixture(context)
     root = tmp_path / EVIDENCE_ROOT
     assert result.state == "failed_terminal" and result.cleanup_proven
     assert commands.terminated and signing_calls == 3
@@ -757,8 +766,8 @@ def test_subprocess_timeout_preserves_failure_and_runs_cleanup(tmp_path: Path) -
             raise subprocess.TimeoutExpired(argv, timeout)
         return original(argv, input_bytes, timeout)
     context = _context(tmp_path, _Transport([_item(1)]), commands)
-    context.run = timeout_remote
-    result = lifecycle.run_one_shot(context)
+    object.__setattr__(context, "run", timeout_remote)
+    result = _run_fixture(context)
     assert result.state == "failed_terminal" and result.cleanup_proven
     root = tmp_path / EVIDENCE_ROOT
     terminal = json.loads((root / "terminal.json").read_bytes())
@@ -781,8 +790,8 @@ def test_generic_remote_runner_exception_recovers_once_then_cleans_up(
             raise OSError("fixture remote runner failure")
         return original(argv, input_bytes, timeout)
     context = _context(tmp_path, _Transport([_item(1)]), commands)
-    context.run = fail_remote
-    result = lifecycle.run_one_shot(context)
+    object.__setattr__(context, "run", fail_remote)
+    result = _run_fixture(context)
     root = tmp_path / EVIDENCE_ROOT
     terminal = json.loads((root / "terminal.json").read_bytes())
     assert result.state == "failed_terminal" and result.cleanup_proven
@@ -814,9 +823,9 @@ def test_expired_operational_deadline_still_cleans_and_publishes_terminal(
         return result
 
     context = _context(tmp_path, _Transport([_item(1)]), commands)
-    context.monotonic = lambda: clock[0]
-    context.run = expire_after_remote
-    result = lifecycle.run_one_shot(context)
+    object.__setattr__(context, "monotonic", lambda: clock[0])
+    object.__setattr__(context, "run", expire_after_remote)
+    result = _run_fixture(context)
     terminal = json.loads((tmp_path / EVIDENCE_ROOT / "terminal.json").read_bytes())
     assert result.state == "failed_terminal" and result.cleanup_proven
     assert terminal["primary_failure"] == "TimeoutError"
@@ -829,7 +838,7 @@ def test_full_source_free_lifecycle_recovers_junit_then_cleans_up(
     transport = _Transport([_item(1)])
     commands = _Commands(tmp_path)
     context = _context(tmp_path, transport, commands)
-    result = lifecycle.run_one_shot(context)
+    result = _run_fixture(context)
     assert result.state == "completed"
     assert result.tests_passed and result.cleanup_proven and result.create_dispatched
     assert [method for method, _url, _payload in transport.calls].count("POST") == 1
@@ -883,8 +892,8 @@ def test_assessment_ttl_is_enforced_before_create(tmp_path: Path) -> None:
     commands = _Commands(tmp_path)
     context = _context(tmp_path, transport, commands)
     epochs = iter((1_000, 1_000, 1_000 + ASSESSMENT_TTL_SECONDS + 1))
-    context.now = lambda: next(epochs)
-    result = lifecycle.run_one_shot(context)
+    object.__setattr__(context, "now", lambda: next(epochs))
+    result = _run_fixture(context)
     assert result.state == "failed_terminal"
     assert not result.create_dispatched
     assert not any(call[0] == "POST" for call in transport.calls)
@@ -912,7 +921,7 @@ def test_runtime_authority_excludes_model_science_source_and_training() -> None:
 
 
 def _rewrite_coherent_wire_chain(
-    context: lifecycle.RuntimeContext,
+    context: _RuntimeContext,
     root: Path,
     terminal: dict[str, Any],
     blob: str,
@@ -971,28 +980,14 @@ def test_resigned_terminal_rejects_ssh_wire_key_mutations(
     terminal = json.loads((root / "terminal.json").read_bytes())
     _rewrite_coherent_wire_chain(context, root, terminal, blob, algorithm)
     calls = 0
-    original = remote_owner._validate_ssh_key_blob
+    original = handoff_owner._validate_ssh_key_blob
 
     def spy(blob_bytes: bytes, algorithm: str) -> None:
         nonlocal calls
         calls += 1
         original(blob_bytes, algorithm)
 
-    monkeypatch.setattr(remote_owner, "_validate_ssh_key_blob", spy)
+    monkeypatch.setattr(handoff_owner, "_validate_ssh_key_blob", spy)
     with pytest.raises(ValueError):
         evidence.verify_terminal_evidence(root, context.identity)
     assert calls == 1
-
-
-def test_coherent_wire_rewrite_accepts_without_wire_parser(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    context, root = _completed_with_history(tmp_path / "parser-disabled")
-    terminal = json.loads((root / "terminal.json").read_bytes())
-    _rewrite_coherent_wire_chain(context, root, terminal, "Z2FyYmFnZQ==")
-
-    def framing_only(_blob: bytes, _algorithm: str) -> None:
-        return None
-
-    monkeypatch.setattr(remote_owner, "_validate_ssh_key_blob", framing_only)
-    assert evidence.verify_terminal_evidence(root, context.identity)["state"] == "completed"

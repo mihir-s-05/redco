@@ -1,26 +1,17 @@
 """Prime transport, resource, finance, and cleanup owners for the test one-shot."""
-
 from __future__ import annotations
 
 import base64
-import importlib.util
 import json
 import os
 import re
-import stat
-import subprocess
-import sys
-import time
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
 from redco.analysis import stage_d_v13_prime_inventory_v5 as v5
 from redco.analysis.stage_d_v13_prime_test_one_shot_contract_v2 import (
-    ASSESSMENT_DOMAIN,
-    ASSESSMENT_TTL_SECONDS,
     CLEANUP_BILLING_TIMEOUT_SECONDS,
     CLEANUP_DISK_TIMEOUT_SECONDS,
     CLEANUP_POD_TIMEOUT_SECONDS,
@@ -34,44 +25,32 @@ from redco.analysis.stage_d_v13_prime_test_one_shot_contract_v2 import (
     MAX_PRIME_CLI_CALLS,
     MAX_TERMINATION_POLLS,
     MAXIMUM_POD_SECONDS,
-    OPENSSH_EXECUTABLES,
     POD_NAME_PREFIX,
-    PODS_API_OWNER,
-    PODS_API_OWNER_SHA256,
     PODS_COMMAND_OWNER,
-    PODS_COMMAND_OWNER_SHA256,
     PODS_CREATE_ENDPOINT,
     POLL_INTERVAL_SECONDS,
-    PRIME_CLIENT_OWNER,
-    PRIME_CLIENT_OWNER_SHA256,
-    PRIME_CONFIG_OWNER,
-    PRIME_CONFIG_OWNER_SHA256,
     READINESS_AUTHORITY,
-    ROOT,
-    RUNTIME_AUTHORITY,
-    V5_CONTRACT_PATH,
-    V5_CONTRACT_SHA256,
-    V5_OWNER_PATH,
-    V5_OWNER_SHA256,
     WALLET_API_ENDPOINT,
-    WALLET_API_OWNER,
-    WALLET_API_OWNER_SHA256,
     CommandJournalSummary,
     CommandResult,
     CreateDispatchSummary,
     CreateResultSummary,
     SigningIdentity,
-    authenticate_authorization,
     authority_value,
     canonical_json,
+    closed_authority,
     publish_once,
     sha256_bytes,
     strict_object,
 )
 from redco.analysis.stage_d_v13_prime_test_one_shot_remote_v2 import (
-    LINUX_UV_BYTES,
-    LINUX_UV_SHA256,
     validate_command_journal_details,
+)
+from redco.analysis.stage_d_v13_prime_test_one_shot_runtime_binding_v2 import (
+    V2_RUNTIME_BINDING,
+    RuntimeBinding,
+    _RuntimeContext,
+    sha_file,
 )
 from redco.analysis.stage_d_v13_prime_test_one_shot_wallet_v2 import (
     MAX_RESPONSE_BYTES,
@@ -81,42 +60,9 @@ from redco.analysis.stage_d_v13_prime_test_one_shot_wallet_v2 import (
     validate_wallet_journal_details,
 )
 
-POD_IMAGE = "ubuntu_22_cuda_12"
-MAX_OUTPUT_BYTES = MAX_COMMAND_OUTPUT_BYTES
-
-
-class APIClient(Protocol):
-    base_url: str
-    api_key: str
-    client: Any
-    config: Any
-
-
-@dataclass(slots=True)
-class RuntimeContext:
-    repository: Path
-    authorization: Mapping[str, str]
-    client: APIClient
-    wallet_team_id: str | None
-    transport_errors: tuple[type[BaseException], ...]
-    prime_executable: Path
-    openssh: Mapping[str, Path]
-    keygen_executable: Path
-    signing_key: Path
-    identity: SigningIdentity
-    linux_uv: Path
-    run: Callable[[Sequence[str], bytes | None, float], CommandResult]
-    now: Callable[[], int]
-    monotonic: Callable[[], float]
-    sleep: Callable[[float], None]
-
-
-def sha_file(path: Path) -> str:
-    return sha256_bytes(path.read_bytes())
-
 
 def load_json(raw: bytes, label: str) -> dict[str, Any]:
-    if len(raw) > MAX_OUTPUT_BYTES:
+    if len(raw) > MAX_COMMAND_OUTPUT_BYTES:
         raise ValueError(f"{label} exceeds its byte bound")
     try:
         value = json.loads(raw, parse_float=Decimal, parse_int=int)
@@ -144,7 +90,8 @@ def inventory(raw: bytes, key: str) -> list[dict[str, Any]]:
 
 
 def assess_pages(
-    pages: list[dict[str, object]], checkout: Mapping[str, str], captured: int
+    pages: list[dict[str, object]], checkout: Mapping[str, str], captured: int,
+    binding: RuntimeBinding = V2_RUNTIME_BINDING,
 ) -> tuple[bytes, dict[str, Any] | None]:
     replay = v5._replay_transcript(pages, None, None, len(pages))
     rows: list[dict[str, object]] = []
@@ -195,12 +142,12 @@ def assess_pages(
     )
     return canonical_json(
         {
-            "schema_version": 2,
-            "domain": ASSESSMENT_DOMAIN,
+            "schema_version": binding.assessment_schema_version,
+            "domain": binding.assessment_domain,
             "state": state,
             "reason": reason,
             "captured_at_epoch": captured,
-            "expires_at_epoch": captured + ASSESSMENT_TTL_SECONDS,
+            "expires_at_epoch": captured + binding.assessment_ttl_seconds,
             "checkout": dict(checkout),
             "transcript_payload_sha256": replay["payload_sha256"],
             "row_count": len(rows),
@@ -213,7 +160,7 @@ def assess_pages(
             "selected_facts": facts,
             "attempt_consumed": True,
             "retry": False,
-            "authority": RUNTIME_AUTHORITY,
+            "authority": dict(binding.assessment_authority),
         }
     ), selected
 
@@ -234,7 +181,7 @@ def create_payload(
             "diskSize": 0,
             "vcpus": None,
             "memory": None,
-            "image": POD_IMAGE,
+            "image": "ubuntu_22_cuda_12",
             "dataCenterId": resource.get("dataCenter"),
             "maxPrice": None,
             "country": None,
@@ -257,7 +204,10 @@ def _digest(value: object, label: str) -> str:
     return value
 
 
-def validate_create_dispatch(raw: bytes) -> CreateDispatchSummary:
+def validate_create_dispatch(
+    raw: bytes, *, authority: Mapping[str, bool] = READINESS_AUTHORITY
+) -> CreateDispatchSummary:
+    authority = closed_authority(authority, "create dispatch")
     value = strict_object(
         raw,
         {
@@ -277,14 +227,20 @@ def validate_create_dispatch(raw: bytes) -> CreateDispatchSummary:
         or value["retry"] is not False
     ):
         raise ValueError("Prime one-shot create dispatch binding differs")
-    authority_value(value["authority"], READINESS_AUTHORITY, "create dispatch")
+    authority_value(value["authority"], authority, "create dispatch")
     return CreateDispatchSummary(
         _digest(value["resource_sha256"], "create resource digest"),
         _digest(value["payload_sha256"], "create payload digest"),
     )
 
 
-def create_dispatch_bytes(resource: Mapping[str, Any], payload: object) -> bytes:
+def create_dispatch_bytes(
+    resource: Mapping[str, Any],
+    payload: object,
+    *,
+    authority: Mapping[str, bool] = READINESS_AUTHORITY,
+) -> bytes:
+    authority = closed_authority(authority, "create dispatch")
     raw = canonical_json(
         {
             "schema_version": 2,
@@ -295,16 +251,20 @@ def create_dispatch_bytes(resource: Mapping[str, Any], payload: object) -> bytes
             "disk_size": 0,
             "attempt_limit": 1,
             "retry": False,
-            "authority": READINESS_AUTHORITY,
+            "authority": dict(authority),
         }
     )
-    validate_create_dispatch(raw)
+    validate_create_dispatch(raw, authority=authority)
     return raw
 
 
 def validate_create_result(
-    raw: bytes, authorization: Mapping[str, str]
+    raw: bytes,
+    authorization: Mapping[str, str],
+    *,
+    authority: Mapping[str, bool] = READINESS_AUTHORITY,
 ) -> CreateResultSummary:
+    authority = closed_authority(authority, "create result")
     value = strict_object(
         raw,
         {
@@ -324,7 +284,7 @@ def validate_create_result(
         or value["pod_name"] != f"{POD_NAME_PREFIX}-{authorization['commit'][:12]}"
     ):
         raise ValueError("Prime one-shot create result binding differs")
-    authority_value(value["authority"], READINESS_AUTHORITY, "create result")
+    authority_value(value["authority"], authority, "create result")
     return CreateResultSummary(
         value["status_code"],
         _digest(value["response_sha256"], "create response digest"),
@@ -335,8 +295,14 @@ def validate_create_result(
 
 
 def create_result_bytes(
-    status_code: int, response: bytes, pod_identity: str, authorization: Mapping[str, str]
+    status_code: int,
+    response: bytes,
+    pod_identity: str,
+    authorization: Mapping[str, str],
+    *,
+    authority: Mapping[str, bool] = READINESS_AUTHORITY,
 ) -> bytes:
+    authority = closed_authority(authority, "create result")
     raw = canonical_json(
         {
             "schema_version": 2,
@@ -346,10 +312,10 @@ def create_result_bytes(
             "response_sha256": sha256_bytes(response),
             "pod_identity_sha256": sha256_bytes(pod_identity.encode()),
             "pod_name": f"{POD_NAME_PREFIX}-{authorization['commit'][:12]}",
-            "authority": READINESS_AUTHORITY,
+            "authority": dict(authority),
         }
     )
-    validate_create_result(raw, authorization)
+    validate_create_result(raw, authorization, authority=authority)
     return raw
 
 
@@ -509,8 +475,8 @@ def replay_command_journal(records_raw: bytes, journal_raw: bytes) -> CommandJou
     )
 
 
-class Lifecycle:
-    def __init__(self, context: RuntimeContext, root: Path, started: float) -> None:
+class _Lifecycle:
+    def __init__(self, context: _RuntimeContext, root: Path, started: float) -> None:
         self.context, self.root, self.started = context, root, started
         self.commands: list[dict[str, object]] = []
         self.cli_calls = 0
@@ -622,8 +588,8 @@ class Lifecycle:
             )
         if (
             result.argv != tuple(argv)
-            or len(result.stdout) > MAX_OUTPUT_BYTES
-            or len(result.stderr) > MAX_OUTPUT_BYTES
+            or len(result.stdout) > MAX_COMMAND_OUTPUT_BYTES
+            or len(result.stderr) > MAX_COMMAND_OUTPUT_BYTES
             or (result.returncode and not allow_failure)
         ):
             raise RuntimeError("Prime one-shot command failed or differs")
@@ -677,7 +643,7 @@ class Lifecycle:
 
 
 def direct_create(
-    owner: Lifecycle,
+    owner: _Lifecycle,
     resource: Mapping[str, Any],
     team_id: object,
     dispatch: Path,
@@ -687,7 +653,12 @@ def direct_create(
     if remaining <= 0:
         raise TimeoutError("Prime one-shot pod-lifetime deadline elapsed before create")
     payload = create_payload(resource, owner.pod_name, team_id)
-    publish_once(dispatch, create_dispatch_bytes(resource, payload))
+    publish_once(
+        dispatch,
+        create_dispatch_bytes(
+            resource, payload, authority=dict(owner.context.binding.create_authority)
+        ),
+    )
     owner.create_dispatched = True
     owner.create_dispatch_epoch = owner.context.now()
     owner.journal(
@@ -747,13 +718,19 @@ def direct_create(
     )
     publish_once(
         result_path,
-        create_result_bytes(response.status_code, raw, value["id"], owner.context.authorization),
+        create_result_bytes(
+            response.status_code,
+            raw,
+            value["id"],
+            owner.context.authorization,
+            authority=dict(owner.context.binding.create_authority),
+        ),
     )
     return value
 
 
 def cleanup(
-    owner: Lifecycle, before: WalletSnapshot | None
+    owner: _Lifecycle, before: WalletSnapshot | None
 ) -> tuple[bool, dict[str, object], list[str]]:
     errors: list[str] = []
     owner.begin_cleanup()
@@ -833,7 +810,7 @@ def cleanup(
 
 
 def terminate_unattempted_known_ids(
-    owner: Lifecycle, terminated: list[str], errors: list[str]
+    owner: _Lifecycle, terminated: list[str], errors: list[str]
 ) -> None:
     if len(owner.known_pod_ids) > MAX_OWNED_POD_IDENTITIES:
         raise RuntimeError("Prime cleanup identity bound exceeded")
@@ -846,112 +823,6 @@ def terminate_unattempted_known_ids(
             errors.append(f"terminate:{type(error).__name__}")
 
 
-def _authenticate_source(path: str, expected: str) -> None:
-    spec = importlib.util.find_spec(path.replace("/", ".").removesuffix(".py"))
-    if spec is None or spec.origin is None or sha_file(Path(spec.origin)) != expected:
-        raise ValueError(f"Prime one-shot installed owner differs: {path}")
-
-
-def _production_run(
-    argv: Sequence[str], input_bytes: bytes | None, timeout: float
-) -> CommandResult:
-    environment = None
-    if Path(argv[0]).name.lower() == "ssh-keygen.exe":
-        environment = {
-            key: value
-            for key, value in os.environ.items()
-            if not key.upper().startswith(("SSH_", "PRIME_", "GIT_SSH"))
-        }
-        environment["PATH"] = r"C:\Windows\System32\OpenSSH;C:\Windows\System32;C:\Windows"
-    result = subprocess.run(
-        argv,
-        input=input_bytes,
-        capture_output=True,
-        check=False,
-        timeout=timeout,
-        env=environment,
-    )
-    return CommandResult(tuple(argv), result.returncode, result.stdout, result.stderr)
-
-
-def _production_context(signing_key: Path) -> RuntimeContext:
-    if sys.version_info[:3] != (3, 13, 2):
-        raise ValueError("Prime one-shot requires CPython 3.13.2")
-    authorization = cast(dict[str, str], authenticate_authorization(ROOT))
-    for relative, expected in (
-        (V5_OWNER_PATH, V5_OWNER_SHA256),
-        (V5_CONTRACT_PATH, V5_CONTRACT_SHA256),
-    ):
-        if sha_file(ROOT / relative) != expected:
-            raise ValueError("historical v5 binding differs")
-    tool = cast(dict[str, object], v5.authenticate_installed_capture_owners()["prime_uv_tool"])
-    prime = Path(cast(str, tool["canonical_path"]))
-    if sha_file(prime) != tool["sha256"]:
-        raise ValueError("Prime executable differs")
-    _authenticate_source(PODS_API_OWNER, PODS_API_OWNER_SHA256)
-    _authenticate_source(PODS_COMMAND_OWNER, PODS_COMMAND_OWNER_SHA256)
-    _authenticate_source(WALLET_API_OWNER, WALLET_API_OWNER_SHA256)
-    _authenticate_source(PRIME_CLIENT_OWNER, PRIME_CLIENT_OWNER_SHA256)
-    _authenticate_source(PRIME_CONFIG_OWNER, PRIME_CONFIG_OWNER_SHA256)
-    openssh = {
-        name: Path(cast(str, binding["path"])) for name, binding in OPENSSH_EXECUTABLES.items()
-    }
-    for name, path in openssh.items():
-        binding = OPENSSH_EXECUTABLES[name]
-        info = path.lstat()
-        if (
-            path.is_symlink()
-            or not stat.S_ISREG(info.st_mode)
-            or info.st_size != binding["bytes"]
-            or sha_file(path) != binding["sha256"]
-        ):
-            raise ValueError("OpenSSH executable differs")
-    keygen = v5.authenticate_approved_openssh_executable()
-    raw_identity = v5._load_terminal_signing_identity()
-    v5._authenticate_operator_key(signing_key, raw_identity)
-    identity = SigningIdentity(
-        raw_identity.principal,
-        raw_identity.key_type,
-        raw_identity.public_key_base64,
-        raw_identity.fingerprint_sha256,
-        raw_identity.allowed_signers_sha256,
-    )
-    linux_uv = Path(r"\\wsl.localhost\Ubuntu\home\mihir\.local\uv-latest\uv")
-    if (
-        not linux_uv.is_file()
-        or linux_uv.stat().st_size != LINUX_UV_BYTES
-        or sha_file(linux_uv) != LINUX_UV_SHA256
-    ):
-        raise ValueError("Linux uv asset differs")
-    client = cast(APIClient, v5._construct_api_client())
-    configured_team = getattr(client.config, "team_id", None)
-    if configured_team is not None and (
-        not isinstance(configured_team, str) or not configured_team
-    ):
-        raise ValueError("Prime configured team identity differs")
-    return RuntimeContext(
-        ROOT,
-        authorization,
-        client,
-        configured_team,
-        v5._httpx_request_error_types(),
-        prime,
-        openssh,
-        Path(cast(str, keygen["path"])),
-        signing_key,
-        identity,
-        linux_uv,
-        _production_run,
-        lambda: int(time.time()),
-        time.monotonic,
-        time.sleep,
-    )
-
-
-def production_context() -> RuntimeContext:
-    return _production_context(Path.home() / ".ssh" / "id_rsa")
-
-
 __all__ = [
     "PODS_COMMAND_OWNER",
     "WALLET_API_ENDPOINT",
@@ -959,8 +830,7 @@ __all__ = [
     "CommandResult",
     "CreateDispatchSummary",
     "CreateResultSummary",
-    "Lifecycle",
-    "RuntimeContext",
+    "RuntimeBinding",
     "SigningIdentity",
     "assess_pages",
     "cleanup",
@@ -968,7 +838,6 @@ __all__ = [
     "create_result_bytes",
     "direct_create",
     "load_json",
-    "production_context",
     "replay_command_journal",
     "sha_file",
     "validate_create_dispatch",

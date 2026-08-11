@@ -19,7 +19,6 @@ from redco.analysis.stage_d_v13_prime_test_one_shot_contract_v2 import (
     ALLOWED_GPU_LABELS,
     ARTIFACT_FILENAMES,
     ASSESSMENT_DOMAIN,
-    ASSESSMENT_NAMESPACE,
     ASSESSMENT_TTL_SECONDS,
     AUTHORIZATION_PATH,
     CLAIM_DOMAIN,
@@ -32,15 +31,13 @@ from redco.analysis.stage_d_v13_prime_test_one_shot_contract_v2 import (
     READINESS_AUTHORITY,
     RUNTIME_AUTHORITY,
     SIGNED_ENVELOPE_DOMAIN,
-    TERMINAL_DOMAIN,
-    TERMINAL_NAMESPACE,
-    TERMINAL_PURPOSE,
     CommandJournalSummary,
     CreateDispatchSummary,
     CreateResultSummary,
     SigningIdentity,
     authority_value,
     canonical_json,
+    closed_authority,
     sha256_bytes,
     strict_object,
 )
@@ -52,10 +49,16 @@ from redco.analysis.stage_d_v13_prime_test_one_shot_prime_v2 import (
 )
 from redco.analysis.stage_d_v13_prime_test_one_shot_remote_v2 import (
     HandoffSummary,
+    remote_test_script,
     validate_gpu_facts,
     validate_handoff_payload,
     validate_junit,
     verify_openssh_sshsig,
+)
+from redco.analysis.stage_d_v13_prime_test_one_shot_runtime_binding_v2 import (
+    V2_RUNTIME_BINDING,
+    RuntimeBinding,
+    _is_trusted_binding,
 )
 from redco.analysis.stage_d_v13_prime_test_one_shot_wallet_v2 import (
     SanitizedWalletSnapshot,
@@ -103,11 +106,12 @@ def signed_envelope(
     identity: SigningIdentity,
     *,
     authority: Mapping[str, bool] = RUNTIME_AUTHORITY,
+    domain: str = SIGNED_ENVELOPE_DOMAIN,
 ) -> bytes:
     return canonical_json(
         {
             "schema_version": 2,
-            "domain": SIGNED_ENVELOPE_DOMAIN,
+            "domain": domain,
             "state": "detached_signature",
             "namespace": namespace,
             "payload": {
@@ -133,7 +137,9 @@ def verify_signed_envelope(
     identity: SigningIdentity,
     *,
     authority: Mapping[str, bool] = RUNTIME_AUTHORITY,
+    domain: str = SIGNED_ENVELOPE_DOMAIN,
 ) -> bytes:
+    authority = closed_authority(authority, "signed envelope")
     value = strict_object(
         raw,
         {
@@ -150,7 +156,7 @@ def verify_signed_envelope(
     )
     if (
         value["schema_version"] != 2
-        or value["domain"] != SIGNED_ENVELOPE_DOMAIN
+        or value["domain"] != domain
         or value["namespace"] != namespace
         or value["identity"] != identity.sanitized()
         or value["state"] != "detached_signature"
@@ -202,7 +208,9 @@ def artifact_dag(paths: Mapping[str, Path]) -> dict[str, dict[str, object]]:
     return result
 
 
-def _authorization_projection(value: object) -> dict[str, str]:
+def _authorization_projection(
+    value: object, *, expected_authorization_path: str = AUTHORIZATION_PATH
+) -> dict[str, str]:
     keys = {
         "commit", "tree", "parent",
         "authorization_path", "authorization_sha256", "authorization_blob",
@@ -217,14 +225,21 @@ def _authorization_projection(value: object) -> dict[str, str]:
         any(_HEX40.fullmatch(normalized[key]) is None for key in ("commit", "tree", "parent"))
         or _HEX40.fullmatch(normalized["authorization_blob"]) is None
         or _HEX64.fullmatch(normalized["authorization_sha256"]) is None
-        or normalized["authorization_path"] != AUTHORIZATION_PATH
+        or normalized["authorization_path"] != expected_authorization_path
         or normalized["commit"] == normalized["parent"]
     ):
         raise ValueError("Prime one-shot terminal authorization binding differs")
     return normalized
 
 
-def _claim_projection(raw: bytes, authorization: Mapping[str, str]) -> dict[str, Any]:
+def _claim_projection(
+    raw: bytes,
+    authorization: Mapping[str, str],
+    *,
+    expected_claim_domain: str = CLAIM_DOMAIN,
+    expected_authority: Mapping[str, bool] = RUNTIME_AUTHORITY,
+) -> dict[str, Any]:
+    expected_authority = closed_authority(expected_authority, "claim")
     claim = strict_object(
         raw,
         {
@@ -237,7 +252,7 @@ def _claim_projection(raw: bytes, authorization: Mapping[str, str]) -> dict[str,
     created = claim["created_at_epoch"]
     if (
         claim["schema_version"] != 2
-        or claim["domain"] != CLAIM_DOMAIN
+        or claim["domain"] != expected_claim_domain
         or claim["state"] != "observation_attempt_consumed"
         or claim["authorization"] != dict(authorization)
         or type(created) is not int
@@ -252,11 +267,20 @@ def _claim_projection(raw: bytes, authorization: Mapping[str, str]) -> dict[str,
         or claim["retry"] is not False
     ):
         raise ValueError("Prime one-shot claim binding differs")
-    authority_value(claim["authority"], RUNTIME_AUTHORITY, "claim")
+    authority_value(claim["authority"], expected_authority, "claim")
     return claim
 
 
-def _assessment_projection(raw: bytes, authorization: Mapping[str, str]) -> dict[str, Any]:
+def _assessment_projection(
+    raw: bytes,
+    authorization: Mapping[str, str],
+    *,
+    expected_domain: str = ASSESSMENT_DOMAIN,
+    expected_schema_version: int = 2,
+    expected_authority: Mapping[str, bool] = RUNTIME_AUTHORITY,
+    expected_ttl_seconds: int = ASSESSMENT_TTL_SECONDS,
+) -> dict[str, Any]:
+    expected_authority = closed_authority(expected_authority, "assessment")
     assessment = strict_object(
         raw,
         {
@@ -275,12 +299,12 @@ def _assessment_projection(raw: bytes, authorization: Mapping[str, str]) -> dict
     state = assessment["state"]
     reason = assessment["reason"]
     if (
-        assessment["schema_version"] != 2
-        or assessment["domain"] != ASSESSMENT_DOMAIN
+        assessment["schema_version"] != expected_schema_version
+        or assessment["domain"] != expected_domain
         or type(captured) is not int
         or captured < 0
         or type(expires) is not int
-        or expires != captured + ASSESSMENT_TTL_SECONDS
+        or expires != captured + expected_ttl_seconds
         or assessment["checkout"] != dict(authorization)
         or type(assessment["transcript_payload_sha256"]) is not str
         or _HEX64.fullmatch(assessment["transcript_payload_sha256"]) is None
@@ -295,7 +319,7 @@ def _assessment_projection(raw: bytes, authorization: Mapping[str, str]) -> dict
         or assessment["retry"] is not False
     ):
         raise ValueError("Prime one-shot assessment binding differs")
-    authority_value(assessment["authority"], RUNTIME_AUTHORITY, "assessment")
+    authority_value(assessment["authority"], expected_authority, "assessment")
     selected_hash = assessment["selected_resource_sha256"]
     selected_facts = assessment["selected_facts"]
     duplicate = assessment["duplicate_identity"]
@@ -352,6 +376,7 @@ def _transcript_projection(
     assessment_raw: bytes | None,
     assessment: Mapping[str, Any] | None,
     authorization: Mapping[str, str],
+    assessment_binding: RuntimeBinding,
 ) -> dict[str, object]:
     if len(raw) > MAX_TRANSCRIPT_BYTES:
         raise ValueError("Prime one-shot transcript exceeds bound")
@@ -373,6 +398,7 @@ def _transcript_projection(
             cast(list[dict[str, object]], transcript["pages"]),
             authorization,
             cast(int, assessment["captured_at_epoch"]),
+            assessment_binding,
         )
         if expected != assessment_raw:
             raise ValueError("Prime one-shot transcript assessment replay differs")
@@ -576,15 +602,21 @@ def _create_projections(
     authorization: Mapping[str, str],
     assessment: Mapping[str, Any] | None,
     journal: CommandJournalSummary,
+    expected_authority: Mapping[str, bool] = READINESS_AUTHORITY,
 ) -> tuple[CreateDispatchSummary | None, CreateResultSummary | None]:
     dispatch = (
-        validate_create_dispatch((root / ARTIFACT_FILENAMES["create-dispatch"]).read_bytes())
+        validate_create_dispatch(
+            (root / ARTIFACT_FILENAMES["create-dispatch"]).read_bytes(),
+            authority=expected_authority,
+        )
         if "create-dispatch" in dag
         else None
     )
     result = (
         validate_create_result(
-            (root / ARTIFACT_FILENAMES["create-result"]).read_bytes(), authorization
+            (root / ARTIFACT_FILENAMES["create-result"]).read_bytes(),
+            authorization,
+            authority=expected_authority,
         )
         if "create-result" in dag
         else None
@@ -619,6 +651,10 @@ def _handoff_projection(
     result: CreateResultSummary | None,
     identity: SigningIdentity,
     journal: CommandJournalSummary,
+    *,
+    expected_namespace: str = HANDOFF_NAMESPACE,
+    expected_authority: Mapping[str, bool] = READINESS_AUTHORITY,
+    expected_domain: str = SIGNED_ENVELOPE_DOMAIN,
 ) -> HandoffSummary | None:
     if not (_HANDOFF_ARTIFACTS & set(dag)):
         return None
@@ -653,29 +689,73 @@ def _handoff_projection(
         selected_resource_sha256=cast(str, assessment["selected_resource_sha256"]),
         selected_facts=assessment["selected_facts"],
         known_hosts=known_hosts,
+        test_script=remote_test_script(
+            authorization["commit"], assessment["selected_facts"]
+        ),
+        authority=expected_authority,
     )
     if summary.pod_identity_sha256 != result.pod_identity_sha256:
         raise ValueError("Prime handoff pod identity differs from create result")
     signature = verify_signed_envelope(
         (root / ARTIFACT_FILENAMES["handoff-envelope"]).read_bytes(),
         handoff,
-        HANDOFF_NAMESPACE,
+        expected_namespace,
         identity,
-        authority=READINESS_AUTHORITY,
+        authority=expected_authority,
+        domain=expected_domain,
     )
     if signature != (root / ARTIFACT_FILENAMES["handoff-signature"]).read_bytes():
         raise ValueError("Prime one-shot handoff signature differs")
     return summary
 
 
-def verify_terminal_evidence(root: Path, identity: SigningIdentity) -> dict[str, Any]:
+def verify_terminal_evidence(
+    root: Path,
+    identity: SigningIdentity,
+    *,
+    binding: RuntimeBinding = V2_RUNTIME_BINDING,
+) -> dict[str, Any]:
+    if not _is_trusted_binding(binding):
+        raise ValueError("Prime one-shot verifier binding is not the canonical singleton")
+    expected_authorization_path = binding.authorization_path
+    expected_claim_domain = binding.claim_domain
+    expected_terminal_domain = binding.terminal_domain
+    expected_terminal_namespace = binding.terminal_namespace
+    expected_terminal_purpose = binding.terminal_purpose
+    expected_claim_authority = dict(binding.claim_authority)
+    expected_assessment_domain = binding.assessment_domain
+    expected_assessment_schema_version = binding.assessment_schema_version
+    expected_assessment_namespace = binding.assessment_namespace
+    expected_assessment_authority = dict(binding.assessment_authority)
+    expected_assessment_ttl_seconds = binding.assessment_ttl_seconds
+    expected_signed_envelope_domain = binding.signed_envelope_domain
+    expected_create_authority = dict(binding.create_authority)
+    expected_terminal_authority = dict(binding.terminal_authority)
+    expected_handoff_namespace = binding.handoff_namespace
+    expected_handoff_authority = dict(binding.handoff_authority)
+    expected_claim_authority = closed_authority(expected_claim_authority, "claim")
+    expected_assessment_authority = closed_authority(expected_assessment_authority, "assessment")
+    expected_create_authority = closed_authority(expected_create_authority, "create")
+    expected_terminal_authority = closed_authority(
+        expected_terminal_authority, "terminal", readiness=True
+    )
+    expected_handoff_authority = closed_authority(
+        expected_handoff_authority, "handoff", readiness=True
+    )
+    if (
+        not _is_trusted_binding(binding)
+        or dict(binding.assessment_authority)
+        != dict(expected_assessment_authority)
+    ):
+        raise ValueError("Prime one-shot assessment binding is not canonical")
     terminal = (root / "terminal.json").read_bytes()
     verify_signed_envelope(
         (root / "terminal-envelope.json").read_bytes(),
         terminal,
-        TERMINAL_NAMESPACE,
+        expected_terminal_namespace,
         identity,
-        authority=READINESS_AUTHORITY,
+        authority=expected_terminal_authority,
+        domain=expected_signed_envelope_domain,
     )
     value = strict_object(
         terminal,
@@ -693,11 +773,11 @@ def verify_terminal_evidence(root: Path, identity: SigningIdentity) -> dict[str,
     elapsed = value["elapsed_seconds"]
     if (
         value["schema_version"] != 2
-        or value["domain"] != TERMINAL_DOMAIN
+        or value["domain"] != expected_terminal_domain
         or type(state) is not str
         or state not in _TERMINAL_STATES
         or value["disposition"] != state
-        or value["purpose"] != TERMINAL_PURPOSE
+        or value["purpose"] != expected_terminal_purpose
         or value["monitoring"] is not False
         or type(value["create_dispatched"]) is not bool
         or type(value["tests_passed"]) is not bool
@@ -709,16 +789,30 @@ def verify_terminal_evidence(root: Path, identity: SigningIdentity) -> dict[str,
         or value["retry"] is not False
     ):
         raise ValueError("Prime one-shot terminal binding differs")
-    authority_value(value["authority"], READINESS_AUTHORITY, "terminal")
-    authorization = _authorization_projection(value["authorization"])
+    authority_value(value["authority"], expected_terminal_authority, "terminal")
+    authorization = _authorization_projection(
+        value["authorization"], expected_authorization_path=expected_authorization_path
+    )
     dag = _bound_dag(root, value["evidence_dag"])
-    _claim_projection((root / ARTIFACT_FILENAMES["claim"]).read_bytes(), authorization)
+    _claim_projection(
+        (root / ARTIFACT_FILENAMES["claim"]).read_bytes(),
+        authorization,
+        expected_claim_domain=expected_claim_domain,
+        expected_authority=expected_claim_authority,
+    )
 
     assessment: dict[str, Any] | None = None
     assessment_raw: bytes | None = None
     if "assessment" in dag:
         assessment_raw = (root / ARTIFACT_FILENAMES["assessment"]).read_bytes()
-        assessment = _assessment_projection(assessment_raw, authorization)
+        assessment = _assessment_projection(
+            assessment_raw,
+            authorization,
+            expected_domain=expected_assessment_domain,
+            expected_schema_version=expected_assessment_schema_version,
+            expected_authority=expected_assessment_authority,
+            expected_ttl_seconds=expected_assessment_ttl_seconds,
+        )
         if (
             "assessment-envelope" not in dag
             or value["assessment_sha256"] != sha256_bytes(assessment_raw)
@@ -727,8 +821,10 @@ def verify_terminal_evidence(root: Path, identity: SigningIdentity) -> dict[str,
         verify_signed_envelope(
             (root / ARTIFACT_FILENAMES["assessment-envelope"]).read_bytes(),
             assessment_raw,
-            ASSESSMENT_NAMESPACE,
+            expected_assessment_namespace,
             identity,
+            authority=expected_assessment_authority,
+            domain=expected_signed_envelope_domain,
         )
     elif value["assessment_sha256"] is not None:
         raise ValueError("Prime one-shot terminal has an unbound assessment")
@@ -740,6 +836,7 @@ def verify_terminal_evidence(root: Path, identity: SigningIdentity) -> dict[str,
             assessment_raw,
             assessment,
             authorization,
+            binding,
         )
     elif assessment is not None:
         raise ValueError("Prime one-shot assessment lacks a transcript")
@@ -749,10 +846,19 @@ def verify_terminal_evidence(root: Path, identity: SigningIdentity) -> dict[str,
         _wallet_before_projection(root, dag, journal)
     )
     create_dispatch, create_result = _create_projections(
-        root, dag, authorization, assessment, journal
+        root, dag, authorization, assessment, journal, expected_create_authority
     )
     handoff = _handoff_projection(
-        root, dag, authorization, assessment, create_result, identity, journal
+        root,
+        dag,
+        authorization,
+        assessment,
+        create_result,
+        identity,
+        journal,
+        expected_namespace=expected_handoff_namespace,
+        expected_authority=expected_handoff_authority,
+        expected_domain=expected_signed_envelope_domain,
     )
     cleanup = _cleanup_projection(
         root, dag, wallet_before_value, journal, wallet_before_requests
@@ -881,6 +987,7 @@ __all__ = [
     "MAX_TRANSCRIPT_BYTES",
     "artifact_dag",
     "authority_value",
+    "closed_authority",
     "signed_envelope",
     "verify_signed_envelope",
     "verify_terminal_evidence",

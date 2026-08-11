@@ -7,11 +7,21 @@ import json
 import os
 import re
 import stat
-import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
+
+from redco.analysis.stage_d_v13_prime_test_one_shot_git_owner_v2 import (
+    GIT_EXECUTABLE,
+    GIT_LAUNCHER,
+    authenticate_git_executable,
+    git_output,
+    git_status,
+)
+from redco.analysis.stage_d_v13_prime_test_one_shot_git_owner_v2 import (
+    _git_environment as _git_owner_environment,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 IMPLEMENTATION_PARENT = "e59fe73a70c2fb15f6f87baf7d1361140ec13db1"
@@ -145,17 +155,6 @@ OPENSSH_EXECUTABLES = {
         "sha256": "43ad579511e145036282f67783459906da4d58b23b46cfc62f1b9b35a8003d06",
     },
 }
-GIT_EXECUTABLE = {
-    "path": r"C:\Program Files\Git\mingw64\bin\git.exe",
-    "bytes": 4_149_624,
-    "sha256": "51c6331aab2426ae2df187975590587b5a10042e3423f4bc0fdcb54aeb3efab7",
-}
-GIT_LAUNCHER = {
-    "path": r"C:\Program Files\Git\cmd\git.exe",
-    "bytes": 46_968,
-    "sha256": "f668c4ba88417ecdf29470b3af92d576a701cc0f76dd083b13d032f4b3f1f247",
-}
-
 READINESS_AUTHORITY = {
     "capacity_observation_authorized": False,
     "model_calls_authorized": False,
@@ -169,6 +168,17 @@ READINESS_AUTHORITY = {
 }
 RUNTIME_AUTHORITY = {
     **READINESS_AUTHORITY,
+    "capacity_observation_authorized": True,
+    "prime_authorized": True,
+    "provisioning_authorized": True,
+    "remote_tests_authorized": True,
+}
+V3_READINESS_AUTHORITY = {
+    **READINESS_AUTHORITY,
+    "parquet_access_authorized": False,
+}
+V3_RUNTIME_AUTHORITY = {
+    **V3_READINESS_AUTHORITY,
     "capacity_observation_authorized": True,
     "prime_authorized": True,
     "provisioning_authorized": True,
@@ -382,115 +392,31 @@ def authority_value(value: object, expected: Mapping[str, bool], label: str) -> 
         raise ValueError(f"Prime one-shot {label} authority differs")
 
 
-def authenticate_git_executable() -> Path:
-    harmless = {"GIT_FLUSH", "GIT_OPTIONAL_LOCKS", "GIT_PAGER", "GIT_TERMINAL_PROMPT"}
-    if any(key.startswith("GIT_") and key not in harmless for key in os.environ):
-        raise ValueError("Prime one-shot Git environment redirects are forbidden")
-    for label, binding in (("launcher", GIT_LAUNCHER), ("owner", GIT_EXECUTABLE)):
-        path = Path(cast(str, binding["path"]))
-        info = path.lstat()
-        reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-        if (
-            path.is_symlink()
-            or getattr(info, "st_file_attributes", 0) & reparse
-            or not stat.S_ISREG(info.st_mode)
-            or info.st_size != binding["bytes"]
-            or sha256_bytes(path.read_bytes()) != binding["sha256"]
-        ):
-            raise ValueError(f"Prime one-shot Git {label} differs")
-    return Path(cast(str, GIT_EXECUTABLE["path"]))
-
-
-def _git_environment() -> dict[str, str]:
-    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    environment.update(
-        {
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_CONFIG_GLOBAL": os.devnull,
-            "GIT_CONFIG_SYSTEM": os.devnull,
-            "GIT_NO_REPLACE_OBJECTS": "1",
-        }
+def closed_authority(
+    value: object, label: str, *, readiness: bool = False
+) -> dict[str, bool]:
+    if type(value) is not dict:
+        raise ValueError(f"Prime one-shot {label} authority is not canonical")
+    authority = cast(dict[object, object], value)
+    if any(type(key) is not str or type(flag) is not bool for key, flag in authority.items()):
+        raise ValueError(f"Prime one-shot {label} authority is not canonical")
+    allowed = (READINESS_AUTHORITY, V3_READINESS_AUTHORITY) if readiness else (
+        READINESS_AUTHORITY,
+        RUNTIME_AUTHORITY,
+        V3_READINESS_AUTHORITY,
+        V3_RUNTIME_AUTHORITY,
     )
-    return environment
-
-
-def _authenticate_git_metadata(root: Path) -> None:
-    marker = root / ".git"
-    marker_info = marker.lstat()
-    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-    if marker.is_symlink() or getattr(marker_info, "st_file_attributes", 0) & reparse:
-        raise ValueError("Prime one-shot Git metadata alias is forbidden")
-    if stat.S_ISDIR(marker_info.st_mode):
-        git_dir = marker
-    elif stat.S_ISREG(marker_info.st_mode) and marker_info.st_nlink == 1:
-        raw = marker.read_text(encoding="utf-8").strip()
-        if not raw.startswith("gitdir: "):
-            raise ValueError("Prime one-shot Git metadata file differs")
-        git_dir = (root / raw.removeprefix("gitdir: ")).resolve()
-        info = git_dir.lstat()
-        if git_dir.is_symlink() or getattr(info, "st_file_attributes", 0) & reparse:
-            raise ValueError("Prime one-shot Git metadata target is aliased")
-    else:
-        raise ValueError("Prime one-shot Git metadata differs")
-    for relative in (
-        "info/grafts",
-        "shallow",
-        "objects/info/alternates",
-        "objects/info/http-alternates",
-    ):
-        candidate = git_dir / relative
-        if candidate.exists() or candidate.is_symlink():
-            raise ValueError("Prime one-shot Git object substitution is forbidden")
-
-
-def git_output(root: Path, *arguments: str) -> str:
-    executable = authenticate_git_executable()
-    _authenticate_git_metadata(root)
-    return subprocess.run(
-        (
-            str(executable),
-            "--no-replace-objects",
-            "-c",
-            f"safe.directory={root.resolve()}",
-            "-C",
-            str(root),
-            *arguments,
-        ),
-        check=True,
-        capture_output=True,
-        text=True,
-        env=_git_environment(),
-    ).stdout.strip()
+    if not any(authority == candidate for candidate in allowed):
+        raise ValueError(f"Prime one-shot {label} authority is not approved")
+    return cast(dict[str, bool], value)
 
 
 def _status(root: Path) -> set[tuple[str, str]]:
-    executable = authenticate_git_executable()
-    _authenticate_git_metadata(root)
-    raw = subprocess.run(
-        (
-            str(executable),
-            "--no-replace-objects",
-            "-c",
-            f"safe.directory={root.resolve()}",
-            "-C",
-            str(root),
-            "status",
-            "--porcelain=v1",
-            "-z",
-            "--untracked-files=all",
-        ),
-        check=True,
-        capture_output=True,
-        env=_git_environment(),
-    ).stdout
-    records: set[tuple[str, str]] = set()
-    for item in raw.split(b"\0"):
-        if not item:
-            continue
-        if len(item) < 4 or item[2:3] != b" ":
-            raise ValueError("Prime one-shot Git status is malformed")
-        records.add((item[:2].decode("ascii"), item[3:].decode("utf-8")))
-    return records
+    return git_status(root)
+
+
+def _git_environment() -> dict[str, str]:
+    return _git_owner_environment()
 
 
 def _external_binding(root: Path) -> None:
@@ -871,9 +797,21 @@ def strict_object(raw: bytes, keys: set[str], label: str) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
-def safe_runtime_root(repository: Path) -> Path:
+def _runtime_root_target(repository: Path, evidence_root: str) -> Path:
+    if (
+        type(evidence_root) is not str
+        or not evidence_root
+        or evidence_root.startswith(("/", "\\"))
+        or ":" in evidence_root
+        or any(part in {"", ".", ".."} for part in evidence_root.replace("\\", "/").split("/"))
+    ):
+        raise ValueError("Prime one-shot evidence root is not a relative path")
+    return repository.resolve() / evidence_root
+
+
+def safe_runtime_root(repository: Path, evidence_root: str = EVIDENCE_ROOT) -> Path:
     repository = repository.resolve()
-    target = repository / EVIDENCE_ROOT
+    target = _runtime_root_target(repository, evidence_root)
     current = target.parent
     while True:
         if current.exists():
@@ -892,8 +830,8 @@ def safe_runtime_root(repository: Path) -> Path:
     return target
 
 
-def exclusive_runtime_root(repository: Path) -> Path:
-    target = safe_runtime_root(repository)
+def exclusive_runtime_root(repository: Path, evidence_root: str = EVIDENCE_ROOT) -> Path:
+    target = safe_runtime_root(repository, evidence_root)
     target.parent.mkdir(parents=True, exist_ok=True)
     os.mkdir(target, 0o700)
     info = target.lstat()
@@ -956,6 +894,8 @@ __all__ = [
     "TERMINAL_NAMESPACE",
     "TERMINAL_PURPOSE",
     "TEST_NODES",
+    "V3_READINESS_AUTHORITY",
+    "V3_RUNTIME_AUTHORITY",
     "WALLET_MINIMUM_USD",
     "WALLET_ROW_DOMAIN",
     "CommandJournalSummary",
@@ -972,6 +912,7 @@ __all__ = [
     "authorization_value",
     "build_readiness_artifacts",
     "canonical_json",
+    "closed_authority",
     "exclusive_runtime_root",
     "fixed_runtime_path",
     "git_output",
