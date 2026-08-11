@@ -16,9 +16,7 @@ dependencies = []
 dev = [
   "mypy>=1.14",
   "pytest>=8.3",
-  "pytest-cov>=6.0",
   "ruff>=0.9",
-  "tomli-w>=1.2.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -39,4 +37,3 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 python_version = "3.12"
 strict = true
 files = ["src", "tests"]
-

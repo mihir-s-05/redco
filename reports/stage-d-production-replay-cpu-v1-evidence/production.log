@@ -1,7 +1,0 @@
-18:16:47 WARNING Harness 'rlm' is running in the subprocess runtime on the local system. Local files and settings may affect the evaluation; use subprocess only for debugging. Use --env.<role>.harness.runtime.type docker or prime for an isolated run.
-18:16:48    INFO rollout start: id=8e99a23fdca94a7eb6897a952a57e339 task=0 harness=rlm runtime=subprocess
-18:16:48    INFO interception up: url=http://127.0.0.1:36715
-18:16:48    INFO interception pool: 1 server(s), multiplex=32
-18:16:48    INFO rlm: ensuring rlm is installed (version=56218f33796ecbe465445bc43948886354fde196)
-18:17:10    INFO rollout done: id=8e99a23fdca94a7eb6897a952a57e339 task=0 reward=1.000 turns=5 stop=agent_completed
-18:17:10    INFO interception down: url=http://127.0.0.1:36715

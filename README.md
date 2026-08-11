@@ -1,40 +1,60 @@
 # ReDCO
 
-Reference implementation of ReDCO-Lite: behavior-policy counterfactual branching
-with dependency-sound replay for restricted recursive dataflow agents.
+ReDCO is a small research prototype for behavior-policy counterfactual branching
+and dependency-sound replay in recursive dataflow agents. The active checkout is
+intentionally optimized for human review, experimentation, and change—not for
+preserving every historical campaign as executable production machinery.
 
-The normative research and implementation specification is
-[`redco-implementation-plan.md`](redco-implementation-plan.md).
+## Active research surface
 
-## Current milestone
+The maintained implementation contains:
 
-Tier 0 is CPU-only and intentionally independent of prime-rl:
+- immutable event, seed, and branch contracts;
+- content-addressed artifacts and exact policy-call caching;
+- event-DAG tracing and dependency-sliced replay;
+- deterministic and stochastic replay-equivalence checks;
+- synthetic credit probes and estimator diagnostics;
+- the CPU-only Gate GB research gate.
 
-- estimator and seed-addressing contracts;
-- immutable, content-addressed artifacts;
-- event-DAG tracing;
-- deterministic full-suffix and graph-sliced replay;
-- enumerable synthetic credit probes.
+Start in these files:
 
-The deterministic Gate GB campaign is a scientific execution path. Run it only
-under its separately authorized operating procedure:
+- `src/redco/contracts.py` — shared research values and canonical JSON;
+- `src/redco/algo/` — branching and training primitives;
+- `src/redco/env/` — artifacts, tracing, policy caching, and replay;
+- `src/redco/analysis/gate_gb.py` — the end-to-end CPU research gate;
+- `tests/` — the focused executable specification.
+
+## Run it
+
+Redco uses `uv`, never `pip`.
+
+```console
+uv sync --frozen
+uv run --frozen pytest
+uv run --frozen ruff check src tests
+uv run --frozen mypy
+```
+
+Run the cheap CPU gate with:
 
 ```console
 uv run --offline --frozen python -m redco.analysis.gate_gb
 ```
 
-It writes a machine-readable report under `runs/stage-b/`. Prime integration,
-providers, models, paid GPU work, training, and scientific execution all require
-an explicit checkpoint; repository verification authorizes none of them.
+It writes under the ignored `runs/` tree. Network, provider, model, GPU,
+training, or scientific campaigns require separate explicit authorization.
 
-## Development
+## Historical work
 
-Redco uses `uv` exclusively. Start with the guides to
-[architecture](docs/architecture.md),
-[development and verification](docs/development.md), and
-[provenance and retention](docs/provenance.md).
+Old Stage C/D campaigns, launch protocols, provider integrations, reports,
+configs, datasets, patches, and bespoke verification harnesses were retired from
+the active checkout. They remain exactly recoverable from Git commit
+`53a7c67c9cb6df39e44454f364aaf3c9ca352966`.
 
-The [development guide](docs/development.md) owns the exact self-contained
-verification commands and named profiles. The verifier owns import paths, test
-classification, frozen Ruff exceptions, strict affected-module typing, and
-cache-free compilation.
+[`provenance/history-v1.jsonl`](provenance/history-v1.jsonl) is the normalized
+recovery index: it records every pre-cleanup file's Git blob, raw SHA-256, byte
+count, role, format, and safe schema metadata without rewriting the original
+bytes. See [provenance](docs/provenance.md) for recovery instructions.
+
+The concise guides are [architecture](docs/architecture.md),
+[development](docs/development.md), and [provenance](docs/provenance.md).

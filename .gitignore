@@ -1,4 +1,5 @@
 .venv/
+.venv-wsl-broken-*/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
@@ -11,6 +12,9 @@ __pycache__/
 *.py[cod]
 .artifacts/
 .redco/
+.operator/
+.runtime/
+outputs/
 runs/**
 !runs/README.md
 /reports/**/*.md

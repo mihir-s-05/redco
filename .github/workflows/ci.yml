@@ -5,35 +5,14 @@ name: CI
   pull_request:
 
 jobs:
-  verify:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            profile: required-green
-          - os: ubuntu-latest
-            profile: platform-linux
-          - os: windows-latest
-            profile: platform-windows
-    runs-on: ${{ matrix.os }}
+  test:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: uv sync --locked --all-groups
-      - run: >-
-          uv run --frozen --with jsonschema==4.26.0 python
-          scripts/verify_repository.py pytest --profile ${{ matrix.profile }}
-      - if: matrix.profile == 'required-green'
-        run: uv run --frozen python scripts/verify_repository.py ruff
-      - if: matrix.profile == 'required-green'
-        run: uv run --frozen python scripts/verify_repository.py mypy
-      - if: matrix.profile == 'required-green'
-        run: uv run --frozen python scripts/verify_repository.py compile
+      - run: uv sync --frozen
+      - run: uv run --frozen pytest
+      - run: uv run --frozen ruff check src tests
+      - run: uv run --frozen mypy
