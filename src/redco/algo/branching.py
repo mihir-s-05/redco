@@ -51,7 +51,7 @@ class BranchRecordCredit:
 
 
 @dataclass(frozen=True, slots=True)
-class StageCCreditAssignment:
+class ReDCOCreditAssignment:
     """Trainer-facing credit for one rollout and its optional branch group."""
 
     incumbent_token_advantages: tuple[float, ...]
@@ -236,15 +236,15 @@ def mean_branch_gradient_weight(
     return tuple(scale * advantage for advantage in values)
 
 
-def assemble_stage_c_credit(
+def assemble_redco_credit(
     *,
     trainable_mask: Sequence[bool],
     trajectory_advantage: float,
     target_span: TokenSpan | None,
     branch_rewards: Sequence[float] | None,
     outer_weight: float,
-) -> StageCCreditAssignment:
-    """Compile the clean Stage-C replacement rule for one rollout.
+) -> ReDCOCreditAssignment:
+    """Compile the ReDCO replacement rule for one rollout.
 
     Untargeted action tokens retain trajectory RLOO credit. A committed target
     is zeroed in the incumbent record and emitted once per branch with
@@ -262,12 +262,12 @@ def assemble_stage_c_credit(
     if target_span is None:
         if branch_rewards is not None:
             raise ValueError("branch rewards require a committed target")
-        return StageCCreditAssignment(tuple(incumbent), (), False)
+        return ReDCOCreditAssignment(tuple(incumbent), (), False)
 
     if branch_rewards is None:
         raise ValueError("a committed target requires branch rewards")
     if len(branch_rewards) != 4:
-        raise ValueError("clean Stage C requires exactly four branch rewards")
+        raise ValueError("this ReDCO configuration requires exactly four branch rewards")
     if target_span.stop > len(trainable_mask):
         raise ValueError("target span exceeds the token stream")
     if not all(trainable_mask[target_span.start : target_span.stop]):
@@ -282,4 +282,4 @@ def assemble_stage_c_credit(
         BranchRecordCredit(float(advantage), record_weight)
         for advantage in branch_advantages
     )
-    return StageCCreditAssignment(tuple(incumbent), branch_records, True)
+    return ReDCOCreditAssignment(tuple(incumbent), branch_records, True)

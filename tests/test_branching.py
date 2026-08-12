@@ -7,7 +7,7 @@ from redco.algo.branching import (
     OnlineTargetSelector,
     RandomizedSelectiveTargetSelector,
     TokenSpan,
-    assemble_stage_c_credit,
+    assemble_redco_credit,
     inclusive_group_mean_advantages,
     leave_one_out_advantages,
     trajectory_rloo,
@@ -122,8 +122,8 @@ def test_loo_and_stock_scaling_are_explicitly_distinct() -> None:
     assert sum(loo) == pytest.approx(0.0)
 
 
-def test_stage_c_credit_replaces_target_with_four_branch_records() -> None:
-    assignment = assemble_stage_c_credit(
+def test_redco_credit_replaces_target_with_four_branch_records() -> None:
+    assignment = assemble_redco_credit(
         trainable_mask=(False, True, True, False, True, True),
         trajectory_advantage=2.0,
         target_span=TokenSpan(4, 6),
@@ -143,8 +143,8 @@ def test_stage_c_credit_replaces_target_with_four_branch_records() -> None:
     assert assignment.target_replaced
 
 
-def test_stage_c_credit_keeps_trajectory_credit_when_target_is_skipped() -> None:
-    assignment = assemble_stage_c_credit(
+def test_redco_credit_keeps_trajectory_credit_when_target_is_skipped() -> None:
+    assignment = assemble_redco_credit(
         trainable_mask=(False, True, True),
         trajectory_advantage=-0.75,
         target_span=None,
@@ -166,13 +166,13 @@ def test_stage_c_credit_keeps_trajectory_credit_when_target_is_skipped() -> None
         (TokenSpan(0, 1), (1.0, 0.0, 0.5, -1.0), "only trainable"),
     ],
 )
-def test_stage_c_credit_rejects_incomplete_or_misaligned_inputs(
+def test_redco_credit_rejects_incomplete_or_misaligned_inputs(
     target_span: TokenSpan | None,
     branch_rewards: tuple[float, ...] | None,
     message: str,
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        assemble_stage_c_credit(
+        assemble_redco_credit(
             trainable_mask=(False, True),
             trajectory_advantage=1.0,
             target_span=target_span,

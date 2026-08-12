@@ -13,6 +13,7 @@ The maintained implementation contains:
 - content-addressed artifacts and exact policy-call caching;
 - event-DAG tracing and dependency-sliced replay;
 - deterministic and stochastic replay-equivalence checks;
+- decision-normalized ReDCO credit assignment and loss evaluation;
 - synthetic credit probes and estimator diagnostics;
 - the CPU-only Gate GB research gate.
 
@@ -43,6 +44,19 @@ uv run --offline --frozen python -m redco.analysis.gate_gb
 
 It writes under the ignored `runs/` tree. Network, provider, model, GPU,
 training, or scientific campaigns require separate explicit authorization.
+
+## Algorithm in brief
+
+ReDCO targets one policy decision before its action is observed, restores the
+state immediately before that decision, and evaluates the original action
+beside sampled alternatives. Rewards are converted into leave-one-out branch
+advantages. The targeted action's ordinary trajectory credit is removed, then
+replaced by the branch comparison; all other decisions keep their trajectory
+credit. Each decision occupies one unit in the outer normalization regardless
+of its token span, while its action log-probability remains the sum over its
+selected tokens. The framework-neutral objective in `redco.algo.training` also
+supports an optional squared log-probability drift penalty against the behavior
+policy that produced the replay.
 
 ## Historical work
 
