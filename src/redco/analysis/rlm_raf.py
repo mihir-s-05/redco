@@ -502,7 +502,7 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("runs/stage-b/rlm-raf-cpu/report.json"),
+        default=Path("runs/rlm-raf/report.json"),
     )
     args = parser.parse_args()
     report = run_rlm_raf_campaign(

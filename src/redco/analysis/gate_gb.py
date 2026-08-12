@@ -9,8 +9,17 @@ import os
 import tempfile
 import time
 from dataclasses import asdict, dataclass
+from math import isclose
 from pathlib import Path
 
+from redco.algo import (
+    BranchActionExample,
+    PolicyDecision,
+    SequenceExample,
+    TokenSpan,
+    compile_redco_records,
+    decision_normalized_loss,
+)
 from redco.analysis.replay_equivalence import run_randomized_equivalence
 from redco.contracts import SeedNamespace, canonical_json
 from redco.env.artifacts import ArtifactStore
@@ -39,6 +48,9 @@ class GateGbCpuReport:
     changed_prompt_regenerated: bool
     changed_seed_regenerated: bool
     structural_seed_stable: bool
+    redco_decision_loss: float
+    redco_decision_units: float
+    redco_objective_exact: bool
     hand_audit_passed: bool
     stochastic_model_audit_status: str
     passed_cpu_gate: bool
@@ -71,6 +83,7 @@ def run_gate(
     hand_audit_passed = _audit_six_edge_closure()
     snapshot_roundtrip_exact = _audit_snapshot_roundtrip()
     cache_reuse, prompt_regenerated, seed_regenerated = _audit_policy_cache()
+    objective_exact, decision_loss, decision_units = _audit_redco_objective()
     namespace = SeedNamespace("gate-gb", "rollout-0", "target-0", 1)
     structural_seed_stable = namespace.action_seed(1) == namespace.action_seed(1)
     all_six = all(count > 0 for count in randomized.dependency_edge_counts.values())
@@ -86,9 +99,10 @@ def run_gate(
         and prompt_regenerated
         and seed_regenerated
         and structural_seed_stable
+        and objective_exact
     )
     return GateGbCpuReport(
-        schema_version=1,
+        schema_version=2,
         generated_at_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         campaign_seed=seed,
         randomized_programs=programs,
@@ -106,6 +120,9 @@ def run_gate(
         changed_prompt_regenerated=prompt_regenerated,
         changed_seed_regenerated=seed_regenerated,
         structural_seed_stable=structural_seed_stable,
+        redco_decision_loss=decision_loss,
+        redco_decision_units=decision_units,
+        redco_objective_exact=objective_exact,
         hand_audit_passed=hand_audit_passed,
         stochastic_model_audit_status="pending_external_model_audit",
         passed_cpu_gate=passed,
@@ -192,6 +209,53 @@ def _audit_policy_cache() -> tuple[bool, bool, bool]:
     )
 
 
+def _audit_redco_objective() -> tuple[bool, float, float]:
+    incumbent = SequenceExample(
+        token_ids=(1, 10, 20),
+        trainable_mask=(False, True, True),
+        behavior_logprobs=(0.0, -0.2, -0.5),
+        env_name="gate-gb-objective",
+    )
+    decisions = (
+        PolicyDecision("context", TokenSpan(1, 2)),
+        PolicyDecision("target", TokenSpan(2, 3)),
+    )
+    branches = tuple(
+        BranchActionExample(
+            sequence=SequenceExample(
+                token_ids=(1, token),
+                trainable_mask=(False, True),
+                behavior_logprobs=(0.0, -0.5),
+                env_name="gate-gb-objective",
+            ),
+            action_span=TokenSpan(1, 2),
+            reward=reward,
+            action_source="original" if index == 0 else "sampled",
+        )
+        for index, (token, reward) in enumerate(
+            ((20, 1.0), (21, 0.0), (22, 0.5), (23, -1.0))
+        )
+    )
+    records = compile_redco_records(
+        incumbent=incumbent,
+        decisions=decisions,
+        trajectory_advantage=2.0,
+        target_node_id="target",
+        branches=branches,
+    )
+    result = decision_normalized_loss(
+        records,
+        tuple(record.sequence.behavior_logprobs for record in records),
+    )
+    exact = (
+        len(records) == 5
+        and records[0].advantages == (0.0, 2.0, 0.0)
+        and isclose(result.loss, 0.2, rel_tol=0.0, abs_tol=1e-15)
+        and isclose(result.decision_units, 2.0, rel_tol=0.0, abs_tol=1e-15)
+    )
+    return exact, result.loss, result.decision_units
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=int, default=20260725)
@@ -201,7 +265,7 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("runs/stage-b/gate-gb-cpu/report.json"),
+        default=Path("runs/gate-gb/report.json"),
     )
     args = parser.parse_args()
     report = run_gate(

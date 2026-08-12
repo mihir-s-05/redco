@@ -482,7 +482,7 @@ def build_credit_confusion_diagnostic(
     }
     payload: dict[str, Any] = {
         "schema_version": 1,
-        "analysis": "stage-c3-multi-decision-credit-confusion",
+        "analysis": "redco-multi-decision-credit-confusion",
         "label": (
             "Exact estimator moments plus seeded tabular learning; this is a "
             "power/design gate, not a language-model result"

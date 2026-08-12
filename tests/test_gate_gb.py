@@ -36,6 +36,16 @@ def test_cpu_gate_exercises_all_dependencies_and_passes() -> None:
     assert report.deterministic_failures == 0
     assert all(count > 0 for count in report.dependency_edge_counts.values())
     assert report.event_raf > 1.0
+    assert report.redco_objective_exact
+    assert report.redco_decision_loss == pytest.approx(0.2)
+    assert report.redco_decision_units == pytest.approx(2.0)
+
+
+def test_cpu_gate_exercises_branch_replacement_and_decision_loss() -> None:
+    exact, loss, decision_units = gate_gb._audit_redco_objective()
+    assert exact
+    assert loss == pytest.approx(0.2)
+    assert decision_units == pytest.approx(2.0)
 
 
 def test_snapshot_roundtrip_uses_verified_content_addressed_bytes() -> None:
@@ -120,7 +130,7 @@ def test_main_preserves_cheap_cli_contract(
     monkeypatch.setattr(sys, "argv", ["gate-gb"])
     assert gate_gb.main() == expected_exit
 
-    output = (tmp_path / "runs/stage-b/gate-gb-cpu/report.json").resolve()
+    output = (tmp_path / "runs/gate-gb/report.json").resolve()
     assert stub.signed_dict_calls == 2
     assert output.read_bytes() == b'{"a":2,"z":1}\n'
     expected_stdout = '{\n  "a": 2,\n  "z": 1\n}\n' + f"wrote {output}\n"
