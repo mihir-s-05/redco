@@ -1,0 +1,120 @@
+{
+  "cost": {
+    "actual_usd": 0.4425,
+    "cap_usd": 3.0,
+    "gpu_rate_usd_per_hour": 1.79
+  },
+  "experiment": "qasper-evidence-matrix-v1",
+  "interpretation": "Across five matched seeds, ReDCO and trajectory LOO had the same mean post-training exact-evidence count: 12.8 of 24. ReDCO-minus-trajectory differences were [0, 2, -1, 1, -2], with mean and median zero. This repeatability pilot does not show an exact-evidence advantage for either update rule.",
+  "lineage": {
+    "config_sha256": "43a99404e53185e9508271ae75cfa2583b5cea2a40608230ee44bf7940334523",
+    "data_sha256": "11f7d6b4edadd0d8d423a22f0ff0e2ed53d2dfe224c01c41e0ce04678042a7e5",
+    "git_commit": "9109cea8559825a6042189885ce57853a7e0b933",
+    "report_payload_sha256": "5fa086f2e134e667627f90c54ab120954fd0872739077804b11f98ea075075df",
+    "report_raw_sha256": "d1a1cd566cd9d658cbf6becdb1bdc0a329f6c4c3abcb26d772a0e0b744ae4298"
+  },
+  "objective": "Choose the correct QASPER paragraph and then the exact supporting span using two constrained policy decisions.",
+  "paired_result": {
+    "baseline_exact_counts": [
+      11,
+      11,
+      11,
+      11,
+      11
+    ],
+    "change_from_baseline_differences": [
+      0,
+      2,
+      -1,
+      1,
+      -2
+    ],
+    "inferential_unit": "seed",
+    "mean_change_from_baseline_difference": 0.0,
+    "mean_post_exact_difference": 0.0,
+    "median_change_from_baseline_difference": 0,
+    "median_post_exact_difference": 0,
+    "n": 5,
+    "post_exact_differences": [
+      0,
+      2,
+      -1,
+      1,
+      -2
+    ],
+    "redco_post_exact_counts": [
+      14,
+      15,
+      11,
+      14,
+      10
+    ],
+    "seeds": [
+      20260812,
+      20260813,
+      20260814,
+      20260815,
+      20260816
+    ],
+    "statistical_claim": "descriptive repeatability pilot; no significance claim",
+    "trajectory_post_exact_counts": [
+      14,
+      13,
+      12,
+      13,
+      12
+    ]
+  },
+  "rollout_diagnostics": {
+    "gradient_norm_mean_by_seed": {
+      "redco": [
+        1.61979166666667,
+        8.00520833333333,
+        0.4765625,
+        5.21875,
+        7.77083340628694
+      ],
+      "trajectory_loo": [
+        2.484375,
+        3.13802083333333,
+        3.05729166666667,
+        4.43489583333333,
+        4.4453125
+      ]
+    },
+    "sampled_reward_mean_by_seed": {
+      "redco": [
+        0.588541666666667,
+        0.651041666666667,
+        0.572916666666667,
+        0.65625,
+        0.609375
+      ],
+      "trajectory_loo": [
+        0.575,
+        0.533333333333333,
+        0.608333333333333,
+        0.633333333333333,
+        0.633333333333333
+      ]
+    },
+    "warning": "Sampled rewards use different arm-specific sampling distributions and are not a direct efficacy comparison. Gradient norms are optimizer diagnostics only."
+  },
+  "run": {
+    "date": "2026-08-12",
+    "elapsed_seconds": 791.062710579,
+    "eval_tasks_per_seed": 24,
+    "gpu": "NVIDIA A100-SXM4-80GB",
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "model_revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+    "policy_calls_per_arm_per_seed": 240,
+    "prime_pods_created": 1,
+    "seeds": 5,
+    "torch": "2.11.0+cu128",
+    "train_tasks_per_seed": 24,
+    "training_attempts": 1,
+    "transformers": "5.6.2",
+    "updates_per_arm_per_seed": 24
+  },
+  "schema_version": 1
+}
