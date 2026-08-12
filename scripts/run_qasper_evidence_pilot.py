@@ -165,47 +165,40 @@ class Policy:
         return self.torch.log_softmax(logits / self.temperature, dim=-1)
 
     def sample(self, prompts: Sequence[str]) -> tuple[tuple[int, float], ...]:
+        samples: list[tuple[int, float]] = []
         with self.torch.no_grad():
-            logprobs = self._choice_logprobs(prompts)
-            actions = self.torch.multinomial(logprobs.exp(), num_samples=1).squeeze(1)
-            chosen = logprobs.gather(1, actions[:, None]).squeeze(1)
-        return tuple(
-            (int(action), float(logprob))
-            for action, logprob in zip(actions.cpu(), chosen.cpu(), strict=True)
-        )
+            for prompt in prompts:
+                logprobs = self._choice_logprobs((prompt,))
+                action = self.torch.multinomial(logprobs.exp(), num_samples=1)[0, 0]
+                samples.append((int(action), float(logprobs[0, action])))
+        return tuple(samples)
 
     def greedy(self, prompts: Sequence[str]) -> tuple[int, ...]:
         with self.torch.no_grad():
-            return tuple(int(value) for value in self._choice_logprobs(prompts).argmax(1).cpu())
+            return tuple(
+                int(self._choice_logprobs((prompt,)).argmax(1)[0])
+                for prompt in prompts
+            )
 
-    def loss(self, decisions: Sequence[Decision], drift_weight: float) -> Any:
+    def backward(self, decisions: Sequence[Decision], drift_weight: float) -> float:
         if not decisions:
             raise ValueError("training update needs decisions")
-        logprobs = self._choice_logprobs([decision.prompt for decision in decisions])
-        indices = self.torch.tensor(
-            [decision.action for decision in decisions],
-            device="cuda",
-        )
-        current = logprobs.gather(1, indices[:, None]).squeeze(1)
-        behavior = self.torch.tensor(
-            [decision.behavior_logprob for decision in decisions],
-            dtype=current.dtype,
-            device="cuda",
-        )
-        advantages = self.torch.tensor(
-            [decision.advantage for decision in decisions],
-            dtype=current.dtype,
-            device="cuda",
-        )
-        weights = self.torch.tensor(
-            [decision.outer_weight for decision in decisions],
-            dtype=current.dtype,
-            device="cuda",
-        )
         normalizer = sum(decision.decision_units for decision in decisions)
-        policy_gradient = (-advantages * current * weights).sum() / normalizer
-        behavior_drift = ((current - behavior).square() * weights).sum() / normalizer
-        return policy_gradient + drift_weight * behavior_drift
+        if normalizer <= 0:
+            raise ValueError("decision-unit normalizer must be positive")
+        total = 0.0
+        for decision in decisions:
+            current = self._choice_logprobs((decision.prompt,))[0, decision.action]
+            behavior = current.new_tensor(decision.behavior_logprob)
+            term = (
+                -decision.advantage * current * decision.outer_weight
+                + drift_weight
+                * (current - behavior).square()
+                * decision.outer_weight
+            ) / normalizer
+            term.backward()
+            total += float(term.detach())
+        return total
 
     def adapter_state(self) -> dict[str, Any]:
         return {
@@ -264,8 +257,7 @@ def _train_arm(
             else redco_batch(policy, task)
         )
         optimizer.zero_grad(set_to_none=True)
-        loss = policy.loss(decisions, float(config["behavior_drift_weight"]))
-        loss.backward()
+        loss = policy.backward(decisions, float(config["behavior_drift_weight"]))
         grad_norm = torch.nn.utils.clip_grad_norm_(
             policy.trainable,
             float(config["gradient_clip"]),
@@ -275,7 +267,7 @@ def _train_arm(
             {
                 "decision_units": sum(item.decision_units for item in decisions),
                 "gradient_norm": float(grad_norm),
-                "loss": float(loss.detach()),
+                "loss": loss,
                 "mean_reward": mean_reward,
                 "policy_calls": budget.baseline_calls_per_update,
                 "step": step,
