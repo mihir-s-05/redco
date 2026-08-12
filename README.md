@@ -87,9 +87,12 @@ task. The policy first chooses one of four paper paragraphs, then chooses the
 complete evidence span from that paragraph. The 32-task dataset is rebuilt from
 the pre-cleanup Git archive into a 24/8 train/evaluation split. Each training
 update gives both arms exactly ten policy calls: trajectory LOO samples five
-complete episodes, while ReDCO branches two paragraph decisions and replays
-seven continuations from one committed paragraph. Both actions are constrained
-to one label token, and the objective is normalized by policy decisions.
+complete episodes, while the tested ReDCO allocation samples two complete
+episodes and six additional span continuations from one committed paragraph.
+ReDCO therefore estimates paragraph credit from only two complete rewards and
+span credit from seven alternatives including the original span. Both actions
+are constrained to one label token, and the objective is normalized by policy
+decisions.
 
 Validate the frozen dataset and pilot configuration without importing Torch:
 
@@ -111,6 +114,20 @@ model-scale path works, while a convincing algorithm comparison now needs more
 evaluation tasks and multiple matched seeds rather than a larger model. The
 compact normalized result is
 [`results/qasper-evidence-pilot-v1.json`](results/qasper-evidence-pilot-v1.json).
+
+The matched follow-up used five seeds and expanded evaluation to 24
+paper-disjoint tasks. Both arms averaged 12.8/24 exact evidence matches after
+training from the common 11/24 baseline. Per-seed ReDCO-minus-trajectory counts
+were `[0, 2, -1, 1, -2]`, with mean and median zero. This is a null for the
+shallow task and the tested ReDCO `2+6` allocation, not for ReDCO generally.
+
+The more informative decomposition is that conditional span accuracy given a
+correct paragraph increased from 55/75 (73.3%) to 64/69 (92.8%) for trajectory
+LOO and 64/70 (91.4%) for ReDCO, while paragraph accuracy fell in both arms.
+The run therefore measured strong span learning alongside upstream paragraph
+drift. It cost $0.4425 on one A100, retained no adapters, and left zero Prime
+pods. See
+[`results/qasper-evidence-matrix-v1.json`](results/qasper-evidence-matrix-v1.json).
 
 ## Historical work
 
