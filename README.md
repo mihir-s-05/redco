@@ -58,6 +58,27 @@ selected tokens. The framework-neutral objective in `redco.algo.training` also
 supports an optional squared log-probability drift penalty against the behavior
 policy that produced the replay.
 
+### Controlled learning result
+
+On 2026-08-12, the dependency-free credit-confusion experiment ran 1,000
+seeded trials per method and task. Both methods used 16 policy calls per update
+and 1,152 calls per trial. ReDCO reduced mean drift on an irrelevant decision
+from `0.0748` to exactly `0`. On the noisy lucky task it reached the `0.8`
+policy threshold in 425 calls on average, versus 434 for trajectory LOO. On the
+redundant task the final policies were effectively tied (`0.8814` versus
+`0.8820`), while ReDCO's estimator variance was 1.54 times higher—a useful
+counterexample to the claim that branching always reduces variance.
+
+The ignored local report is reproducible with:
+
+```console
+uv run --offline --frozen python -m redco.analysis.credit_confusion \
+  --output runs/credit-confusion/report.json
+```
+
+Its canonical payload SHA-256 is
+`a8ed7400ade493fc7c7808c28f0bba61431f8b209e4514135d006c4112bcfa2e`.
+
 ## Historical work
 
 Old Stage C/D campaigns, launch protocols, provider integrations, reports,
