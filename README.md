@@ -43,7 +43,8 @@ uv run --offline --frozen python -m redco.analysis.gate_gb
 ```
 
 It writes under the ignored `runs/` tree. Network, provider, model, GPU,
-training, or scientific campaigns require separate explicit authorization.
+training, and scientific runs are launched manually with an experiment-specific
+time and cost bound; no background capacity monitor is part of the active core.
 
 ## Algorithm in brief
 
@@ -78,6 +79,29 @@ uv run --offline --frozen python -m redco.analysis.credit_confusion \
 
 Its canonical payload SHA-256 is
 `a8ed7400ade493fc7c7808c28f0bba61431f8b209e4514135d006c4112bcfa2e`.
+
+### QASPER model pilot
+
+The first model-scale experiment is a two-decision QASPER evidence-retrieval
+task. The policy first chooses one of four paper paragraphs, then chooses the
+complete evidence span from that paragraph. The 32-task dataset is rebuilt from
+the pre-cleanup Git archive into a 24/8 train/evaluation split. Each training
+update gives both arms exactly ten policy calls: trajectory LOO samples five
+complete episodes, while ReDCO branches two paragraph decisions and replays
+seven continuations from one committed paragraph. Both actions are constrained
+to one label token, and the objective is normalized by policy decisions.
+
+Validate the frozen dataset and pilot configuration without importing Torch:
+
+```console
+uv run --offline --frozen python scripts/build_qasper_evidence_pilot.py --check
+uv run --offline --frozen python scripts/run_qasper_evidence_pilot.py --check
+```
+
+The GPU configuration pins Qwen3-4B-Instruct-2507, rank-8 LoRA, 24 updates per
+arm, a three-hour absolute runtime ceiling, and a $6 total cost ceiling. The
+live run uses one ephemeral Prime GPU and always downloads the compact report
+and adapters before terminating the pod.
 
 ## Historical work
 
