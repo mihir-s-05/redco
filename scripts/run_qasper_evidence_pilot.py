@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import json
 import os
 import random
@@ -207,6 +208,20 @@ class Policy:
             if name.endswith((".a.weight", ".b.weight"))
         }
 
+    def adapter_digest(self) -> str:
+        """Hash the exact initial LoRA tensors without retaining an adapter."""
+        digest = hashlib.sha256()
+        for name, tensor in sorted(self.adapter_state().items()):
+            raw = tensor.contiguous().view(self.torch.uint8).numpy()
+            metadata = {
+                "dtype": str(tensor.dtype),
+                "name": name,
+                "shape": list(tensor.shape),
+            }
+            digest.update(canonical_json(metadata))
+            digest.update(raw.tobytes(order="C"))
+        return digest.hexdigest()
+
 
 def _evaluate(policy: Policy, tasks: Sequence[EvidenceTask]) -> dict[str, float | int]:
     paragraph_actions = policy.greedy(tuple(stage_one_prompt(task) for task in tasks))
@@ -237,61 +252,87 @@ def _train_arm(
     config: dict[str, Any],
     tasks: tuple[EvidenceTask, ...],
     arm: str,
-    output_dir: Path,
+    output_dir: Path | None,
+    budget: PilotBudget | None = None,
+    deadline: float | None = None,
+    expected_initial_adapter_sha256: str | None = None,
+    expected_evaluation_before: dict[str, float | int] | None = None,
 ) -> dict[str, Any]:
-    policy = Policy(torch, transformers, config)
-    optimizer = torch.optim.AdamW(
-        policy.trainable,
-        lr=float(config["learning_rate"]),
-        weight_decay=float(config["weight_decay"]),
-    )
-    budget = PilotBudget()
-    train_tasks = tuple(task for task in tasks if task.split == "train")
-    eval_tasks = tuple(task for task in tasks if task.split == "eval")
-    initial = _evaluate(policy, eval_tasks)
-    updates: list[dict[str, float | int]] = []
-    for step, task in enumerate(train_tasks, 1):
-        decisions, mean_reward = (
-            trajectory_batch(policy, task, budget)
-            if arm == "trajectory_loo"
-            else redco_batch(policy, task)
-        )
-        optimizer.zero_grad(set_to_none=True)
-        loss = policy.backward(decisions, float(config["behavior_drift_weight"]))
-        grad_norm = torch.nn.utils.clip_grad_norm_(
+    def require_time(label: str) -> None:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError(f"matrix deadline reached before {label}")
+
+    policy: Policy | None = None
+    optimizer: Any | None = None
+    try:
+        require_time(f"{arm} model initialization")
+        policy = Policy(torch, transformers, config)
+        require_time(f"{arm} initial evaluation")
+        initial_adapter_sha256 = policy.adapter_digest()
+        optimizer = torch.optim.AdamW(
             policy.trainable,
-            float(config["gradient_clip"]),
+            lr=float(config["learning_rate"]),
+            weight_decay=float(config["weight_decay"]),
         )
-        optimizer.step()
-        updates.append(
-            {
-                "decision_units": sum(item.decision_units for item in decisions),
-                "gradient_norm": float(grad_norm),
-                "loss": loss,
-                "mean_reward": mean_reward,
-                "policy_calls": budget.baseline_calls_per_update,
-                "step": step,
+        budget = budget or PilotBudget()
+        train_tasks = tuple(task for task in tasks if task.split == "train")
+        eval_tasks = tuple(task for task in tasks if task.split == "eval")
+        initial = _evaluate(policy, eval_tasks)
+        if (
+            expected_initial_adapter_sha256 is not None
+            and initial_adapter_sha256 != expected_initial_adapter_sha256
+        ):
+            raise RuntimeError(f"{arm} did not start from the matched LoRA tensors")
+        if expected_evaluation_before is not None and initial != expected_evaluation_before:
+            raise RuntimeError(f"{arm} did not start from the matched evaluation")
+        updates: list[dict[str, float | int]] = []
+        for step, task in enumerate(train_tasks, 1):
+            require_time(f"{arm} update {step}")
+            decisions, sampled_reward = (
+                trajectory_batch(policy, task, budget)
+                if arm == "trajectory_loo"
+                else redco_batch(policy, task)
+            )
+            optimizer.zero_grad(set_to_none=True)
+            loss = policy.backward(decisions, float(config["behavior_drift_weight"]))
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                policy.trainable,
+                float(config["gradient_clip"]),
+            )
+            optimizer.step()
+            updates.append(
+                {
+                    "arm_specific_sampled_reward": sampled_reward,
+                    "decision_units": sum(item.decision_units for item in decisions),
+                    "gradient_norm": float(grad_norm),
+                    "loss": loss,
+                    "policy_calls": budget.baseline_calls_per_update,
+                    "step": step,
+                }
+            )
+        require_time(f"{arm} final evaluation")
+        final = _evaluate(policy, eval_tasks)
+        result = {
+            "arm": arm,
+            "evaluation_after": final,
+            "evaluation_before": initial,
+            "initial_adapter_sha256": initial_adapter_sha256,
+            "rollout_calls": budget.rollout_calls_per_arm,
+            "updates": updates,
+        }
+        if output_dir is not None:
+            adapter_path = output_dir / f"{arm}-adapter.pt"
+            torch.save(policy.adapter_state(), adapter_path)
+            result["adapter"] = {
+                "bytes": adapter_path.stat().st_size,
+                "path": adapter_path.name,
+                "sha256": sha256_bytes(adapter_path.read_bytes()),
             }
-        )
-    final = _evaluate(policy, eval_tasks)
-    adapter_path = output_dir / f"{arm}-adapter.pt"
-    torch.save(policy.adapter_state(), adapter_path)
-    result = {
-        "adapter": {
-            "bytes": adapter_path.stat().st_size,
-            "path": adapter_path.name,
-            "sha256": sha256_bytes(adapter_path.read_bytes()),
-        },
-        "arm": arm,
-        "evaluation_after": final,
-        "evaluation_before": initial,
-        "rollout_calls": budget.rollout_calls_per_arm,
-        "updates": updates,
-    }
-    del optimizer, policy
-    gc.collect()
-    torch.cuda.empty_cache()
-    return result
+        return result
+    finally:
+        del optimizer, policy
+        gc.collect()
+        torch.cuda.empty_cache()
 
 
 def main() -> None:

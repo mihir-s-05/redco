@@ -1,0 +1,19 @@
+{
+  "base_config": "configs/qasper-evidence-pilot-v1.json",
+  "base_config_sha256": "3b8a531015f13839a05f488cdbfec8a52d553f6f7eeec9466ae07a29c3eedb83",
+  "cost_limit_usd": 3.0,
+  "data": "data/qasper-evidence-matrix-v1.json",
+  "data_sha256": "11f7d6b4edadd0d8d423a22f0ff0e2ed53d2dfe224c01c41e0ce04678042a7e5",
+  "max_experiment_minutes": 60,
+  "max_hourly_rate_usd": 2.0,
+  "max_pod_lifetime_minutes": 75,
+  "pilot": "qasper-evidence-matrix-v1",
+  "schema_version": 1,
+  "seeds": [
+    20260812,
+    20260813,
+    20260814,
+    20260815,
+    20260816
+  ]
+}

@@ -9,6 +9,7 @@ import pytest
 from redco.experiments.qasper_evidence import (
     EvidenceTask,
     PilotBudget,
+    assert_matrix_continuity,
     build_pilot_tasks,
     build_span_options,
     load_pilot_tasks,
@@ -157,3 +158,9 @@ def test_runtime_batches_have_equal_calls_and_decision_normalization() -> None:
     assert len(redco) == 9
     assert sum(decision.outer_weight for decision in redco) == pytest.approx(2)
     assert sum(decision.decision_units for decision in redco) == pytest.approx(2)
+
+
+def test_committed_matrix_preserves_the_pilot_task_sets() -> None:
+    pilot = load_pilot_tasks(Path("data/qasper-evidence-pilot-v1.json"))
+    matrix = load_pilot_tasks(Path("data/qasper-evidence-matrix-v1.json"))
+    assert_matrix_continuity(pilot, matrix)

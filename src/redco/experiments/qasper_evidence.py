@@ -317,8 +317,8 @@ class PilotBudget:
         return self.eval_tasks * 2
 
 
-def load_pilot_tasks(path: Path) -> tuple[EvidenceTask, ...]:
-    """Authenticate and load the generated pilot task envelope."""
+def load_pilot_dataset(path: Path) -> tuple[tuple[EvidenceTask, ...], PilotBudget]:
+    """Authenticate and load tasks with their exact rollout budget."""
     value = json.loads(path.read_bytes())
     if type(value) is not dict or set(value) != {
         "payload",
@@ -343,11 +343,48 @@ def load_pilot_tasks(path: Path) -> tuple[EvidenceTask, ...]:
     budget = payload["budget"]
     if type(budget) is not dict:
         raise ValueError("pilot dataset budget must be an object")
-    expected_budget = PilotBudget()
-    if budget != asdict(expected_budget):
-        raise ValueError("pilot dataset budget differs from the reviewed pilot")
-    if len([task for task in tasks if task.split == "train"]) != expected_budget.train_tasks:
+    if set(budget) != set(asdict(PilotBudget())):
+        raise ValueError("pilot dataset budget has the wrong schema")
+    try:
+        loaded_budget = PilotBudget(**budget)
+    except (TypeError, ValueError) as error:
+        raise ValueError("pilot dataset budget is invalid") from error
+    if len([task for task in tasks if task.split == "train"]) != loaded_budget.train_tasks:
         raise ValueError("pilot dataset has the wrong training task count")
-    if len([task for task in tasks if task.split == "eval"]) != expected_budget.eval_tasks:
+    if len([task for task in tasks if task.split == "eval"]) != loaded_budget.eval_tasks:
         raise ValueError("pilot dataset has the wrong evaluation task count")
-    return tasks
+    return tasks, loaded_budget
+
+
+def load_pilot_tasks(path: Path) -> tuple[EvidenceTask, ...]:
+    """Authenticate and load tasks while preserving the original public helper."""
+    return load_pilot_dataset(path)[0]
+
+
+def assert_matrix_continuity(
+    pilot_tasks: tuple[EvidenceTask, ...],
+    matrix_tasks: tuple[EvidenceTask, ...],
+) -> None:
+    """Prove that the matrix only expands the pilot evaluation cohort."""
+    pilot_train = tuple(task for task in pilot_tasks if task.split == "train")
+    pilot_eval = tuple(task for task in pilot_tasks if task.split == "eval")
+    matrix_train = tuple(task for task in matrix_tasks if task.split == "train")
+    matrix_eval = tuple(task for task in matrix_tasks if task.split == "eval")
+    if len(pilot_train) != 24 or len(pilot_eval) != 8:
+        raise ValueError("pilot continuity requires the committed 24/8 cohort")
+    if len(matrix_train) != 24 or len(matrix_eval) != 24:
+        raise ValueError("matrix continuity requires a 24/24 cohort")
+    if matrix_train != pilot_train:
+        raise ValueError("matrix training tasks differ from the pilot")
+    matrix_eval_by_id = {task.task_id: task for task in matrix_eval}
+    if len(matrix_eval_by_id) != len(matrix_eval):
+        raise ValueError("matrix evaluation task IDs are not unique")
+    if any(matrix_eval_by_id.get(task.task_id) != task for task in pilot_eval):
+        raise ValueError("pilot evaluation tasks are not preserved by the matrix")
+    papers = [task.source_paper_id for task in matrix_tasks]
+    if len(set(papers)) != 48:
+        raise ValueError("matrix must contain 48 unique papers")
+    train_papers = {task.source_paper_id for task in matrix_train}
+    eval_papers = {task.source_paper_id for task in matrix_eval}
+    if train_papers & eval_papers:
+        raise ValueError("matrix training and evaluation papers overlap")
