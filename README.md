@@ -103,6 +103,15 @@ arm, a three-hour absolute runtime ceiling, and a $6 total cost ceiling. The
 live run uses one ephemeral Prime GPU and always downloads the compact report
 and adapters before terminating the pod.
 
+The bounded Prime run completed on 2026-08-12 for $0.7788. Both arms improved
+exact evidence selection from 4/8 to 5/8 evaluation tasks, so this seed does not
+show a ReDCO accuracy advantage. ReDCO had lower mean and maximum gradient norms
+but also lower sampled training reward. This is a useful pilot result: the
+model-scale path works, while a convincing algorithm comparison now needs more
+evaluation tasks and multiple matched seeds rather than a larger model. The
+compact normalized result is
+[`results/qasper-evidence-pilot-v1.json`](results/qasper-evidence-pilot-v1.json).
+
 ## Historical work
 
 Old Stage C/D campaigns, launch protocols, provider integrations, reports,

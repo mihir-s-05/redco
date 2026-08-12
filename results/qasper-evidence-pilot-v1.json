@@ -1,0 +1,72 @@
+{
+  "arms": {
+    "redco": {
+      "adapter_sha256": "246cb3e31cd550632fbc70cee834c5bc8bfeb75349d4d06ca30d972b19629513",
+      "decision_units_per_update": 2,
+      "evaluation_after": {
+        "exact_evidence": 5,
+        "paragraph": 5,
+        "tasks": 8
+      },
+      "evaluation_before": {
+        "exact_evidence": 4,
+        "paragraph": 6,
+        "tasks": 8
+      },
+      "max_gradient_norm": 28.25,
+      "mean_gradient_norm": 1.60416666666667,
+      "mean_loss": -0.00685139497121175,
+      "mean_sampled_reward": 0.588541666666667,
+      "policy_calls": 240,
+      "updates": 24
+    },
+    "trajectory_loo": {
+      "adapter_sha256": "adc20d5518d038d18e657ea547da1b6eaadbdaba0e5437006705417cc41361eb",
+      "decision_units_per_update": 10,
+      "evaluation_after": {
+        "exact_evidence": 5,
+        "paragraph": 5,
+        "tasks": 8
+      },
+      "evaluation_before": {
+        "exact_evidence": 4,
+        "paragraph": 6,
+        "tasks": 8
+      },
+      "max_gradient_norm": 34.5,
+      "mean_gradient_norm": 2.6484375,
+      "mean_loss": -0.00879430425508569,
+      "mean_sampled_reward": 0.683333333333333,
+      "policy_calls": 240,
+      "updates": 24
+    }
+  },
+  "cost": {
+    "actual_usd": 0.7788,
+    "cap_usd": 6.0,
+    "gpu_rate_usd_per_hour": 1.79
+  },
+  "experiment": "qasper-evidence-pilot-v1",
+  "interpretation": "Both arms gained one exact evaluation match. This single seed does not show a ReDCO accuracy advantage; it does show lower ReDCO gradient norms under decision-unit normalization.",
+  "lineage": {
+    "config_sha256": "3b8a531015f13839a05f488cdbfec8a52d553f6f7eeec9466ae07a29c3eedb83",
+    "data_sha256": "f65c4f3ce75b3c11ff8551201249061b1e97ad53363acd4f2e02b8ba53afaea8",
+    "git_commit": "b335316965a5e297026dec5493e7bef944d289b8",
+    "report_payload_sha256": "e5fbc98571a6e50820f03e05400577aaafde7c21d2dbb93d63ffe71547b10503",
+    "report_raw_sha256": "baeef65ba3c84638f08eb2edcc99ce4c7fd4949ceb31e837f4b33cf9cba87a26"
+  },
+  "objective": "Choose the correct QASPER paragraph and then the exact supporting span using two constrained policy decisions.",
+  "run": {
+    "date": "2026-08-12",
+    "elapsed_seconds": 143.814,
+    "gpu": "NVIDIA A100-SXM4-80GB",
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "model_revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+    "prime_pods_created": 1,
+    "torch": "2.11.0+cu128",
+    "training_attempts": 2,
+    "transformers": "5.6.2"
+  },
+  "schema_version": 1,
+  "setup_note": "The first training attempt exhausted GPU memory by retaining a padded multi-prompt graph. Commit b335316 changed this to mathematically equivalent sequential gradient accumulation; the second attempt completed on the same pod."
+}
