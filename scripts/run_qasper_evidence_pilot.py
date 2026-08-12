@@ -23,7 +23,13 @@ from redco.experiments.qasper_evidence import (
     stage_one_prompt,
     stage_two_prompt,
 )
-from redco.experiments.qasper_runtime import Decision, redco_batch, trajectory_batch
+from redco.experiments.qasper_runtime import (
+    BranchAllocation,
+    Decision,
+    branch_batch,
+    redco_batch,
+    trajectory_batch,
+)
 from redco.integrity import sha256_bytes
 
 LABELS = (" A", " B", " C", " D")
@@ -223,7 +229,10 @@ class Policy:
         return digest.hexdigest()
 
 
-def _evaluate(policy: Policy, tasks: Sequence[EvidenceTask]) -> dict[str, float | int]:
+def _evaluate(
+    policy: Policy,
+    tasks: Sequence[EvidenceTask],
+) -> dict[str, float | int | None]:
     paragraph_actions = policy.greedy(tuple(stage_one_prompt(task) for task in tasks))
     span_prompts = tuple(
         stage_two_prompt(task, action)
@@ -238,12 +247,35 @@ def _evaluate(policy: Policy, tasks: Sequence[EvidenceTask]) -> dict[str, float 
         _, gold_span = build_span_options(task, paragraph)
         exact += int(paragraph_correct and span == gold_span)
     return {
+        "conditional_span_accuracy": exact / paragraphs if paragraphs else None,
         "exact_evidence": exact,
         "exact_evidence_rate": exact / len(tasks),
         "paragraph": paragraphs,
         "paragraph_rate": paragraphs / len(tasks),
         "tasks": len(tasks),
     }
+
+
+def _rollout_batch(
+    policy: Policy,
+    task: EvidenceTask,
+    budget: PilotBudget,
+    arm: str,
+) -> tuple[list[Decision], float]:
+    if arm == "trajectory_loo":
+        return trajectory_batch(policy, task, budget)
+    allocations = {
+        "branch_4_2": BranchAllocation(4, 2),
+        "branch_3_4": BranchAllocation(3, 4),
+        "branch_2_6": BranchAllocation(2, 6),
+    }
+    if arm == "redco":
+        return redco_batch(policy, task)
+    try:
+        allocation = allocations[arm]
+    except KeyError as error:
+        raise ValueError(f"unsupported experiment arm: {arm}") from error
+    return branch_batch(policy, task, allocation)
 
 
 def _train_arm(
@@ -256,7 +288,7 @@ def _train_arm(
     budget: PilotBudget | None = None,
     deadline: float | None = None,
     expected_initial_adapter_sha256: str | None = None,
-    expected_evaluation_before: dict[str, float | int] | None = None,
+    expected_evaluation_before: dict[str, float | int | None] | None = None,
 ) -> dict[str, Any]:
     def require_time(label: str) -> None:
         if deadline is not None and time.monotonic() >= deadline:
@@ -288,11 +320,7 @@ def _train_arm(
         updates: list[dict[str, float | int]] = []
         for step, task in enumerate(train_tasks, 1):
             require_time(f"{arm} update {step}")
-            decisions, sampled_reward = (
-                trajectory_batch(policy, task, budget)
-                if arm == "trajectory_loo"
-                else redco_batch(policy, task)
-            )
+            decisions, sampled_reward = _rollout_batch(policy, task, budget, arm)
             optimizer.zero_grad(set_to_none=True)
             loss = policy.backward(decisions, float(config["behavior_drift_weight"]))
             grad_norm = torch.nn.utils.clip_grad_norm_(

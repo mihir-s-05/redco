@@ -1,0 +1,25 @@
+{
+  "arms": [
+    "trajectory_loo",
+    "branch_4_2",
+    "branch_3_4",
+    "branch_2_6"
+  ],
+  "base_config": "configs/qasper-evidence-pilot-v1.json",
+  "base_config_sha256": "3b8a531015f13839a05f488cdbfec8a52d553f6f7eeec9466ae07a29c3eedb83",
+  "cost_limit_usd": 3.0,
+  "data": "data/qasper-allocation-sweep-v1.json",
+  "data_sha256": "bd9eda60f2d63864e112e7edb3774a038e91f6460a2c38a7c87f6146b7799a84",
+  "max_experiment_minutes": 60,
+  "max_hourly_rate_usd": 2.0,
+  "max_pod_lifetime_minutes": 75,
+  "pilot": "qasper-allocation-sweep-v1",
+  "schema_version": 1,
+  "seeds": [
+    20260812,
+    20260813,
+    20260814,
+    20260815,
+    20260816
+  ]
+}

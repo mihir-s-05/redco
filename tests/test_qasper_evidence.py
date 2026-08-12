@@ -9,6 +9,7 @@ import pytest
 from redco.experiments.qasper_evidence import (
     EvidenceTask,
     PilotBudget,
+    assert_evaluation_extension,
     assert_matrix_continuity,
     build_pilot_tasks,
     build_span_options,
@@ -16,7 +17,12 @@ from redco.experiments.qasper_evidence import (
     stage_one_prompt,
     stage_two_prompt,
 )
-from redco.experiments.qasper_runtime import redco_batch, trajectory_batch
+from redco.experiments.qasper_runtime import (
+    BranchAllocation,
+    branch_batch,
+    redco_batch,
+    trajectory_batch,
+)
 
 
 def _row(index: int) -> dict[str, object]:
@@ -160,7 +166,41 @@ def test_runtime_batches_have_equal_calls_and_decision_normalization() -> None:
     assert sum(decision.decision_units for decision in redco) == pytest.approx(2)
 
 
+@pytest.mark.parametrize(
+    ("complete_episodes", "continuations", "expected_records"),
+    ((4, 2, 7), (3, 4, 8), (2, 6, 9)),
+)
+def test_branch_allocation_sweep_preserves_calls_and_decision_units(
+    complete_episodes: int,
+    continuations: int,
+    expected_records: int,
+) -> None:
+    (task,) = build_pilot_tasks([_row(0)], train_tasks=1, eval_tasks=0)
+    policy = _FakePolicy()
+    allocation = BranchAllocation(complete_episodes, continuations)
+    decisions, _ = branch_batch(policy, task, allocation)
+    paragraph_records = decisions[:complete_episodes]
+    span_records = decisions[complete_episodes:]
+
+    assert policy.calls == allocation.policy_calls == 10
+    assert len(decisions) == expected_records
+    assert sum(item.decision_units for item in paragraph_records) == pytest.approx(1)
+    assert sum(item.decision_units for item in span_records) == pytest.approx(1)
+    assert sum(item.decision_units for item in decisions) == pytest.approx(2)
+
+
 def test_committed_matrix_preserves_the_pilot_task_sets() -> None:
     pilot = load_pilot_tasks(Path("data/qasper-evidence-pilot-v1.json"))
     matrix = load_pilot_tasks(Path("data/qasper-evidence-matrix-v1.json"))
     assert_matrix_continuity(pilot, matrix)
+
+
+def test_allocation_sweep_preserves_the_committed_matrix() -> None:
+    matrix = load_pilot_tasks(Path("data/qasper-evidence-matrix-v1.json"))
+    sweep = load_pilot_tasks(Path("data/qasper-allocation-sweep-v1.json"))
+    assert_evaluation_extension(
+        matrix,
+        sweep,
+        parent_eval_tasks=24,
+        expanded_eval_tasks=96,
+    )

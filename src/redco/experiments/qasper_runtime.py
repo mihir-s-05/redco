@@ -38,6 +38,24 @@ class Episode:
     paragraph_correct: bool
 
 
+@dataclass(frozen=True, slots=True)
+class BranchAllocation:
+    """Allocate ten policy calls between complete roots and one span branch."""
+
+    complete_episodes: int
+    conditioned_span_continuations: int
+
+    def __post_init__(self) -> None:
+        if self.complete_episodes < 2 or self.conditioned_span_continuations < 1:
+            raise ValueError("branch allocation needs at least two roots and one continuation")
+        if self.policy_calls != 10:
+            raise ValueError("branch allocation must use exactly ten policy calls")
+
+    @property
+    def policy_calls(self) -> int:
+        return self.complete_episodes * 2 + self.conditioned_span_continuations
+
+
 def sample_episode(policy: ChoicePolicy, task: EvidenceTask) -> Episode:
     paragraph_prompt = stage_one_prompt(task)
     ((paragraph_action, paragraph_logprob),) = policy.sample((paragraph_prompt,))
@@ -80,16 +98,24 @@ def trajectory_batch(
     return decisions, sum(episode.reward for episode in episodes) / len(episodes)
 
 
-def redco_batch(policy: ChoicePolicy, task: EvidenceTask) -> tuple[list[Decision], float]:
-    primary = [sample_episode(policy, task) for _ in range(2)]
+def branch_batch(
+    policy: ChoicePolicy,
+    task: EvidenceTask,
+    allocation: BranchAllocation,
+) -> tuple[list[Decision], float]:
+    """Credit roots across complete episodes and one span across continuations."""
+    primary = [sample_episode(policy, task) for _ in range(allocation.complete_episodes)]
     paragraph_advantages = leave_one_out_advantages(tuple(episode.reward for episode in primary))
+    paragraph_weight = 1.0 / len(primary)
     paragraph_records = [
-        _with_credit(episode.paragraph, advantage, 0.5, 0.5)
+        _with_credit(episode.paragraph, advantage, paragraph_weight, paragraph_weight)
         for episode, advantage in zip(primary, paragraph_advantages, strict=True)
     ]
 
     original = primary[0].span
-    alternatives = policy.sample((original.prompt,) * 6)
+    alternatives = policy.sample(
+        (original.prompt,) * allocation.conditioned_span_continuations
+    )
     span_records = [original]
     span_rewards = [primary[0].reward]
     _, gold_span = build_span_options(task, primary[0].paragraph.action)
@@ -104,3 +130,8 @@ def redco_batch(policy: ChoicePolicy, task: EvidenceTask) -> tuple[list[Decision
     ]
     rewards = [episode.reward for episode in primary] + span_rewards[1:]
     return [*paragraph_records, *credited_spans], sum(rewards) / len(rewards)
+
+
+def redco_batch(policy: ChoicePolicy, task: EvidenceTask) -> tuple[list[Decision], float]:
+    """Preserve the original branch-heavy 2+6 ReDCO allocation."""
+    return branch_batch(policy, task, BranchAllocation(2, 6))

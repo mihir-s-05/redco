@@ -388,3 +388,35 @@ def assert_matrix_continuity(
     eval_papers = {task.source_paper_id for task in matrix_eval}
     if train_papers & eval_papers:
         raise ValueError("matrix training and evaluation papers overlap")
+
+
+def assert_evaluation_extension(
+    parent_tasks: tuple[EvidenceTask, ...],
+    expanded_tasks: tuple[EvidenceTask, ...],
+    *,
+    parent_eval_tasks: int,
+    expanded_eval_tasks: int,
+) -> None:
+    """Prove an evaluation-only expansion preserves every parent task."""
+    parent_train = tuple(task for task in parent_tasks if task.split == "train")
+    parent_eval = tuple(task for task in parent_tasks if task.split == "eval")
+    expanded_train = tuple(task for task in expanded_tasks if task.split == "train")
+    expanded_eval = tuple(task for task in expanded_tasks if task.split == "eval")
+    if len(parent_train) != 24 or len(parent_eval) != parent_eval_tasks:
+        raise ValueError("parent cohort has the wrong split")
+    if len(expanded_train) != 24 or len(expanded_eval) != expanded_eval_tasks:
+        raise ValueError("expanded cohort has the wrong split")
+    if parent_train != expanded_train:
+        raise ValueError("expanded cohort changes training tasks")
+    expanded_by_id = {task.task_id: task for task in expanded_eval}
+    if len(expanded_by_id) != len(expanded_eval):
+        raise ValueError("expanded evaluation task IDs are not unique")
+    if any(expanded_by_id.get(task.task_id) != task for task in parent_eval):
+        raise ValueError("expanded cohort changes a parent evaluation task")
+    papers = [task.source_paper_id for task in expanded_tasks]
+    if len(set(papers)) != len(expanded_tasks):
+        raise ValueError("expanded cohort must use one task per paper")
+    train_papers = {task.source_paper_id for task in expanded_train}
+    eval_papers = {task.source_paper_id for task in expanded_eval}
+    if train_papers & eval_papers:
+        raise ValueError("expanded training and evaluation papers overlap")

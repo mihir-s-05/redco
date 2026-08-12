@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path("scripts").resolve()))
+from run_qasper_allocation_sweep import _load_sweep_config
 from run_qasper_evidence_matrix import _load_matrix_config, _paired_summary
 
 
@@ -55,3 +56,21 @@ def test_paired_summary_uses_five_seed_level_differences() -> None:
         "mean": 1.0,
         "median": 1,
     }
+
+
+def test_allocation_sweep_config_freezes_the_frontier(tmp_path: Path) -> None:
+    path = Path("configs/qasper-allocation-sweep-v1.json")
+    config = _load_sweep_config(path)
+    assert config["arms"] == [
+        "trajectory_loo",
+        "branch_4_2",
+        "branch_3_4",
+        "branch_2_6",
+    ]
+
+    changed = json.loads(path.read_bytes())
+    changed["arms"][1:3] = reversed(changed["arms"][1:3])
+    changed_path = tmp_path / "changed.json"
+    changed_path.write_text(json.dumps(changed), encoding="utf-8")
+    with pytest.raises(ValueError, match="exact reviewed allocation frontier"):
+        _load_sweep_config(changed_path)
