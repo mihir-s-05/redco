@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "experiment": "musique-ans-capability-gate-v1",
+  "source": {
+    "raw_report_path": "runs/musique-ans-capability-gate-v1/report.json",
+    "raw_report_sha256": "a43c0fd71b83a47dfc3f1b50cd85d3f83b2815285b1fa3837d3f15132794f6a6",
+    "raw_report_bytes": 72596,
+    "config_sha256": "9978ac70b684026b15073786c960b33bfd3d4d9973ea41bb25ccb82a80eea646",
+    "snapshot_sha256": "07f75ea217779b754a37136d204de19f45f26679bdb6b7e056089cb5e54c70ed",
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+    "actual_calls": 882,
+    "elapsed_seconds": 180.373201472,
+    "cuda_device_count": 1,
+    "dtype": "bfloat16"
+  },
+  "cost": {
+    "successful_pod_usd": 0.0801,
+    "total_usd": 0.1021,
+    "pods_remaining": 0
+  },
+  "status": "blocked",
+  "metrics": {
+    "2": {
+      "tasks": 24,
+      "greedy_full_paths": 7,
+      "greedy_full_path_rate": 0.2916666666666667,
+      "oracle_answer_f1": 0.5156903082549634,
+      "greedy_answer_f1": 0.445874183006536,
+      "teacher_top1_accuracy": 0.5416666666666666,
+      "teacher_random_baseline": 0.13392857142857142,
+      "mixed_prefix_reward_tasks": 2,
+      "mixed_prefix_reward_rate": 0.08333333333333333,
+      "greedy_choice_parse_valid_rate": 0.7083333333333334
+    },
+    "4": {
+      "tasks": 21,
+      "greedy_full_paths": 0,
+      "greedy_full_path_rate": 0.0,
+      "oracle_answer_f1": 0.46865079365079365,
+      "greedy_answer_f1": 0.13492063492063494,
+      "teacher_top1_accuracy": 0.10714285714285714,
+      "teacher_random_baseline": 0.15863095238095237,
+      "mixed_prefix_reward_tasks": 3,
+      "mixed_prefix_reward_rate": 0.14285714285714285,
+      "greedy_choice_parse_valid_rate": 0.09523809523809523
+    }
+  },
+  "blocked_reasons": [
+    "2-hop prefix reward support below 0.20",
+    "4-hop oracle answer F1 below 0.50",
+    "4-hop teacher accuracy is not above random plus margin",
+    "4-hop prefix reward support below 0.20",
+    "4-hop greedy full-path rate is not above 0.10"
+  ],
+  "interpretation": {
+    "action_interface": "strict textual choice parsing is a substantial failure mode, especially at four hops",
+    "depth_content": "four-hop root ranking is near-random and oracle answer F1 is below the gate, so formatting is not the only limitation",
+    "reward_support": "K=4 normalized prefix reward is collapsed for most tasks and is descriptive rather than a training-comparison measure",
+    "scientific_claim": "no ReDCO conclusion",
+    "next_objective": "constrained eight-way candidate-scoring diagnostic with no training comparison"
+  },
+  "authority": {
+    "training_comparison_authorized": false,
+    "redco_conclusion": false,
+    "model_calls_in_this_commit": false,
+    "prime_or_network_activity_in_this_commit": false
+  }
+}
