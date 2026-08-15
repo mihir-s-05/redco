@@ -129,6 +129,20 @@ drift. It cost $0.4425 on one A100, retained no adapters, and left zero Prime
 pods. See
 [`results/qasper-evidence-matrix-v1.json`](results/qasper-evidence-matrix-v1.json).
 
+The allocation follow-up kept the ten-call update budget fixed and compared
+trajectory LOO against three branch-credit splits: `4+2`, `3+4`, and `2+6`
+complete-root/conditioned-span calls. It used the same five matched seeds but
+expanded evaluation to 96 paper-disjoint tasks per seed. Among the branch arms,
+more span continuations produced a clear descriptive frontier: mean paragraph
+counts fell from 52.4 to 51.8 to 50.6, while conditional span accuracy rose
+from 79.2% to 89.0% to 94.5% and exact-evidence counts rose from 41.4 to 46.2
+to 47.8. The `2+6` arm nearly tied trajectory LOO on exact evidence (47.8
+versus 47.4 of 96), with 3.3 percentage points higher mean conditional span
+accuracy and 1.4 fewer correct paragraphs. With five seeds this is evidence of
+an allocation trade-off, not superiority. The one-A100 run cost $0.6819 and
+left zero Prime pods. See
+[`results/qasper-allocation-sweep-v1.json`](results/qasper-allocation-sweep-v1.json).
+
 ## Historical work
 
 Old Stage C/D campaigns, launch protocols, provider integrations, reports,

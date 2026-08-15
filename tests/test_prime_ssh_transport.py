@@ -94,6 +94,8 @@ def test_transport_sanitizes_subprocess_failure(
 def test_remote_script_exposes_repository_python_packages() -> None:
     script = _remote_script().decode()
     assert 'export PYTHONPATH="$PWD/src:$PWD/scripts"' in script
+    assert 'test -x "$HOME/.local/bin/uv"' in script
+    assert "command -v uv >/dev/null 2>&1" in script
     assert script.index("cd /tmp/redco-qasper-allocation-sweep-v1/repo") < script.index(
         "export PYTHONPATH="
     )

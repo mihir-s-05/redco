@@ -347,9 +347,12 @@ test "$(git rev-parse HEAD)" = "{EXPERIMENT_COMMIT}"
 export PYTHONPATH="$PWD/src:$PWD/scripts"
 failure_phase=uv_bootstrap
 if ! command -v uv >/dev/null 2>&1; then
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
+    test -x "$HOME/.local/bin/uv"
+  fi
   export PATH="$HOME/.local/bin:$PATH"
 fi
+command -v uv >/dev/null 2>&1
 export UV_CACHE_DIR={REMOTE_ROOT}/uv-cache
 export CUDA_VISIBLE_DEVICES=0
 run_uv() {{
