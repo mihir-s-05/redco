@@ -28,6 +28,15 @@ MAX_POD_SECONDS = 75 * 60
 MAX_REPORT_BYTES = 16 * 1024 * 1024
 REMOTE_ROOT = "/tmp/redco-qasper-allocation-sweep-v1"
 _REMOTE_PATH = re.compile(r"/[A-Za-z0-9._/-]+")
+_REMOTE_PHASES = {
+    "cuda_probe",
+    "dependency_preflight",
+    "repository_checkout",
+    "sweep",
+    "uv_bootstrap",
+    "workspace_setup",
+}
+_REMOTE_FAILURE = re.compile(rb"REDCO_REMOTE_FAILURE:([a-z_]+)")
 
 
 class StageFailure(RuntimeError):
@@ -130,12 +139,25 @@ class SshTransport:
 
     def run_script(self, script: bytes, timeout: float) -> subprocess.CompletedProcess[bytes]:
         self._require_trust()
-        return _run(
-            "remote_experiment",
-            ["ssh", *self._options("yes"), "bash", "-s"],
-            timeout,
-            stdin=script,
-        )
+        args = ["ssh", *self._options("yes"), "bash", "-s"]
+        try:
+            return subprocess.run(
+                args,
+                input=script,
+                check=True,
+                capture_output=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise StageFailure("remote_timeout") from error
+        except subprocess.CalledProcessError as error:
+            output = (error.stdout or b"") + (error.stderr or b"")
+            matches = _REMOTE_FAILURE.findall(output)
+            phase = matches[-1].decode() if matches else ""
+            stage = f"remote_{phase}" if phase in _REMOTE_PHASES else "remote_experiment"
+            raise StageFailure(stage) from error
+        except OSError as error:
+            raise StageFailure("remote_experiment") from error
 
     def download(self, path: str, max_bytes: int = MAX_REPORT_BYTES) -> bytes:
         self._require_trust()
@@ -312,25 +334,37 @@ def _wait_endpoint(client: Any, pod_id: str, deadline: float) -> tuple[str, str]
 
 
 def _remote_script() -> bytes:
-    return f"""set -euo pipefail
+    return f"""set -Eeuo pipefail
+failure_phase=workspace_setup
+trap 'status=$?; printf "REDCO_REMOTE_FAILURE:%s\\n" "$failure_phase" >&2; exit "$status"' ERR
 mkdir -p {REMOTE_ROOT}
 rm -rf {REMOTE_ROOT}/repo {REMOTE_ROOT}/result
+failure_phase=repository_checkout
 git clone {REMOTE_ROOT}/redco.bundle {REMOTE_ROOT}/repo
 cd {REMOTE_ROOT}/repo
 git checkout --detach {EXPERIMENT_COMMIT}
 test "$(git rev-parse HEAD)" = "{EXPERIMENT_COMMIT}"
 export PYTHONPATH="$PWD/src:$PWD/scripts"
+failure_phase=uv_bootstrap
 if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
 fi
 export UV_CACHE_DIR={REMOTE_ROOT}/uv-cache
 export CUDA_VISIBLE_DEVICES=0
-uv run --no-project --python 3.12 --index-strategy unsafe-best-match \\
-  --extra-index-url https://download.pytorch.org/whl/cu128 \\
-  --with torch==2.11.0 --with transformers==5.6.2 \\
-  python scripts/run_qasper_allocation_sweep.py \\
+run_uv() {{
+  uv run --no-project --python 3.12 --index-strategy unsafe-best-match \\
+    --extra-index-url https://download.pytorch.org/whl/cu128 \\
+    --with torch==2.11.0 --with transformers==5.6.2 "$@"
+}}
+failure_phase=dependency_preflight
+run_uv python scripts/run_qasper_allocation_sweep.py --check
+failure_phase=cuda_probe
+run_uv python -c 'import torch; assert torch.cuda.is_available() and torch.cuda.device_count() == 1'
+failure_phase=sweep
+run_uv python scripts/run_qasper_allocation_sweep.py \\
   --output {REMOTE_ROOT}/result
+trap - ERR
 """.encode()
 
 

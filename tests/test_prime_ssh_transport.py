@@ -97,3 +97,43 @@ def test_remote_script_exposes_repository_python_packages() -> None:
     assert script.index("cd /tmp/redco-qasper-allocation-sweep-v1/repo") < script.index(
         "export PYTHONPATH="
     )
+    phases = [
+        "workspace_setup",
+        "repository_checkout",
+        "uv_bootstrap",
+        "dependency_preflight",
+        "cuda_probe",
+        "sweep",
+    ]
+    assert [script.index(f"failure_phase={phase}") for phase in phases] == sorted(
+        script.index(f"failure_phase={phase}") for phase in phases
+    )
+
+
+def test_remote_failure_reports_only_closed_phase(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cases = [
+        (b"REDCO_REMOTE_FAILURE:cuda_probe", "remote_cuda_probe"),
+        (b"REDCO_REMOTE_FAILURE:unknown", "remote_experiment"),
+        (b"sensitive output only", "remote_experiment"),
+    ]
+    failure = {"marker": b""}
+
+    def fail(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        raise subprocess.CalledProcessError(
+            1,
+            args,
+            output=b"private stdout",
+            stderr=failure["marker"] + b" private stderr",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fail)
+    for marker, expected in cases:
+        failure["marker"] = marker
+        transport = _transport(tmp_path)
+        transport._trusted = True
+        with pytest.raises(StageFailure, match=f"^{expected}$") as captured:
+            transport.run_script(b"script", 30)
+        assert "private" not in str(captured.value)
