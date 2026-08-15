@@ -23,6 +23,35 @@
     "sweep_config_sha256": "7dad5f4fdf9cbcda70900dc08ed0af9fc2a2d293367d98587f3dbda6c54ffb20"
   },
   "objective": "Choose the correct QASPER paragraph and then the exact supporting span using two constrained policy decisions.",
+  "optimizer_diagnostics": {
+    "zero_gradient_updates": {
+      "trajectory_loo": {"count": 100, "total": 120},
+      "branch_4_2": {"count": 95, "total": 120},
+      "branch_3_4": {"count": 101, "total": 120},
+      "branch_2_6": {"count": 104, "total": 120}
+    },
+    "gradient_above_clip_counts": {
+      "trajectory_loo": {"count": 20, "total": 120},
+      "branch_4_2": {"count": 16, "total": 120},
+      "branch_3_4": {"count": 17, "total": 120},
+      "branch_2_6": {"count": 15, "total": 120}
+    },
+    "exact_zero_gradients_coincide_with_arm_mean_reward": true,
+    "zero_gradient_arm_mean_reward_values": [0, 1],
+    "uninformative_task_positions": {
+      "definition": "positions whose arm-specific mean sampled reward is exactly 0 or 1 for all five seeds, evaluated separately within each arm",
+      "count_per_arm": {
+        "trajectory_loo": 12,
+        "branch_4_2": 12,
+        "branch_3_4": 12,
+        "branch_2_6": 12
+      },
+      "common_to_all_arms": 9,
+      "of": 24
+    },
+    "loss_comparison": "signed loss is not a cross-arm efficacy measure",
+    "sampled_reward_comparison": "arm-specific sampled reward is not a cross-arm efficacy measure"
+  },
   "outcomes": {
     "baseline": {"conditional_span": 0.666666666666667, "exact_mean": 34.0, "paragraph_mean": 51.0},
     "branch_2_6": {

@@ -1,0 +1,44 @@
+{
+  "dataset": "MuSiQue-Ans",
+  "schema_version": 1,
+  "cohort": "short_document_linear_chain",
+  "source": {
+    "archive_sha256": "98f839bf2fd5319f5c688aed77901a6d5c30b3b9f9f691ab9a8ecafb045ee0cd",
+    "license": "CC BY 4.0",
+    "official_snapshot_required": true,
+    "raw_dev_bytes": 30439728,
+    "raw_dev_sha256": "15fa63794d18a94ce12411aca6e2327e65b6e83b0b1490efab3f1962e48abf3b",
+    "repository": "StonyBrookNLP/musique",
+    "snapshot_path": "data/musique-ans-capability-v1.json",
+    "snapshot_sha256": "07f75ea217779b754a37136d204de19f45f26679bdb6b7e056089cb5e54c70ed"
+  },
+  "subset": "linear_chain",
+  "inference": {
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+    "max_seconds": 900,
+    "choice_max_new_tokens": 4,
+    "answer_max_new_tokens": 32,
+    "max_input_tokens": 8192
+  },
+  "gate": {
+    "candidate_count": 8,
+    "tasks_per_depth": {
+      "2": 24,
+      "4": 21
+    },
+    "planned_k": 4,
+    "short_document_token_limit": 288,
+    "generation": {
+      "base_seed": 20260815,
+      "temperature": 1.0,
+      "top_p": 0.95
+    },
+    "thresholds": {
+      "oracle_answer_f1_min": 0.5,
+      "teacher_forced_margin": 0.1,
+      "greedy_full_path_min": 0.1,
+      "mixed_reward_min": 0.2
+    }
+  }
+}
