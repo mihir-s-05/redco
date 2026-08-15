@@ -319,6 +319,7 @@ git clone {REMOTE_ROOT}/redco.bundle {REMOTE_ROOT}/repo
 cd {REMOTE_ROOT}/repo
 git checkout --detach {EXPERIMENT_COMMIT}
 test "$(git rev-parse HEAD)" = "{EXPERIMENT_COMMIT}"
+export PYTHONPATH="$PWD/src:$PWD/scripts"
 if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"

@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path("scripts").resolve()))
 
-from run_qasper_allocation_sweep_on_prime import SshTransport, StageFailure
+from run_qasper_allocation_sweep_on_prime import SshTransport, StageFailure, _remote_script
 
 
 def _transport(tmp_path: Path) -> SshTransport:
@@ -89,3 +89,11 @@ def test_transport_sanitizes_subprocess_failure(
     with pytest.raises(StageFailure, match="ssh_trust") as captured:
         transport.establish_trust()
     assert "sensitive" not in str(captured.value)
+
+
+def test_remote_script_exposes_repository_python_packages() -> None:
+    script = _remote_script().decode()
+    assert 'export PYTHONPATH="$PWD/src:$PWD/scripts"' in script
+    assert script.index("cd /tmp/redco-qasper-allocation-sweep-v1/repo") < script.index(
+        "export PYTHONPATH="
+    )
