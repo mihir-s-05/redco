@@ -39,6 +39,7 @@ def test_transport_streams_exact_bytes_after_isolated_trust(
     assert "StrictHostKeyChecking=accept-new" in calls[0]["args"]
     assert all("StrictHostKeyChecking=yes" in call["args"] for call in calls[1:])
     assert calls[1]["input"] == b"bundle-bytes"
+    assert "mkdir -p /workspace" in calls[1]["args"][-1]
     assert all(call["args"][0] == "ssh" for call in calls)
 
 

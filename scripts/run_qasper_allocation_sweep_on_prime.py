@@ -15,7 +15,7 @@ import sys
 import tempfile
 import time
 from collections import defaultdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +26,7 @@ MAX_RATE_USD = 2.0
 MAX_COST_USD = 3.0
 MAX_POD_SECONDS = 75 * 60
 MAX_REPORT_BYTES = 16 * 1024 * 1024
+REMOTE_ROOT = "/tmp/redco-qasper-allocation-sweep-v1"
 _REMOTE_PATH = re.compile(r"/[A-Za-z0-9._/-]+")
 
 
@@ -112,9 +113,14 @@ class SshTransport:
     def upload(self, path: str, data: bytes, timeout: float = 180) -> None:
         self._require_trust()
         remote = self._path(path)
+        parent = str(PurePosixPath(remote).parent)
         _run(
             "ssh_upload",
-            ["ssh", *self._options("yes"), f"umask 077; cat > {remote}"],
+            [
+                "ssh",
+                *self._options("yes"),
+                f"mkdir -p {parent}; umask 077; cat > {remote}",
+            ],
             timeout,
             stdin=data,
         )
@@ -307,22 +313,23 @@ def _wait_endpoint(client: Any, pod_id: str, deadline: float) -> tuple[str, str]
 
 def _remote_script() -> bytes:
     return f"""set -euo pipefail
-rm -rf /workspace/redco
-git clone /workspace/redco.bundle /workspace/redco
-cd /workspace/redco
+mkdir -p {REMOTE_ROOT}
+rm -rf {REMOTE_ROOT}/repo {REMOTE_ROOT}/result
+git clone {REMOTE_ROOT}/redco.bundle {REMOTE_ROOT}/repo
+cd {REMOTE_ROOT}/repo
 git checkout --detach {EXPERIMENT_COMMIT}
 test "$(git rev-parse HEAD)" = "{EXPERIMENT_COMMIT}"
 if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
 fi
-export UV_CACHE_DIR=/workspace/.uv-cache
+export UV_CACHE_DIR={REMOTE_ROOT}/uv-cache
 export CUDA_VISIBLE_DEVICES=0
 uv run --no-project --python 3.12 --index-strategy unsafe-best-match \\
   --extra-index-url https://download.pytorch.org/whl/cu128 \\
   --with torch==2.11.0 --with transformers==5.6.2 \\
   python scripts/run_qasper_allocation_sweep.py \\
-  --output /workspace/qasper-allocation-sweep-v1
+  --output {REMOTE_ROOT}/result
 """.encode()
 
 
@@ -458,12 +465,12 @@ def main() -> int:
                 target, port, Path(Config().ssh_key_path), temp / "known_hosts"
             )
             transport.establish_trust()
-            transport.upload_file("/workspace/redco.bundle", bundle)
+            transport.upload_file(f"{REMOTE_ROOT}/redco.bundle", bundle)
             remaining = min(65 * 60, started + MAX_POD_SECONDS - time.monotonic() - 300)
             if remaining <= 60:
                 raise StageFailure("experiment_time_reserve")
             transport.run_script(_remote_script(), remaining)
-            report = transport.download("/workspace/qasper-allocation-sweep-v1/report.json")
+            report = transport.download(f"{REMOTE_ROOT}/result/report.json")
         digest = _validate_report(report)
         RESULT.parent.mkdir(parents=True, exist_ok=False)
         RESULT.write_bytes(report)
