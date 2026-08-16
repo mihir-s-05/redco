@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "mode": "qwen3_5_matrix",
+  "dataset": "MuSiQue-Ans",
+  "cohort": "short_document_linear_chain",
+  "source": {
+    "snapshot_path": "data/musique-ans-capability-v1.json",
+    "snapshot_sha256": "07f75ea217779b754a37136d204de19f45f26679bdb6b7e056089cb5e54c70ed",
+    "gate_config_path": "configs/musique-ans-capability-gate-v1.json",
+    "gate_config_sha256": "9978ac70b684026b15073786c960b33bfd3d4d9973ea41bb25ccb82a80eea646",
+    "task_counts": {"2": 24, "4": 21}
+  },
+  "models": [
+    {
+      "name": "Qwen/Qwen3.5-4B",
+      "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+      "model_type": "qwen3_5",
+      "architecture": "Qwen3_5ForCausalLM",
+      "repository_architecture": "Qwen3_5ForConditionalGeneration",
+      "text_model_type": "qwen3_5_text",
+      "layers": 32,
+      "hidden_size": 2560,
+      "index_total_size": 9319737856,
+      "index_shards": 2
+    },
+    {
+      "name": "Qwen/Qwen3.5-9B",
+      "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+      "model_type": "qwen3_5",
+      "architecture": "Qwen3_5ForCausalLM",
+      "repository_architecture": "Qwen3_5ForConditionalGeneration",
+      "text_model_type": "qwen3_5_text",
+      "layers": 32,
+      "hidden_size": 4096,
+      "index_total_size": 19306216416,
+      "index_shards": 4
+    }
+  ],
+  "choice": {
+    "labels": ["1", "2", "3", "4", "5", "6", "7", "8"],
+    "prompt_template": "Question:\n{question}\n\nAlready selected evidence:\n{evidence}\n\nChoose exactly one next document from the numbered candidates. Return only one integer from the displayed range.\n\nCandidates:\n{candidates}",
+    "chat_template": {"tokenize": false, "add_generation_prompt": true, "enable_thinking": false},
+    "max_input_tokens": 8192
+  },
+  "gate": {
+    "candidate_count": 8,
+    "expected_states_per_model": 264,
+    "expected_forward_calls": 528,
+    "teacher_margin": 0.1,
+    "four_hop_greedy_full_path_min": 0.1,
+    "four_hop_teacher_position_min_count": 8,
+    "four_hop_greedy_full_path_min_count": 3,
+    "four_hop_k10_mixed_sum_min": 5.0
+  },
+  "runtime": {
+    "max_seconds": 1500,
+    "minimum_seconds_per_model": 300,
+    "cuda_devices": 1,
+    "dtype": "bfloat16",
+    "transformers_version": "5.6.2",
+    "use_cache": false,
+    "models_run_in_separate_processes": true,
+    "unload_between_models": true,
+    "empty_cuda_cache": true
+  }
+}

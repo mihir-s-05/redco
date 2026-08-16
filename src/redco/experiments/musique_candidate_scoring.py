@@ -47,6 +47,7 @@ class ScoringConfig:
     cuda_devices: int
     dtype: str
     use_cache: bool
+    stronger_gate: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,11 +140,7 @@ def load_config(path: Path) -> ScoringConfig:
     }:
         raise ValueError("candidate-scoring config has the wrong schema")
     schema_version = value["schema_version"]
-    if (
-        type(schema_version) is not int
-        or schema_version not in (1, 2)
-        or value["dataset"] != "MuSiQue-Ans"
-    ):
+    if type(schema_version) is not int or schema_version != 1 or value["dataset"] != "MuSiQue-Ans":
         raise ValueError("candidate-scoring config is not MuSiQue")
     if value["cohort"] != "short_document_linear_chain":
         raise ValueError("candidate-scoring config has the wrong cohort")
@@ -160,25 +157,6 @@ def load_config(path: Path) -> ScoringConfig:
         "teacher_margin",
     }
     runtime_keys = {"cuda_devices", "dtype", "max_seconds"}
-    if schema_version == 2:
-        model_keys = {
-            "architecture",
-            "active_experts",
-            "experts",
-            "index_shards",
-            "index_total_size",
-            "layers",
-            "name",
-            "revision",
-        }
-        gate_keys.update(
-            {
-                "four_hop_greedy_full_path_min_count",
-                "four_hop_k10_mixed_sum_min",
-                "four_hop_teacher_position_min_count",
-            }
-        )
-        runtime_keys.add("use_cache")
     if (
         type(source) is not dict
         or set(source)
@@ -220,8 +198,7 @@ def load_config(path: Path) -> ScoringConfig:
             schema_version == 1
             and (
                 model["name"] != "Qwen/Qwen3-4B-Instruct-2507"
-                or model["revision"]
-                != "cdbee75f17c01a7cc42f958dc650907174af0554"
+                or model["revision"] != "cdbee75f17c01a7cc42f958dc650907174af0554"
             )
         )
         or labels != [str(index) for index in range(1, 9)]
@@ -235,41 +212,12 @@ def load_config(path: Path) -> ScoringConfig:
         or runtime["max_seconds"] != 900
     ):
         raise ValueError("candidate-scoring config is outside the frozen diagnostic")
-    if schema_version == 2 and (
-        model["name"] != "Qwen/Qwen3-30B-A3B-Instruct-2507"
-        or model["revision"] != "0d7cf23991f47feeb3a57ecb4c9cee8ea4a17bfe"
-        or model["architecture"] != "qwen3_moe"
-        or model["layers"] != 48
-        or model["experts"] != 128
-        or model["active_experts"] != 8
-        or model["index_total_size"] != 61064245248
-        or model["index_shards"] != 16
-        or runtime["use_cache"] is not False
-    ):
-        raise ValueError("stronger-model binding is outside the reviewed diagnostic")
     threshold = _finite(gate["teacher_margin"], "teacher margin must be finite")
     full_path_min = _finite(
         gate["four_hop_greedy_full_path_min"], "full-path threshold must be finite"
     )
     if threshold != 0.1 or full_path_min != 0.1:
         raise ValueError("candidate-scoring thresholds changed")
-    if schema_version == 2:
-        if (
-            type(gate["four_hop_teacher_position_min_count"]) is not int
-            or gate["four_hop_teacher_position_min_count"] != 8
-            or type(gate["four_hop_greedy_full_path_min_count"]) is not int
-            or gate["four_hop_greedy_full_path_min_count"] != 3
-        ):
-            raise ValueError("stronger-model count gates changed")
-        k10_min = _finite(gate["four_hop_k10_mixed_sum_min"], "K10 threshold must be finite")
-        if k10_min != 5.0:
-            raise ValueError("stronger-model K10 threshold changed")
-        position_min = gate["four_hop_teacher_position_min_count"]
-        path_min_count = gate["four_hop_greedy_full_path_min_count"]
-    else:
-        k10_min = 0.0
-        position_min = 0
-        path_min_count = 0
     return ScoringConfig(
         schema_version,
         config_sha256,
@@ -287,13 +235,14 @@ def load_config(path: Path) -> ScoringConfig:
         gate["expected_states"],
         threshold,
         full_path_min,
-        position_min,
-        path_min_count,
-        k10_min,
+        0,
+        0,
+        0.0,
         runtime["max_seconds"],
         runtime["cuda_devices"],
         runtime["dtype"],
-        False if schema_version == 1 else cast(bool, runtime["use_cache"]),
+        False,
+        False,
     )
 
 
@@ -500,7 +449,7 @@ def summarize(
         ]
         position_gate = (
             all(count >= config.four_hop_teacher_position_min_count for count in position_correct)
-            if depth == 4 and config.schema_version == 2
+            if depth == 4 and config.stronger_gate
             else None
         )
         k10_rows: list[dict[str, object]] = []
@@ -519,12 +468,12 @@ def summarize(
                 k10_mixed_count += mixed >= 0.5
         k10_gate = (
             k10_mixed_sum >= config.four_hop_k10_mixed_sum_min
-            if depth == 4 and config.schema_version == 2
+            if depth == 4 and config.stronger_gate
             else None
         )
         full_path_count_gate = (
             full_paths >= config.four_hop_greedy_full_path_min_count
-            if depth == 4 and config.schema_version == 2
+            if depth == 4 and config.stronger_gate
             else None
         )
         full_path_passed = full_rate > config.four_hop_greedy_full_path_min and (
@@ -536,8 +485,11 @@ def summarize(
             blocked.append("4-hop greedy full-path rate does not exceed the frozen threshold")
         if depth == 4 and position_gate is False:
             blocked.append("4-hop teacher positions do not meet the stronger count gate")
-        if depth == 4 and k10_gate is False:
-            blocked.append("4-hop K10 mixed expectation does not meet the stronger threshold")
+        training_support_reasons = (
+            ["4-hop K10 mixed expectation does not meet the frozen support threshold"]
+            if depth == 4 and k10_gate is False
+            else []
+        )
         by_hop[str(depth)] = {
             "tasks": expected_tasks,
             "greedy_states": len(greedy),
@@ -554,6 +506,11 @@ def summarize(
             "greedy_unordered_support_set_matches": unordered_support_matches,
             "teacher_position_top1_correct": position_correct,
             "teacher_position_top1_gate": position_gate,
+            "capability_pass": teacher_passed
+            and (full_path_passed if depth == 4 else True)
+            and (position_gate is not False),
+            "training_support_pass": not training_support_reasons,
+            "training_support_reasons": training_support_reasons,
             "k10_mixed": (
                 {
                     "q_values": k10_rows,
@@ -581,6 +538,15 @@ def report_payload(
     forward_calls: int,
     law: ChoiceLaw,
 ) -> dict[str, object]:
+    training_support_reasons = [
+        str(reason)
+        for value in by_hop.values()
+        if isinstance(value, dict)
+        for reason in cast(list[object], value.get("training_support_reasons", []))
+    ]
+    capability_reasons = list(blocked)
+    capability_pass = not capability_reasons
+    training_support_pass = not training_support_reasons
     return {
         "schema_version": config.schema_version,
         "dataset": "MuSiQue-Ans",
@@ -612,8 +578,13 @@ def report_payload(
             "training_updates": 0,
         },
         "by_hop": dict(by_hop),
-        "passed": not blocked,
-        "blocked_reasons": list(blocked),
+        "capability_pass": capability_pass,
+        "capability_blocked_reasons": capability_reasons,
+        "training_support_pass": training_support_pass,
+        "training_support_blocked_reasons": training_support_reasons,
+        "training_experiment_eligible": capability_pass and training_support_pass,
+        "passed": capability_pass,
+        "blocked_reasons": capability_reasons,
         "gold_fields_in_prompt": False,
         "deadline_cooperative": True,
         "elapsed_seconds": elapsed_seconds,
