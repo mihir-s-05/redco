@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "experiment": "musique-ans-qwen35-candidate-scoring-matrix-v1",
+  "status": "complete",
+  "source": {
+    "commit": "37b27c5cd8978f2412ad531d2aa5d252a3b04202",
+    "config_sha256": "6e333ed937cdec1cf82cfb26caf446fc7fb5ed66dc6b5528811a15089882149d",
+    "snapshot_sha256": "07f75ea217779b754a37136d204de19f45f26679bdb6b7e056089cb5e54c70ed",
+    "raw_report_path": "runs/musique-ans-candidate-scoring-matrix-v1/report.json",
+    "raw_report_sha256": "5141903732a141fe84e8d22cb6d44f4dbd2b945de0550650ec77450b6b2a1a72",
+    "raw_report_bytes": 533690
+  },
+  "execution": {
+    "gpu": "A100_80GB",
+    "gpu_count": 1,
+    "spot": true,
+    "rate_usd_per_hour": 0.895,
+    "observed_cost_usd": 0.2471,
+    "elapsed_seconds": 858.386475641,
+    "uv_runtime": {
+      "python": "3.12",
+      "torch_requirement": "2.11.0",
+      "pytorch_index": "cu128",
+      "transformers": "5.6.2",
+      "jinja2": "3.1.6"
+    },
+    "actual_forward_calls": 528,
+    "sampling_calls": 0,
+    "training_updates": 0,
+    "pods_remaining_after_teardown": 0
+  },
+  "comparability": {
+    "chat_template_sha256": "a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715",
+    "fixed_teacher_forced_states": 132,
+    "total_structural_states_per_model": 264,
+    "greedy_prompts": "model-dependent trajectories",
+    "paired_tasks": 45
+  },
+  "models": [
+    {
+      "name": "Qwen/Qwen3.5-4B",
+      "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+      "elapsed_seconds": 359.96500059699997,
+      "peak_memory_bytes": 23389521920,
+      "two_hop": {
+        "tasks": 24,
+        "teacher_top1_correct": 31,
+        "teacher_states": 48,
+        "greedy_ordered_full_paths": 9,
+        "greedy_unordered_support_sets": 15,
+        "capability_pass": true
+      },
+      "four_hop": {
+        "tasks": 21,
+        "teacher_position_top1_correct": [7, 4, 2, 17],
+        "teacher_top1_correct": 30,
+        "teacher_states": 84,
+        "greedy_ordered_full_paths": 0,
+        "greedy_unordered_support_sets": 5,
+        "k10_mixed_expectation": 1.6314913368959816,
+        "capability_pass": false,
+        "training_support_pass": false
+      },
+      "training_experiment_eligible": false
+    },
+    {
+      "name": "Qwen/Qwen3.5-9B",
+      "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+      "elapsed_seconds": 495.887291526,
+      "peak_memory_bytes": 32784962560,
+      "two_hop": {
+        "tasks": 24,
+        "teacher_top1_correct": 30,
+        "teacher_states": 48,
+        "greedy_ordered_full_paths": 9,
+        "greedy_unordered_support_sets": 15,
+        "capability_pass": true
+      },
+      "four_hop": {
+        "tasks": 21,
+        "teacher_position_top1_correct": [5, 5, 5, 15],
+        "teacher_top1_correct": 30,
+        "teacher_states": 84,
+        "greedy_ordered_full_paths": 0,
+        "greedy_unordered_support_sets": 6,
+        "k10_mixed_expectation": 1.4886147021767526,
+        "capability_pass": false,
+        "training_support_pass": false
+      },
+      "training_experiment_eligible": false
+    }
+  ],
+  "paired_summary": {
+    "two_hop_ordered_paths": {
+      "both_models": 7,
+      "only_4b": 2,
+      "only_9b": 2,
+      "neither_model": 13
+    },
+    "four_hop_ordered_paths": {
+      "both_models": 0,
+      "only_4b": 0,
+      "only_9b": 0,
+      "neither_model": 21
+    },
+    "mean_teacher_gold_probability_delta_9b_minus_4b": -0.02880509355388516,
+    "mean_greedy_path_probability_delta_9b_minus_4b": 0.009966396111279616
+  },
+  "conclusion": {
+    "capability": "Both models pass the two-hop diagnostic and fail the frozen four-hop gate; 9B does not materially improve the decisive four-hop outcomes over 4B.",
+    "training_support": "Neither model provides enough mixed four-hop reward support for the planned ReDCO-versus-trajectory training comparison.",
+    "training_authorized": false,
+    "recommended_action": "Close this MuSiQue/Qwen3.5 branch as a capability negative; do not launch the planned training matrix on either model."
+  }
+}
