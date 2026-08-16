@@ -391,6 +391,7 @@ def test_qwen35_loader_uses_text_causal_owner_and_frozen_chat_mode(
                 architectures=["Qwen3_5ForCausalLM"],
                 num_hidden_layers=32,
                 hidden_size=2560,
+                use_cache=True,
             )
 
         def to(self, device: str) -> Qwen3_5ForCausalLM:
@@ -456,11 +457,11 @@ def test_qwen35_loader_uses_text_causal_owner_and_frozen_chat_mode(
             {
                 "revision": matrix.models[0].revision,
                 "torch_dtype": fake_torch.bfloat16,
-                "use_cache": False,
                 "trust_remote_code": False,
             },
         )
     ]
+    assert model.config.use_cache is False
     rendered = adapter.apply_chat_template(
         [{"role": "user", "content": "Question"}],
         tokenize=False,

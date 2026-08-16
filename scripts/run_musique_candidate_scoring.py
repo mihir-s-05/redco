@@ -329,10 +329,12 @@ def _load_qwen35_model(config: MatrixConfig, spec: MatrixModel) -> tuple[Any, An
         spec.name,
         revision=spec.revision,
         torch_dtype=torch.bfloat16,
-        use_cache=False,
         trust_remote_code=False,
     )
     _authenticate_qwen35_model(model, spec)
+    model.config.use_cache = False
+    if model.config.use_cache is not False:
+        raise RuntimeError("Qwen3.5 loaded model did not disable the cache")
     model = model.to("cuda")
     model.eval()
     return Qwen35TextTokenizer(tokenizer), model, torch
