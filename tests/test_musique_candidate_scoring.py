@@ -16,6 +16,7 @@ from redco.experiments.musique_candidate_scoring import (
     ScoreSummary,
     ScoringConfig,
     evaluate_states,
+    k10_mixed_sum,
     load_inputs,
     prompt_for_state,
     score_values,
@@ -25,6 +26,7 @@ from redco.experiments.musique_candidate_scoring import (
 
 ROOT = Path(__file__).parents[1]
 CONFIG = ROOT / "configs/musique-ans-candidate-scoring-v1.json"
+V2_CONFIG = ROOT / "configs/musique-ans-candidate-scoring-v2.json"
 SNAPSHOT = ROOT / "data/musique-ans-capability-v1.json"
 GATE_CONFIG = ROOT / "configs/musique-ans-capability-gate-v1.json"
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -333,7 +335,14 @@ def test_model_loader_forwards_pinned_revision_without_local_only(
     _load_model(config)
     assert tokenizer_calls == [((config.model,), {"revision": config.revision})]
     assert model_calls == [
-        ((config.model,), {"revision": config.revision, "torch_dtype": fake_torch.bfloat16})
+        (
+            (config.model,),
+            {
+                "revision": config.revision,
+                "torch_dtype": fake_torch.bfloat16,
+                "use_cache": False,
+            },
+        )
     ]
 
 
@@ -359,6 +368,63 @@ def test_report_check_binds_the_actual_config_bytes() -> None:
     assert payload["config_sha256"] == config.config_sha256
     assert payload["config_sha256"] == hashlib.sha256(CONFIG.read_bytes()).hexdigest()
     assert payload["tasks"] == len(tasks)
+
+
+def test_stronger_config_and_k10_gate_are_explicit() -> None:
+    config, tasks = load_inputs(V2_CONFIG, SNAPSHOT, GATE_CONFIG)
+    assert config.schema_version == 2
+    assert config.model == "Qwen/Qwen3-30B-A3B-Instruct-2507"
+    assert config.revision == "0d7cf23991f47feeb3a57ecb4c9cee8ea4a17bfe"
+    assert config.expected_states == 264
+    assert config.use_cache is False
+    assert config.four_hop_teacher_position_min_count == 8
+    assert config.four_hop_greedy_full_path_min_count == 3
+    assert config.four_hop_k10_mixed_sum_min == 5.0
+    assert len(tasks) == 45
+    assert k10_mixed_sum((0.5, 0.5)) == pytest.approx(1.99609375)
+
+
+def test_compact_four_b_result_fails_the_stronger_gate() -> None:
+    result = json.loads(
+        (ROOT / "results/musique-ans-candidate-scoring-v1.json").read_bytes()
+    )
+    preview = result["stronger_gate_preview"]
+    assert preview["passed"] is False
+    assert preview["four_hop_teacher_position_top1_correct"] == [8, 4, 5, 10]
+    assert preview["four_hop_greedy_full_paths"] == 0
+    assert preview["four_hop_k10_mixed_sum"] < 5.0
+
+
+def test_stronger_check_binds_model_and_all_thresholds(tmp_path: Path) -> None:
+    output = tmp_path / "unused.json"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/run_musique_candidate_scoring.py",
+            "--check",
+            "--config",
+            str(V2_CONFIG),
+            "--output",
+            str(output),
+        ],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PYTHONPATH": str(ROOT / "src") + os.pathsep + str(ROOT / "scripts"),
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    payload = json.loads(completed.stdout)
+    assert payload["schema_version"] == 2
+    assert payload["model"] == "Qwen/Qwen3-30B-A3B-Instruct-2507"
+    assert payload["revision"] == "0d7cf23991f47feeb3a57ecb4c9cee8ea4a17bfe"
+    assert payload["expected_states"] == 264
+    assert payload["gate"]["four_hop_teacher_position_min_count"] == 8
+    assert payload["gate"]["four_hop_greedy_full_path_min_count"] == 3
+    assert payload["gate"]["four_hop_k10_mixed_sum_min"] == 5.0
+    assert not output.exists()
 
 
 def test_check_is_source_free_and_exclusive_writer_refuses_overwrite(tmp_path: Path) -> None:

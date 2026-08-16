@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "dataset": "MuSiQue-Ans",
+  "cohort": "short_document_linear_chain",
+  "commit": "3434346d12ee33ddeea5f3411819a43561cc16f2",
+  "raw_report": {
+    "path": "runs/musique-ans-candidate-scoring-v1/report.json",
+    "sha256": "a7c4d64dcf2b0addd77a3d2e8f229a2bf52c71e3380ee692c76a93276587914c",
+    "bytes": 121953
+  },
+  "config": {
+    "path": "configs/musique-ans-candidate-scoring-v1.json",
+    "sha256": "0d9d8d8ebc2dc9d55437aba09f4d1f55996b55e8484539e1da8d7e5d03434d05"
+  },
+  "snapshot": {
+    "path": "data/musique-ans-capability-v1.json",
+    "sha256": "07f75ea217779b754a37136d204de19f45f26679bdb6b7e056089cb5e54c70ed"
+  },
+  "model": {
+    "name": "Qwen/Qwen3-4B-Instruct-2507",
+    "revision": "cdbee75f17c01a7cc42f958dc650907174af0554"
+  },
+  "run": {
+    "elapsed_seconds": 158.65137588600004,
+    "successful_pod_usd": 0.0757,
+    "pods_remaining": 0,
+    "expected_forward_calls": 264,
+    "actual_forward_calls": 264,
+    "answer_calls": 0,
+    "sampled_calls": 0,
+    "training_updates": 0,
+    "raw_states_local_only": true
+  },
+  "position_metrics": {
+    "2": {
+      "teacher_forced": [
+        {"step": 1, "states": 24, "top1_correct": 13, "top1_rate": 0.5416666666666666, "mean_rank": 2.2083333333333335, "mean_gold_probability": 0.5240398964554493, "median_gold_probability": 0.7771305809127684, "mean_entropy": 0.0581992870767141, "mean_margin": 0.957428051863678},
+        {"step": 2, "states": 24, "top1_correct": 17, "top1_rate": 0.7083333333333334, "mean_rank": 1.7916666666666667, "mean_gold_probability": 0.7245030460243961, "median_gold_probability": 0.9999998488542485, "mean_entropy": 0.05163911605402296, "mean_margin": 0.9576515198539134}
+      ],
+      "greedy": [
+        {"step": 1, "states": 24, "top1_correct": 13, "top1_rate": 0.5416666666666666, "mean_rank": 2.2083333333333335, "mean_gold_probability": 0.5240398964554493, "median_gold_probability": 0.7771305809127684, "mean_entropy": 0.0581992870767141, "mean_margin": 0.957428051863678},
+        {"step": 2, "states": 24, "top1_correct": 12, "top1_rate": 0.5, "mean_rank": 2.2083333333333335, "mean_gold_probability": 0.5166087176958633, "median_gold_probability": 0.6881550331973618, "mean_entropy": 0.11180775183615062, "mean_margin": 0.9172332941336482}
+      ]
+    },
+    "4": {
+      "teacher_forced": [
+        {"step": 1, "states": 21, "top1_correct": 8, "top1_rate": 0.38095238095238093, "mean_rank": 3.1904761904761907, "mean_gold_probability": 0.347972877853132, "median_gold_probability": 0.00014342129450740148, "mean_entropy": 0.1388622685545957, "mean_margin": 0.8995265877455513},
+        {"step": 2, "states": 21, "top1_correct": 4, "top1_rate": 0.19047619047619047, "mean_rank": 3.6666666666666665, "mean_gold_probability": 0.20514202110355054, "median_gold_probability": 7.884158326782885e-06, "mean_entropy": 0.1532851553383752, "mean_margin": 0.9026678548983124},
+        {"step": 3, "states": 21, "top1_correct": 5, "top1_rate": 0.23809523809523808, "mean_rank": 3.0952380952380953, "mean_gold_probability": 0.23459100273912253, "median_gold_probability": 0.0009621905691112643, "mean_entropy": 0.17150131664771978, "mean_margin": 0.8949504979394198},
+        {"step": 4, "states": 21, "top1_correct": 10, "top1_rate": 0.47619047619047616, "mean_rank": 1.9047619047619047, "mean_gold_probability": 0.5195241149065388, "median_gold_probability": 0.46878995004167645, "mean_entropy": 0.1943391994640089, "mean_margin": 0.832681761260786}
+      ],
+      "greedy": [
+        {"step": 1, "states": 21, "top1_correct": 8, "top1_rate": 0.38095238095238093, "mean_rank": 3.1904761904761907, "mean_gold_probability": 0.347972877853132, "median_gold_probability": 0.00014342129450740148, "mean_entropy": 0.1388622685545957, "mean_margin": 0.8995265877455513},
+        {"step": 2, "states": 21, "top1_correct": 5, "top1_rate": 0.23809523809523808, "mean_rank": 2.8095238095238093, "mean_gold_probability": 0.25898230962365004, "median_gold_probability": 0.00012229578319368451, "mean_entropy": 0.1631666881893825, "mean_margin": 0.8993233447010487},
+        {"step": 3, "states": 21, "top1_correct": 7, "top1_rate": 0.3333333333333333, "mean_rank": 2.857142857142857, "mean_gold_probability": 0.32774716393044595, "median_gold_probability": 0.007586984156455594, "mean_entropy": 0.31687592521335933, "mean_margin": 0.8125541594898116},
+        {"step": 4, "states": 21, "top1_correct": 9, "top1_rate": 0.42857142857142855, "mean_rank": 2.2857142857142856, "mean_gold_probability": 0.46058568623340485, "median_gold_probability": 0.12468763816400005, "mean_entropy": 0.34550357827799877, "mean_margin": 0.7713482647620477}
+      ]
+    }
+  },
+  "four_hop_task_summary": {
+    "teacher_correct_positions_per_task": {"0": 4, "1": 10, "2": 4, "3": 3, "4": 0},
+    "ordered_prefix_distribution": {"0": 13, "1": 5, "2": 2, "3": 1, "4": 0},
+    "first_error_steps": {"1": 13, "2": 5, "3": 2, "4": 1},
+    "first_error_types": {"off_order": 11, "distractor": 10},
+    "greedy_support_count_distribution": {"2": 4, "3": 13, "4": 4},
+    "all_support_set_misordered": 4,
+    "path_probability_sum": 0.16187640252161586,
+    "path_probability_mean": 0.007708400120076946,
+    "path_probability_median": 3.6505748652638224e-13,
+    "k10_mixed_expected_sum": 1.1045286724716186
+  },
+  "stronger_gate_preview": {
+    "passed": false,
+    "aggregate_teacher_gate": {"2": true, "4": true},
+    "four_hop_teacher_position_top1_correct": [8, 4, 5, 10],
+    "four_hop_teacher_position_min_count": 8,
+    "four_hop_greedy_full_paths": 0,
+    "four_hop_greedy_full_path_min_count": 3,
+    "four_hop_k10_mixed_sum": 1.1045286724716186,
+    "four_hop_k10_mixed_sum_min": 5.0
+  },
+  "gate": {
+    "passed": false,
+    "four_b_closed": true,
+    "training_authorized": false,
+    "sampling_authorized": false,
+    "blocked_reasons": [
+      "stronger-model four-hop position and path gates fail",
+      "the Qwen3-4B diagnostic does not establish capability for training comparison"
+    ]
+  },
+  "interpretation": "The 4B constrained diagnostic is closed and does not authorize sampling or training comparison. The stronger-model gate is predeclared for the same snapshot and exact CLL states; unordered support-set statistics remain descriptive only."
+}

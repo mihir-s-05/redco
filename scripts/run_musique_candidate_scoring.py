@@ -178,6 +178,7 @@ def _load_model(config: ScoringConfig) -> tuple[Any, Any, Any]:
         config.model,
         revision=config.revision,
         torch_dtype=torch.bfloat16,
+        use_cache=config.use_cache,
     )
     model = model.to("cuda")
     model.eval()
