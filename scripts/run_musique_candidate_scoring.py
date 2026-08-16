@@ -390,10 +390,14 @@ def _adapter_metadata(
     tokenizer: Qwen35TextTokenizer, scorer: TorchChoiceScorer
 ) -> dict[str, object]:
     base = tokenizer.tokenizer
+    chat_template = getattr(base, "chat_template", None)
+    if type(chat_template) is not str:
+        raise RuntimeError("Qwen3.5 tokenizer has no exact text chat template")
     return {
         "processor_class": None,
         "tokenizer_class": type(base).__name__,
         "chat_template": {"enable_thinking": False, "add_generation_prompt": True},
+        "chat_template_sha256": hashlib.sha256(chat_template.encode("utf-8")).hexdigest(),
         "padding_side": getattr(base, "padding_side", None),
         "pad_token_id": getattr(base, "pad_token_id", None),
         "active_suffix_length_distribution": {
@@ -547,7 +551,52 @@ def _validate_matrix_model_report(
         or type(payload.get("training_support_pass")) is not bool
     ):
         raise ValueError("matrix worker report is missing independent gate results")
+    adapter = payload.get("adapter")
+    if not isinstance(adapter, Mapping):
+        raise ValueError("matrix worker report is missing adapter metadata")
+    template_digest = adapter.get("chat_template_sha256")
+    if (
+        type(template_digest) is not str
+        or len(template_digest) != 64
+        or any(character not in "0123456789abcdef" for character in template_digest)
+    ):
+        raise ValueError("matrix worker report has an invalid chat-template digest")
     _validate_state_identity(payload, config.expected_states_per_model)
+
+
+def _comparability_projection(
+    report: Mapping[str, Any], expected_states: int
+) -> tuple[list[tuple[object, ...]], list[Mapping[str, Any]], list[str]]:
+    identities = report["state_identity"]
+    prompt_digests = report["rendered_prompt_sha256"]
+    if not isinstance(identities, list) or not isinstance(prompt_digests, list):
+        raise ValueError("matrix worker report has no state/prompt topology")
+    structural: list[tuple[object, ...]] = []
+    teacher_identities: list[Mapping[str, Any]] = []
+    teacher_prompts: list[str] = []
+    for identity, prompt_digest in zip(identities, prompt_digests, strict=True):
+        if not isinstance(identity, Mapping) or type(prompt_digest) is not str:
+            raise ValueError("matrix worker report has invalid state/prompt topology")
+        candidate_titles = identity["candidate_titles"]
+        selected_titles = identity["selected_evidence_titles"]
+        if not isinstance(candidate_titles, list) or not isinstance(selected_titles, list):
+            raise ValueError("matrix worker report has invalid state topology")
+        structural.append(
+            (
+                identity["task_id"],
+                identity["hop_count"],
+                identity["mode"],
+                identity["step"],
+                len(candidate_titles),
+                len(selected_titles),
+            )
+        )
+        if identity["mode"] == "teacher_forced":
+            teacher_identities.append(identity)
+            teacher_prompts.append(prompt_digest)
+    if len(structural) != expected_states or len(teacher_identities) * 2 != expected_states:
+        raise ValueError("matrix worker report has the wrong fixed/dynamic state split")
+    return structural, teacher_identities, teacher_prompts
 
 
 def _task_deltas(reports: Sequence[Mapping[str, Any]]) -> list[dict[str, object]]:
@@ -609,14 +658,26 @@ def _matrix_report(
         raise ValueError("matrix requires both model reports")
     for report, spec in zip(reports, config.models, strict=True):
         _validate_matrix_model_report(report, config, spec)
-    state_identity = reports[0]["state_identity"]
-    prompt_digests = reports[0]["rendered_prompt_sha256"]
-    if any(
-        report["state_identity"] != state_identity
-        or report["rendered_prompt_sha256"] != prompt_digests
-        for report in reports[1:]
-    ):
-        raise ValueError("matrix workers rendered different ordered state prompts")
+    topology, teacher_identity, teacher_prompts = _comparability_projection(
+        reports[0], config.expected_states_per_model
+    )
+    first_adapter = reports[0]["adapter"]
+    if not isinstance(first_adapter, Mapping):
+        raise ValueError("matrix worker report is missing adapter metadata")
+    template_digest = first_adapter["chat_template_sha256"]
+    for report in reports[1:]:
+        other_topology, other_teacher_identity, other_teacher_prompts = (
+            _comparability_projection(report, config.expected_states_per_model)
+        )
+        adapter = report["adapter"]
+        if (
+            not isinstance(adapter, Mapping)
+            or adapter.get("chat_template_sha256") != template_digest
+            or other_topology != topology
+            or other_teacher_identity != teacher_identity
+            or other_teacher_prompts != teacher_prompts
+        ):
+            raise ValueError("matrix workers differ on fixed prompt comparability")
     eligible: list[str] = []
     for report in reports:
         if report["training_experiment_eligible"] is True:
@@ -659,9 +720,12 @@ def _matrix_report(
         "eligible_models": eligible,
         "paired_task_deltas_9b_minus_4b": _task_deltas(reports),
         "comparability": {
-            "state_identity": state_identity,
+            "structural_state_topology": [list(item) for item in topology],
+            "teacher_forced_state_identity": teacher_identity,
             "rendered_prompt_digest_algorithm": "sha256_utf8",
-            "rendered_prompt_sha256": prompt_digests,
+            "teacher_forced_rendered_prompt_sha256": teacher_prompts,
+            "chat_template_sha256": template_digest,
+            "greedy_prompt_relationship": "model_dependent_trajectory",
         },
         "generation": {
             "expected_forward_calls": config.expected_forward_calls,

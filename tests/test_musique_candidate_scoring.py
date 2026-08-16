@@ -185,6 +185,7 @@ class _FakeModel:
 
 class _Tokenizer:
     def __init__(self, duplicate_suffix: bool = False, context_variant: str = "") -> None:
+        self.chat_template = "<frozen-test-chat-template>"
         self.duplicate_suffix = duplicate_suffix
         self.context_variant = context_variant
         self.prompts: list[str] = []
@@ -542,7 +543,7 @@ def test_qwen35_matrix_config_and_k10_gate_are_explicit() -> None:
 
 
 def _worker_report(config: Any, index: int, prompt_digest: str = "0" * 64) -> dict[str, Any]:
-    identity = {
+    greedy_identity = {
         "task_id": "synthetic",
         "hop_count": 2,
         "mode": "greedy",
@@ -550,6 +551,7 @@ def _worker_report(config: Any, index: int, prompt_digest: str = "0" * 64) -> di
         "candidate_titles": ["candidate-1", "candidate-2"],
         "selected_evidence_titles": [],
     }
+    teacher_identity = dict(greedy_identity, mode="teacher_forced")
     return {
         "config_sha256": config.config_sha256,
         "snapshot_sha256": config.snapshot_sha256,
@@ -568,13 +570,14 @@ def _worker_report(config: Any, index: int, prompt_digest: str = "0" * 64) -> di
         "training_support_pass": False,
         "training_support_blocked_reasons": ["synthetic"],
         "training_experiment_eligible": False,
-        "state_identity": [identity] * 264,
+        "adapter": {"chat_template_sha256": "a" * 64},
+        "state_identity": [teacher_identity] * 132 + [greedy_identity] * 132,
         "rendered_prompt_digest_algorithm": "sha256_utf8",
         "rendered_prompt_sha256": [prompt_digest] * 264,
     }
 
 
-def test_matrix_final_report_requires_exact_state_and_prompt_comparability(
+def test_matrix_final_report_compares_fixed_prompts_and_allows_greedy_divergence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import run_musique_candidate_scoring as runner
@@ -588,8 +591,12 @@ def test_matrix_final_report_requires_exact_state_and_prompt_comparability(
     comparability = payload["comparability"]
     assert isinstance(comparability, Mapping)
     assert comparability["rendered_prompt_digest_algorithm"] == "sha256_utf8"
-    second["rendered_prompt_sha256"] = ["1" * 64] * 264
-    with pytest.raises(ValueError, match="ordered state prompts"):
+    assert comparability["greedy_prompt_relationship"] == "model_dependent_trajectory"
+    second["rendered_prompt_sha256"][132] = "1" * 64
+    payload = _matrix_report(config, (first, second), 1.0)
+    assert payload["matrix_complete"] is True
+    second["rendered_prompt_sha256"][0] = "1" * 64
+    with pytest.raises(ValueError, match="fixed prompt comparability"):
         _matrix_report(config, (first, second), 1.0)
 
 
