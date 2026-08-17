@@ -1,0 +1,152 @@
+{
+  "payload": {
+    "config": {
+      "corruption_probability": 0.5,
+      "dropout_probability": 0.5,
+      "interchange_penalty": 1.0,
+      "learning_rate": 0.25,
+      "maximum_normal_reward_regression": 0.02,
+      "minimum_typed_gain_over_simple_baseline": 0.02,
+      "samples_per_update": 3,
+      "seeds": 64,
+      "updates_per_mode": 160
+    },
+    "decision": {
+      "go_to_llm": false,
+      "reason": "typed interchange does not beat the strongest simple augmentation by the predeclared margin"
+    },
+    "environment": {
+      "actions": [
+        "artifact_only",
+        "context_only",
+        "both"
+      ],
+      "ambient_failure": "corrupt the shortcut only in artifact_with_context_shortcut tasks; genuinely useful context remains available",
+      "modes": [
+        "artifact_with_context_shortcut",
+        "context_needed",
+        "either_sufficient",
+        "both_needed"
+      ]
+    },
+    "paired_findings": {
+      "best_simple_augmentation": "context_corruption",
+      "paired_gain_95pct_normal_ci": [
+        0.0157366027595473,
+        0.017699718388055678
+      ],
+      "paired_gain_by_seed": [
+        0.02290491390920557,
+        0.01630280085141622,
+        0.020495582966316706,
+        0.016687449394974352,
+        0.019239198922841982,
+        0.02239268533421601,
+        0.014885512726988348,
+        0.02003541363143979,
+        0.012737578639492764,
+        0.020074785660295413,
+        0.01641871727557398,
+        0.007520936227453867,
+        0.013172466718633702,
+        0.016944277640419614,
+        0.0214288230224009,
+        0.017791704335188507,
+        0.01844180462420031,
+        0.017043030885815602,
+        0.015876043827538378,
+        0.021211349369032573,
+        0.015886147532473638,
+        0.020090430533217463,
+        0.02071106593220906,
+        0.015968529372962892,
+        0.015597620313898664,
+        0.019493659974121558,
+        0.011491508105102688,
+        0.02226602374416875,
+        0.019056499913894354,
+        0.020004948894952856,
+        0.010470228935216652,
+        0.01332495096978592,
+        0.012729762699977831,
+        0.01930388998452859,
+        0.014373308400488893,
+        0.008553521586515345,
+        0.01800342020590917,
+        0.016273184305404254,
+        0.017544422723578368,
+        0.016134166053870302,
+        0.015242519265829646,
+        0.016040649879397018,
+        0.01163906695926653,
+        0.014346341994903367,
+        0.022464781119524102,
+        0.020904980163743647,
+        0.019546856090624676,
+        0.016322953498627668,
+        0.019511913647486057,
+        0.016462769316241133,
+        0.0060620325744021875,
+        0.019207733998209076,
+        0.014293545839354937,
+        0.01573800995240693,
+        0.012598446044083778,
+        0.015071348304429799,
+        0.014574277999999441,
+        0.01245389571586808,
+        0.028744600876367765,
+        0.012130461059396747,
+        0.021689293133272503,
+        0.01759769242515774,
+        0.01466513442092432,
+        0.013770606298053378
+      ],
+      "redco_lite_equals_trajectory_on_one_decision": true,
+      "typed_gain_over_best_simple_augmentation": 0.016718160573801488,
+      "typed_normal_reward_regression": 0.0
+    },
+    "source_report_path": "runs/routing-probe-v1/report.json",
+    "source_report_raw_sha256": "536ab256b7d41242d763accf61d49c95c3078ac6e04f62828e7b786cb8c96ecd",
+    "summaries": {
+      "context_corruption": {
+        "ambient_failure_reward_mean": 0.9694074852738883,
+        "logical_reward_calls_per_seed": 1920,
+        "normal_reward_mean": 0.980084224142309,
+        "robust_route_accuracy_mean": 0.9694074852738883
+      },
+      "context_dropout": {
+        "ambient_failure_reward_mean": 0.8514150797365124,
+        "logical_reward_calls_per_seed": 1920,
+        "normal_reward_mean": 0.9797249617778495,
+        "robust_route_accuracy_mean": 0.8514150797365124
+      },
+      "fixed_artifact_only": {
+        "ambient_failure_reward_mean": 0.5,
+        "logical_reward_calls_per_seed": 0,
+        "normal_reward_mean": 0.5,
+        "robust_route_accuracy_mean": 0.5
+      },
+      "redco_lite_route_branching": {
+        "ambient_failure_reward_mean": 0.824246661299672,
+        "logical_reward_calls_per_seed": 1920,
+        "normal_reward_mean": 0.9909133279663387,
+        "robust_route_accuracy_mean": 0.824246661299672
+      },
+      "trajectory_route_loo": {
+        "ambient_failure_reward_mean": 0.824246661299672,
+        "logical_reward_calls_per_seed": 1920,
+        "normal_reward_mean": 0.9909133279663387,
+        "robust_route_accuracy_mean": 0.824246661299672
+      },
+      "typed_interchange": {
+        "ambient_failure_reward_mean": 0.9861256458476898,
+        "logical_reward_calls_per_seed": 3840,
+        "normal_reward_mean": 0.9909133279663387,
+        "robust_route_accuracy_mean": 0.9861256458476898
+      }
+    },
+    "training_backend": "dependency-free tabular softmax policy"
+  },
+  "payload_sha256": "e4cebcf059d1094b115d810b46ca0c8db450279ccab37f92734afc175aa1bb30",
+  "schema_version": 1
+}

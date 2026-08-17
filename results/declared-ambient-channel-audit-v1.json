@@ -1,0 +1,121 @@
+{
+  "audit": {
+    "date": "2026-08-16",
+    "head_commit": "40afb63c6330fdc8d2b839fb1d903000db0c60ee",
+    "model_calls": 0,
+    "prime_calls": 0,
+    "question": "Can completed ReDCO-Lite reports reconstruct independent declared-artifact and ambient-context interchange effects?",
+    "source_access": "local read-only"
+  },
+  "conclusion": {
+    "dual_channel_reports": 0,
+    "reports_inspected": 6,
+    "interchange_eligible_reports": 0,
+    "status": "not_reconstructable",
+    "use_in_future_work": "task controls and motivation for prospective channel instrumentation only"
+  },
+  "instrumentation_at_audit": {
+    "current_support": [
+      "exact rendered prompt token IDs",
+      "token-level provenance spans for explicitly serialized artifacts",
+      "typed event-graph edges",
+      "content-addressed versioned artifacts"
+    ],
+    "missing_for_channel_study": [
+      "an explicit declared-versus-ambient origin on prompt spans",
+      "records of automatic ambient inclusion from stdout or conversation history",
+      "an explicit artifact-read event bound to the serialized downstream value",
+      "paired original/alternative values for both channels",
+      "four-cell mixed-intervention outcomes"
+    ],
+    "tracer_bytes": 6345,
+    "tracer_path": "src/redco/env/tracer.py",
+    "tracer_sha256": "c888ffd03a50202becfa1967edc5e01becf9745bb907c3629424e2f00a8480ba"
+  },
+  "records": [
+    {
+      "ambient_route": "chosen paragraph is inserted into the next prompt, established by the authenticated runner source but not serialized in the report",
+      "bytes": 6786,
+      "declared_artifact_reads": false,
+      "exact_prompt_token_ids": false,
+      "interchange_reconstructable": false,
+      "path": "runs/qasper-evidence-pilot-v1/report.json",
+      "rendered_prompt_digest": false,
+      "sha256": "baeef65ba3c84638f08eb2edcc99ce4c7fd4949ceb31e837f4b33cf9cba87a26",
+      "task": "qasper_evidence_pilot"
+    },
+    {
+      "ambient_route": "chosen paragraph is inserted into the next prompt, established by the authenticated runner source but not serialized in the report",
+      "bytes": 35251,
+      "declared_artifact_reads": false,
+      "exact_prompt_token_ids": false,
+      "interchange_reconstructable": false,
+      "path": "runs/qasper-evidence-matrix-v1/report.json",
+      "rendered_prompt_digest": false,
+      "sha256": "d1a1cd566cd9d658cbf6becdb1bdc0a329f6c4c3abcb26d772a0e0b744ae4298",
+      "task": "qasper_evidence_matrix"
+    },
+    {
+      "ambient_route": "chosen paragraph is inserted into the next prompt, established by the authenticated runner source but not serialized in the report",
+      "bytes": 71087,
+      "declared_artifact_reads": false,
+      "exact_prompt_token_ids": false,
+      "interchange_reconstructable": false,
+      "path": "runs/qasper-allocation-sweep-v1/report.json",
+      "rendered_prompt_digest": false,
+      "sha256": "9fbbab4274c49b9431ab36770641d003dbb78af16b4aba2544c1477faf86ac30",
+      "task": "qasper_allocation_sweep"
+    },
+    {
+      "ambient_route": "selected evidence is accumulated into subsequent model observations but no declared artifact alternative exists",
+      "bytes": 72596,
+      "declared_artifact_reads": false,
+      "exact_prompt_token_ids": false,
+      "interchange_reconstructable": false,
+      "path": "runs/musique-ans-capability-gate-v1/report.json",
+      "rendered_prompt_digest": false,
+      "sha256": "a43c0fd71b83a47dfc3f1b50cd85d3f83b2815285b1fa3837d3f15132794f6a6",
+      "task": "musique_capability_gate"
+    },
+    {
+      "ambient_route": "selected evidence is accumulated into subsequent model observations but no declared artifact alternative exists",
+      "bytes": 121953,
+      "declared_artifact_reads": false,
+      "exact_prompt_token_ids": false,
+      "interchange_reconstructable": false,
+      "path": "runs/musique-ans-candidate-scoring-v1/report.json",
+      "rendered_prompt_digest": false,
+      "sha256": "a7c4d64dcf2b0addd77a3d2e8f229a2bf52c71e3380ee692c76a93276587914c",
+      "task": "musique_candidate_scoring"
+    },
+    {
+      "ambient_route": "selected evidence is accumulated into subsequent model observations; prompt digests are comparable across models but no declared artifact alternative exists",
+      "bytes": 533690,
+      "declared_artifact_reads": false,
+      "exact_prompt_token_ids": false,
+      "interchange_reconstructable": false,
+      "path": "runs/musique-ans-candidate-scoring-matrix-v1/report.json",
+      "rendered_prompt_digest": true,
+      "sha256": "5141903732a141fe84e8d22cb6d44f4dbd2b945de0550650ec77450b6b2a1a72",
+      "task": "musique_candidate_scoring_matrix"
+    }
+  ],
+  "runner_bindings": {
+    "musique_candidate_scoring": {
+      "bytes": 23765,
+      "path": "src/redco/experiments/musique_candidate_scoring.py",
+      "sha256": "b2939ada71745d282ac68f130161c54ef0ee041f90b126db094f3cde4f48d424"
+    },
+    "qasper_evidence": {
+      "bytes": 17241,
+      "path": "src/redco/experiments/qasper_evidence.py",
+      "sha256": "9f206487ee0c386f83da6350156759aed47fc9a49f7d40660ccf49bd78801bb6"
+    },
+    "qasper_runtime": {
+      "bytes": 4965,
+      "path": "src/redco/experiments/qasper_runtime.py",
+      "sha256": "aa923d49fc7a913073feb3d4bd0904ad2e5d782bead480ba19cf6213ec9dff0b"
+    }
+  },
+  "schema_version": 1
+}

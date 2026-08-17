@@ -27,6 +27,12 @@ class EdgeKind(StrEnum):
     RESOURCE = "resource"
 
 
+class AmbientContextKind(StrEnum):
+    CONVERSATION = "conversation"
+    INHERITED = "inherited"
+    STDOUT = "stdout"
+
+
 @dataclass(frozen=True, slots=True)
 class EventNode:
     node_id: str
@@ -59,18 +65,38 @@ class PromptProvenanceSpan:
 
 
 @dataclass(frozen=True, slots=True)
+class AmbientProvenanceSpan:
+    """Tokens made visible without an explicit declared-artifact read."""
+
+    source_event_id: str
+    kind: AmbientContextKind
+    token_start: int
+    token_end: int
+
+    def __post_init__(self) -> None:
+        if not self.source_event_id:
+            raise ValueError("ambient source event must be non-empty")
+        if self.token_start < 0 or self.token_end <= self.token_start:
+            raise ValueError("ambient prompt token span must be non-empty and ordered")
+
+
+@dataclass(frozen=True, slots=True)
 class PolicyObservation:
-    """Exact rendered token IDs and actual-inclusion artifact provenance."""
+    """Exact rendered token IDs with declared and ambient actual-inclusion spans."""
 
     prompt_token_ids: tuple[int, ...]
     provenance_spans: tuple[PromptProvenanceSpan, ...] = ()
+    ambient_spans: tuple[AmbientProvenanceSpan, ...] = ()
 
     def __post_init__(self) -> None:
         if any(token_id < 0 for token_id in self.prompt_token_ids):
             raise ValueError("token IDs must be non-negative")
-        for span in self.provenance_spans:
-            if span.token_end > len(self.prompt_token_ids):
+        for declared_span in self.provenance_spans:
+            if declared_span.token_end > len(self.prompt_token_ids):
                 raise ValueError("provenance span exceeds rendered prompt")
+        for ambient_span in self.ambient_spans:
+            if ambient_span.token_end > len(self.prompt_token_ids):
+                raise ValueError("ambient provenance span exceeds rendered prompt")
 
     @property
     def token_ids_hash(self) -> str:

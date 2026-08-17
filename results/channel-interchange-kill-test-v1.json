@@ -1,0 +1,87 @@
+{
+  "payload": {
+    "gates": {
+      "all_channels_observed": true,
+      "conservation_exact": true,
+      "planted_effects_recovered": true,
+      "semantics_preserving_representation_stable": true
+    },
+    "interpretation": "The deterministic typed-interchange measurement contract is coherent on planted cases. This is a systems/formula gate, not evidence that an LLM learns robust routing or that mixed states are valid in a real workflow.",
+    "passed": true,
+    "probes": [
+      {
+        "effects": {
+          "artifact_allocation": 1.0,
+          "artifact_baseline_effect": 1.0,
+          "conservation_error": 0.0,
+          "context_allocation": 0.0,
+          "context_baseline_effect": 0.0,
+          "interaction": 0.0,
+          "r00": 0.0,
+          "r01": 0.0,
+          "r10": 1.0,
+          "r11": 1.0,
+          "total": 1.0
+        },
+        "probe": "artifact_only",
+        "representation_stable": true
+      },
+      {
+        "effects": {
+          "artifact_allocation": 0.0,
+          "artifact_baseline_effect": 0.0,
+          "conservation_error": 0.0,
+          "context_allocation": 1.0,
+          "context_baseline_effect": 1.0,
+          "interaction": 0.0,
+          "r00": 0.0,
+          "r01": 1.0,
+          "r10": 0.0,
+          "r11": 1.0,
+          "total": 1.0
+        },
+        "probe": "context_only",
+        "representation_stable": true
+      },
+      {
+        "effects": {
+          "artifact_allocation": 0.5,
+          "artifact_baseline_effect": 1.0,
+          "conservation_error": 0.0,
+          "context_allocation": 0.5,
+          "context_baseline_effect": 1.0,
+          "interaction": -1.0,
+          "r00": 0.0,
+          "r01": 1.0,
+          "r10": 1.0,
+          "r11": 1.0,
+          "total": 1.0
+        },
+        "probe": "redundant",
+        "representation_stable": true
+      },
+      {
+        "effects": {
+          "artifact_allocation": 0.5,
+          "artifact_baseline_effect": 0.0,
+          "conservation_error": 0.0,
+          "context_allocation": 0.5,
+          "context_baseline_effect": 0.0,
+          "interaction": 1.0,
+          "r00": 0.0,
+          "r01": 0.0,
+          "r10": 0.0,
+          "r11": 1.0,
+          "total": 1.0
+        },
+        "probe": "synergistic",
+        "representation_stable": true
+      }
+    ],
+    "source_report_path": "runs/channel-interchange-kill-test-v1/report.json",
+    "source_report_raw_sha256": "f74956449791ac918ddb37216a7326285fd645cf29eb09caab66c8de96958dc3",
+    "training_performed": false
+  },
+  "payload_sha256": "83f99b94e229540459b9e5b0efb99f8871bbc4002b7b08244fbf9235bd09d2f8",
+  "schema_version": 1
+}

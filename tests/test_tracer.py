@@ -4,6 +4,8 @@ import pytest
 
 from redco.contracts import PolicyNodeKind
 from redco.env.tracer import (
+    AmbientContextKind,
+    AmbientProvenanceSpan,
     EdgeKind,
     EventEdge,
     EventGraph,
@@ -52,6 +54,9 @@ def test_policy_observation_hashes_exact_tokens_and_checks_provenance() -> None:
     observation = PolicyObservation(
         prompt_token_ids=(1, 2, 3, 4),
         provenance_spans=(PromptProvenanceSpan("context", 2, 1, 3),),
+        ambient_spans=(
+            AmbientProvenanceSpan("parent-turn", AmbientContextKind.CONVERSATION, 0, 1),
+        ),
     )
     record = PolicyNodeRecord(
         node_id="policy-1",
@@ -77,6 +82,12 @@ def test_prompt_provenance_rejects_non_actual_span() -> None:
         PolicyObservation(
             prompt_token_ids=(1, 2),
             provenance_spans=(PromptProvenanceSpan("context", 0, 1, 3),),
+        )
+
+    with pytest.raises(ValueError, match="ambient provenance"):
+        PolicyObservation(
+            prompt_token_ids=(1, 2),
+            ambient_spans=(AmbientProvenanceSpan("stdout-event", AmbientContextKind.STDOUT, 1, 3),),
         )
 
 
