@@ -54,6 +54,15 @@ def test_effects_are_stable_under_equivalent_representation(kind: ProbeKind) -> 
     }
 
 
+def test_mixed_cells_record_prompt_geometry_without_claiming_token_counts() -> None:
+    _, cells = evaluate_probe(ProbeKind.REDUNDANT, Representation.CANONICAL)
+    geometry = cells["r00"].prompt_geometry
+    assert geometry["tokenizer_used"] is False
+    assert geometry["unrelated_tokens_displaced"] is None
+    assert geometry["contract_equivalent"] is True
+    assert geometry["utf8_byte_delta"] == 2
+
+
 def test_report_passes_only_the_deterministic_measurement_gate() -> None:
     report = build_report()
     payload = report["payload"]

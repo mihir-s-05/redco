@@ -27,10 +27,13 @@ class EdgeKind(StrEnum):
     RESOURCE = "resource"
 
 
-class AmbientContextKind(StrEnum):
-    CONVERSATION = "conversation"
-    INHERITED = "inherited"
-    STDOUT = "stdout"
+class InformationChannelKind(StrEnum):
+    """How information became visible to a policy observation."""
+
+    DECLARED_READ = "declared_read"
+    AMBIENT_STDOUT = "ambient_stdout"
+    AMBIENT_HISTORY = "ambient_history"
+    INHERITED_CONTEXT = "inherited_context"
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,54 +52,54 @@ class EventEdge:
 
 
 @dataclass(frozen=True, slots=True)
-class PromptProvenanceSpan:
-    artifact_id: str
-    version: int
-    token_start: int
-    token_end: int
-
-    def __post_init__(self) -> None:
-        if not self.artifact_id:
-            raise ValueError("artifact_id must be non-empty")
-        if self.version < 0:
-            raise ValueError("artifact version must be non-negative")
-        if self.token_start < 0 or self.token_end <= self.token_start:
-            raise ValueError("prompt token span must be non-empty and ordered")
-
-
-@dataclass(frozen=True, slots=True)
-class AmbientProvenanceSpan:
-    """Tokens made visible without an explicit declared-artifact read."""
+class InformationProvenanceSpan:
+    """One actual-inclusion span with a declared or ambient access path."""
 
     source_event_id: str
-    kind: AmbientContextKind
+    channel_kind: InformationChannelKind
     token_start: int
     token_end: int
+    serializer_id: str
+    raw_content_hash: str
+    semantic_content_hash: str
+    visibility_scope: str
+    artifact_id: str | None = None
+    artifact_version: int | None = None
 
     def __post_init__(self) -> None:
         if not self.source_event_id:
-            raise ValueError("ambient source event must be non-empty")
+            raise ValueError("source event must be non-empty")
         if self.token_start < 0 or self.token_end <= self.token_start:
-            raise ValueError("ambient prompt token span must be non-empty and ordered")
+            raise ValueError("prompt token span must be non-empty and ordered")
+        if not self.serializer_id or not self.visibility_scope:
+            raise ValueError("serializer and visibility scope must be non-empty")
+        for name, value in (
+            ("raw_content_hash", self.raw_content_hash),
+            ("semantic_content_hash", self.semantic_content_hash),
+        ):
+            if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+                raise ValueError(f"{name} must be a lowercase SHA-256 digest")
+        if (self.artifact_id is None) != (self.artifact_version is None):
+            raise ValueError("artifact ID and version must be present together")
+        if self.artifact_version is not None and self.artifact_version < 0:
+            raise ValueError("artifact version must be non-negative")
+        if self.channel_kind is InformationChannelKind.DECLARED_READ and not self.artifact_id:
+            raise ValueError("declared reads require an artifact identity")
 
 
 @dataclass(frozen=True, slots=True)
 class PolicyObservation:
-    """Exact rendered token IDs with declared and ambient actual-inclusion spans."""
+    """Exact rendered token IDs and access-path-aware actual-inclusion spans."""
 
     prompt_token_ids: tuple[int, ...]
-    provenance_spans: tuple[PromptProvenanceSpan, ...] = ()
-    ambient_spans: tuple[AmbientProvenanceSpan, ...] = ()
+    provenance_spans: tuple[InformationProvenanceSpan, ...] = ()
 
     def __post_init__(self) -> None:
         if any(token_id < 0 for token_id in self.prompt_token_ids):
             raise ValueError("token IDs must be non-negative")
-        for declared_span in self.provenance_spans:
-            if declared_span.token_end > len(self.prompt_token_ids):
+        for span in self.provenance_spans:
+            if span.token_end > len(self.prompt_token_ids):
                 raise ValueError("provenance span exceeds rendered prompt")
-        for ambient_span in self.ambient_spans:
-            if ambient_span.token_end > len(self.prompt_token_ids):
-                raise ValueError("ambient provenance span exceeds rendered prompt")
 
     @property
     def token_ids_hash(self) -> str:

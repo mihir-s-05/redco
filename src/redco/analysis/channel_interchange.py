@@ -96,9 +96,10 @@ class ChannelExecution:
     ambient_included: bool
     ambient_sha256: str
     ambient_signal: bool
+    prompt_geometry: dict[str, object]
     reward: float
 
-    def as_dict(self) -> dict[str, bool | float | str]:
+    def as_dict(self) -> dict[str, object]:
         return {
             "ambient_included": self.ambient_included,
             "ambient_sha256": self.ambient_sha256,
@@ -106,6 +107,7 @@ class ChannelExecution:
             "artifact_read": self.artifact_read,
             "artifact_sha256": self.artifact_sha256,
             "artifact_signal": self.artifact_signal,
+            "prompt_geometry": self.prompt_geometry,
             "reward": self.reward,
         }
 
@@ -186,6 +188,10 @@ def execute_cell(
     """Execute one mixed state with an explicit artifact read and ambient view."""
     artifact_raw = _artifact_bytes(artifact_original, representation)
     ambient_text = _ambient_text(ambient_original, representation)
+    reference_artifact = _artifact_bytes(True, representation)
+    reference_ambient = _ambient_text(True, representation).encode("utf-8")
+    rendered_bytes = len(artifact_raw) + len(ambient_text.encode("utf-8"))
+    reference_bytes = len(reference_artifact) + len(reference_ambient)
     artifact_signal = _read_declared_artifact(artifact_raw)
     ambient_signal = _observe_ambient_context(ambient_text)
     return ChannelExecution(
@@ -195,6 +201,16 @@ def execute_cell(
         ambient_included=True,
         ambient_sha256=_sha256(ambient_text.encode("utf-8")),
         ambient_signal=ambient_signal,
+        prompt_geometry={
+            "contract_equivalent": True,
+            "length_matched": rendered_bytes == reference_bytes,
+            "newly_truncated_span_ids": [],
+            "original_reference_utf8_bytes": reference_bytes,
+            "rendered_utf8_bytes": rendered_bytes,
+            "tokenizer_used": False,
+            "unrelated_tokens_displaced": None,
+            "utf8_byte_delta": rendered_bytes - reference_bytes,
+        },
         reward=_reward(
             kind,
             artifact_signal=artifact_signal,

@@ -4,16 +4,15 @@ import pytest
 
 from redco.contracts import PolicyNodeKind
 from redco.env.tracer import (
-    AmbientContextKind,
-    AmbientProvenanceSpan,
     EdgeKind,
     EventEdge,
     EventGraph,
     EventNode,
     EventNodeKind,
+    InformationChannelKind,
+    InformationProvenanceSpan,
     PolicyNodeRecord,
     PolicyObservation,
-    PromptProvenanceSpan,
 )
 
 
@@ -51,11 +50,32 @@ def test_event_graph_rejects_cycles_without_mutating_graph() -> None:
 
 
 def test_policy_observation_hashes_exact_tokens_and_checks_provenance() -> None:
+    digest = "a" * 64
     observation = PolicyObservation(
         prompt_token_ids=(1, 2, 3, 4),
-        provenance_spans=(PromptProvenanceSpan("context", 2, 1, 3),),
-        ambient_spans=(
-            AmbientProvenanceSpan("parent-turn", AmbientContextKind.CONVERSATION, 0, 1),
+        provenance_spans=(
+            InformationProvenanceSpan(
+                "artifact-read",
+                InformationChannelKind.DECLARED_READ,
+                1,
+                3,
+                "json-v1",
+                digest,
+                digest,
+                "explicit_projection",
+                "context",
+                2,
+            ),
+            InformationProvenanceSpan(
+                "parent-turn",
+                InformationChannelKind.AMBIENT_HISTORY,
+                0,
+                1,
+                "chat-template-v1",
+                digest,
+                digest,
+                "automatic_history",
+            ),
         ),
     )
     record = PolicyNodeRecord(
@@ -81,13 +101,62 @@ def test_prompt_provenance_rejects_non_actual_span() -> None:
     with pytest.raises(ValueError, match="exceeds"):
         PolicyObservation(
             prompt_token_ids=(1, 2),
-            provenance_spans=(PromptProvenanceSpan("context", 0, 1, 3),),
+            provenance_spans=(
+                InformationProvenanceSpan(
+                    "read",
+                    InformationChannelKind.DECLARED_READ,
+                    1,
+                    3,
+                    "json-v1",
+                    "a" * 64,
+                    "b" * 64,
+                    "explicit_projection",
+                    "context",
+                    0,
+                ),
+            ),
         )
 
-    with pytest.raises(ValueError, match="ambient provenance"):
+    with pytest.raises(ValueError, match="exceeds"):
         PolicyObservation(
             prompt_token_ids=(1, 2),
-            ambient_spans=(AmbientProvenanceSpan("stdout-event", AmbientContextKind.STDOUT, 1, 3),),
+            provenance_spans=(
+                InformationProvenanceSpan(
+                    "stdout-event",
+                    InformationChannelKind.AMBIENT_STDOUT,
+                    1,
+                    3,
+                    "stdout-v1",
+                    "a" * 64,
+                    "b" * 64,
+                    "automatic_stdout",
+                ),
+            ),
+        )
+
+
+def test_information_provenance_requires_declared_artifact_and_exact_hashes() -> None:
+    with pytest.raises(ValueError, match="artifact identity"):
+        InformationProvenanceSpan(
+            "read",
+            InformationChannelKind.DECLARED_READ,
+            0,
+            1,
+            "json-v1",
+            "a" * 64,
+            "b" * 64,
+            "explicit_projection",
+        )
+    with pytest.raises(ValueError, match="raw_content_hash"):
+        InformationProvenanceSpan(
+            "history",
+            InformationChannelKind.AMBIENT_HISTORY,
+            0,
+            1,
+            "chat-v1",
+            "not-a-digest",
+            "b" * 64,
+            "automatic_history",
         )
 
 

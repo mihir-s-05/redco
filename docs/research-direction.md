@@ -55,7 +55,8 @@ not unrestricted natural path-specific causal effects.
 4. If the gate passes, introduce one explicit policy action:
    `ARTIFACT_ONLY`, `CONTEXT_ONLY`, or `BOTH`.
 5. Compare typed interchange credit against ordinary route-action learning,
-   ReDCO-Lite, context dropout, and fixed routing.
+   ReDCO-Lite, uniform and state-based corruption, identical-cell objectives,
+   shuffled credit, and privileged oracle controls.
 6. Use an LLM or Prime only after cheaper policies show an improved
    robustness–utility frontier under a predeclared ambient-channel failure.
 
@@ -76,11 +77,50 @@ This validates the measurement contract only. Its compact result is
 [`results/channel-interchange-kill-test-v1.json`](../results/channel-interchange-kill-test-v1.json).
 
 The first dependency-free route-learning probe compared trajectory routing,
-single-decision ReDCO-Lite, context dropout, context corruption, typed interchange,
-and fixed artifact-only routing over 64 matched seeds. Typed interchange reached
-`0.98613` mean ambient-failure reward versus `0.96941` for context corruption, but
-its paired gain of `0.01672` (95% normal interval `[0.01574, 0.01770]`) missed the
-predeclared `0.02` threshold and required twice as many logical reward evaluations.
-ReDCO-Lite and trajectory routing were exactly equivalent in the one-decision
-environment. The current decision is therefore **no LLM/Prime experiment** from
-this probe. See [`results/routing-probe-v1.json`](../results/routing-probe-v1.json).
+single-decision ReDCO-Lite, context dropout, context corruption, an intervention
+penalty then called typed interchange, and fixed artifact-only routing over 64
+matched seeds. The intervention penalty reached `0.98613` mean ambient-failure
+reward versus `0.96941` for context corruption, but required twice as many reward
+evaluations. ReDCO-Lite and trajectory routing were exactly equivalent. See the
+historical [`results/routing-probe-v1.json`](../results/routing-probe-v1.json).
+
+### Objective correction and cost controls
+
+The historical `typed_interchange` condition did **not** train from
+`phi_A`, `phi_C`, or `I`. It directly evaluated the held-out ambient-failure
+condition and penalized the normal-to-failure reward loss. It is now named
+`oracle_heldout_shift_penalty`. This was a privileged robustness objective, not
+evidence that the decomposition discovered a fragile channel.
+
+The corrected CPU control enumerates all three route actions exactly. Its typed
+route objective replaces ordinary task advantage with:
+
+```text
+U(ARTIFACT_ONLY) = phi_A
+U(CONTEXT_ONLY)  = phi_C
+U(BOTH)          = T + I
+```
+
+The last term deliberately reuses the interaction sign to penalize redundant
+duplication and favor true synergy. It is a modified robustness objective, not an
+unbiased estimator of ordinary expected reward. Four cells are evaluated once per
+update and reused across all route actions; leave-one-out normalization then acts
+on the three enumerated route utilities.
+
+At 1,920 reward calls, the historical oracle penalty exceeded uniform context
+corruption by only `0.0000223`. At 3,840 calls, their mean difference was
+`0.0000000013`. The compute-efficiency advantage therefore disappears under
+matched reward-evaluation budgets.
+
+The genuine typed objective reached `0.874997` held-out reward. Uniform corruption
+reached `0.999927`, and a noisy state-risk corruption baseline reached
+`0.999999991`, both with 1,920 calls versus 2,560 for typed allocation. Typed
+allocation strongly beat a shuffled-credit placebo, but it could not choose
+between artifact and context in the shortcut mode because the normal four cells
+were exactly symmetric redundancy: `(0, 1, 1, 1)`. The data identify redundancy,
+not which redundant channel will survive an unseen failure.
+
+The sequential benchmark and all LLM/Prime routing work remain paused. The current
+result is a useful instrumentation result and a negative algorithmic gate, not a
+reason to scale the routing objective. See
+[`results/routing-controls-v2.json`](../results/routing-controls-v2.json).

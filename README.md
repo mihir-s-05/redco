@@ -160,13 +160,21 @@ context channel, verify the factorial decomposition on planted artifact-only,
 context-only, redundant, and synergistic cases, and reject the direction if those
 interventions are invalid or unstable. See [research direction](docs/research-direction.md).
 
-The deterministic measurement gate passed. A subsequent 64-seed tabular routing
-probe did not clear its preregistered LLM threshold: typed interchange improved
-ambient-failure reward over the strongest simple augmentation by `0.01672`
-(paired 95% normal interval `[0.01574, 0.01770]`) against a required `0.02`, while
-using twice the logical reward evaluations. No LLM or Prime routing experiment is
-authorized by this result. See
-[`results/routing-probe-v1.json`](results/routing-probe-v1.json).
+The deterministic measurement gate passed. The first 64-seed tabular probe then
+showed a positive robustness signal, but a follow-up audit found that the condition
+called typed interchange directly evaluated the held-out failure and used twice
+the reward information. It is now classified as an oracle held-out-shift penalty.
+
+Cost-matched CPU controls remove the apparent advantage: at 1,920 reward calls the
+oracle penalty beats uniform corruption by only `0.0000223`, and at 3,840 calls
+they are effectively tied. A genuine `phi_A`/`phi_C`/interaction route objective
+reaches `0.874997` held-out reward, below uniform corruption (`0.999927`) and a
+noisy non-oracle state-risk baseline (`0.999999991`) despite using more reward
+evaluations. Four-cell attribution recognizes redundancy but cannot say which
+redundant channel will remain reliable under a future shift. No sequential,
+LLM, or Prime routing experiment is justified. See
+[`results/routing-controls-v2.json`](results/routing-controls-v2.json) and the
+[research-direction memo](docs/research-direction.md).
 
 ## Historical work
 
