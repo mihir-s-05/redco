@@ -1,156 +1,96 @@
 # ReDCO-Lite
 
-ReDCO-Lite is a small research prototype for behavior-policy counterfactual
-branching and dependency-sound replay in recursive dataflow agents. It is the
-maintained baseline for the next research question, not a claim to have originated
-intermediate counterfactual branching or graph-aware credit assignment. The active
-checkout is intentionally optimized for human review, experimentation, and
-change—not for preserving every historical campaign as executable production
-machinery.
+ReDCO-Lite is a small research implementation of local counterfactual credit
+assignment for multi-step agents. It records an execution as an event graph,
+branches from a selected policy decision, replays only the affected suffix, and
+uses the resulting rewards to update that decision.
 
-## Active research surface
+The repository is intentionally dependency-light and optimized for readable,
+CPU-testable research code.
 
-The maintained implementation contains:
+## Setup
 
-- immutable event, seed, and branch contracts;
-- content-addressed artifacts and exact policy-call caching;
-- event-DAG tracing and dependency-sliced replay;
-- deterministic and stochastic replay-equivalence checks;
-- decision-normalized ReDCO-Lite credit assignment and loss evaluation;
-- synthetic credit probes and estimator diagnostics;
-- the CPU-only Gate GB research gate.
-
-Start in these files:
-
-- `src/redco/contracts.py` — shared research values and canonical JSON;
-- `src/redco/algo/` — branching and training primitives;
-- `src/redco/env/` — artifacts, tracing, policy caching, and replay;
-- `src/redco/analysis/gate_gb.py` — the end-to-end CPU research gate;
-- `tests/` — the focused executable specification.
-
-## Run it
-
-Redco uses `uv`, never `pip`.
+Requirements: Python 3.12 or newer and [`uv`](https://docs.astral.sh/uv/).
 
 ```console
 uv sync --frozen
 uv run --frozen pytest
-uv run --frozen ruff check src tests
-uv run --frozen mypy
 ```
 
-Run the cheap CPU gate with:
+Run the static checks with:
+
+```console
+uv run --frozen ruff check src tests
+uv run --frozen mypy
+git diff --check
+```
+
+Run the end-to-end CPU gate with:
 
 ```console
 uv run --offline --frozen python -m redco.analysis.gate_gb
 ```
 
-It writes under the ignored `runs/` tree. Network, provider, model, GPU,
-training, and scientific runs are launched manually with an experiment-specific
-time and cost bound; no background capacity monitor is part of the active core.
+## Algorithm
 
-## ReDCO-Lite algorithm in brief
+Given a completed trajectory, ReDCO-Lite:
 
-ReDCO-Lite targets one policy decision before its action is observed, restores the
-state immediately before that decision, and evaluates the original action
-beside sampled alternatives. Rewards are converted into leave-one-out branch
-advantages. The targeted action's ordinary trajectory credit is removed, then
-replaced by the branch comparison; all other decisions keep their trajectory
-credit. Each decision occupies one unit in the outer normalization regardless
-of its token span, while its action log-probability remains the sum over its
-selected tokens. The framework-neutral objective in `redco.algo.training` also
-supports an optional squared log-probability drift penalty against the behavior
-policy that produced the replay.
+1. Chooses a policy decision before observing its action.
+2. Restores the state immediately before that decision.
+3. Replays the original action and sampled alternatives through the affected
+   downstream events.
+4. Converts the branch rewards into leave-one-out advantages.
+5. Replaces that decision's trajectory-level credit with its local branch credit.
+6. Leaves every untargeted decision's ordinary trajectory credit unchanged.
 
-### Controlled learning result
+For branch reward `R_i` among `K` alternatives, the local advantage is:
 
-On 2026-08-12, the dependency-free credit-confusion experiment ran 1,000
-seeded trials per method and task. Both methods used 16 policy calls per update
-and 1,152 calls per trial. ReDCO-Lite reduced mean drift on an irrelevant decision
-from `0.0748` to exactly `0`. On the noisy lucky task it reached the `0.8`
-policy threshold in 425 calls on average, versus 434 for trajectory LOO. On the
-redundant task the final policies were effectively tied (`0.8814` versus
-`0.8820`), while ReDCO-Lite's estimator variance was 1.54 times higher—a useful
-counterexample to the claim that branching always reduces variance.
-
-The ignored local report is reproducible with:
-
-```console
-uv run --offline --frozen python -m redco.analysis.credit_confusion \
-  --output runs/credit-confusion/report.json
+```text
+A_i = R_i - sum(R_j for j != i) / (K - 1)
 ```
 
-Its canonical payload SHA-256 is
-`a8ed7400ade493fc7c7808c28f0bba61431f8b209e4514135d006c4112bcfa2e`.
+The training objective sums token log-probabilities within each action, then
+normalizes across policy decisions rather than tokens. This prevents long actions
+from receiving extra weight merely because they contain more tokens. An optional
+squared log-probability penalty constrains drift from the behavior policy that
+generated the replay.
 
-### Completed model experiments
+ReDCO-Lite is most useful as a controlled baseline for studying where credit is
+assigned. It does not assume that local branching always improves learning or
+reduces variance.
 
-The retired QASPER campaigns tested a shallow two-decision evidence-retrieval
-task with Qwen3-4B-Instruct-2507 and rank-8 LoRA. A one-seed pilot established the
-model-scale path but not an accuracy advantage. A five-seed matched matrix found
-the same mean exact-evidence score for trajectory LOO and the tested ReDCO-Lite
-allocation. The final allocation sweep exposed the more useful result: spending
-more calls on conditioned span continuations improved conditional span accuracy
-while reducing upstream paragraph accuracy. This is an allocation frontier, not
-algorithmic superiority. See the compact [pilot](results/qasper-evidence-pilot-v1.json),
-[matrix](results/qasper-evidence-matrix-v1.json), and
-[allocation-sweep](results/qasper-allocation-sweep-v1.json) records.
+## Repository map
 
-The completed MuSiQue gates established that the tested models could not reliably
-produce ordered four-hop support paths, so no credit-learning comparison was
-warranted. See the compact [capability](results/musique-ans-capability-gate-v1.json),
-[candidate-scoring](results/musique-ans-candidate-scoring-v1.json), and
-[Qwen3.5 matrix](results/musique-ans-qwen35-matrix-v1.json) records.
+| Path | Purpose |
+|---|---|
+| `src/redco/contracts.py` | Immutable event, seed, branch, and policy-call values |
+| `src/redco/algo/` | Branch construction and training calculations |
+| `src/redco/env/` | Tracing, artifacts, caching, commands, and replay |
+| `src/redco/analysis/` | Small CPU research gates and diagnostics |
+| `tests/` | Executable specification of maintained behavior |
+| `results/` | Compact records from completed experiments |
+| `provenance/` | Git recovery index for retired files |
 
-The campaign-specific launchers, frozen task snapshots, configs, model adapters,
-and one-shot tests have been retired from the active checkout. Their exact source
-remains recoverable from Git; the normalized compact results above remain as the
-reviewable scientific record.
+See [architecture](docs/architecture.md), [development](docs/development.md), and
+[provenance](docs/provenance.md) for the small amount of additional documentation.
 
-## Completed routing investigation
+## Research workflow
 
-**Status: closed after a negative cost-matched CPU gate.** The MuSiQue campaign is
-retired from the active tree, and no sequential, LLM, or Prime routing experiment
-is pending.
+- Start with an analytical or CPU test that could falsify the hypothesis.
+- Keep exploratory outputs under ignored `runs/` or `.artifacts/` directories.
+- Promote only compact results needed for interpretation or reproduction.
+- Give model or provider runs explicit time and cost limits.
+- Delete obsolete campaign code after its result is preserved; Git is the archive.
 
-Typed interchange successfully measures how declared artifacts and ambient context
-contribute to current reward. It does not predict which exchangeable redundant
-channel will survive an unseen asymmetric failure. In the fragile shortcut mode,
-the normal table `(0, 1, 1, 1)` is invariant to swapping artifact and context, so
-every channel-equivariant objective must value them equally. The resulting typed
-policy approaches the analytical held-out value `7/8`; ordinary route LOO
-approaches `5/6`, and route-independent scalar controls approach `7/12`.
+## Timeline
 
-The earlier condition called typed interchange directly evaluated the held-out
-failure and was therefore an oracle shift penalty. At equal reward-call budgets it
-ties uniform corruption. The corrected typed objective reaches `0.874997`, below
-uniform corruption at `0.999927` despite using more evaluations. This closes the
-current routing objective, not the broader study of information flow.
-
-ReDCO-Lite remains a baseline, dependency-sliced replay remains a systems substrate,
-and typed interchange plus information provenance remain auditing instruments.
-See the [completed investigation](docs/research-direction.md), compact
-[`result`](results/routing-controls-v2.json), and [pivot brief](docs/pivot-brief.md).
-
-## Historical work
-
-Old Stage C/D campaigns, launch protocols, provider integrations, reports,
-configs, datasets, patches, and bespoke verification harnesses were retired from
-the active checkout. They remain exactly recoverable from Git commit
-`53a7c67c9cb6df39e44454f364aaf3c9ca352966`.
-
-[`provenance/history-v1.jsonl`](provenance/history-v1.jsonl) is the normalized
-recovery index: it records every pre-cleanup file's Git blob, raw SHA-256, byte
-count, role, format, and safe schema metadata without rewriting the original
-bytes. See [provenance](docs/provenance.md) for recovery instructions.
-
-The retired `redco-implementation-plan.md` is explicitly superseded as of August
-2026: later literature review invalidated its broad novelty positioning, and its
-context-routing implication failed the corrected cost-matched CPU gate. The plan's
-exact historical bytes remain indexed in `provenance/history-v1.jsonl` at Git blob
-`6a4521bb093482899f8879289e8223a3a17bd275`; it is project history, not active
-guidance.
-
-The concise guides are [architecture](docs/architecture.md),
-[development](docs/development.md), [research direction](docs/research-direction.md),
-[pivot brief](docs/pivot-brief.md), and [provenance](docs/provenance.md).
+- **2026-08-12:** Synthetic credit probes validated local branching and exposed a
+  counterexample to the claim that it always lowers variance.
+- **2026-08-12 to 2026-08-13:** QASPER experiments found a shallow-task null and
+  an upstream-versus-downstream allocation trade-off.
+- **2026-08-14:** MuSiQue capability gates did not support a deeper credit-learning
+  comparison with the tested models.
+- **2026-08-16:** Typed channel interchange was retained as an auditing tool; its
+  routing objective failed a cost-matched CPU gate.
+- **2026-08-17:** Campaign-specific code was retired, leaving the current lean
+  baseline, replay system, tests, and compact results.

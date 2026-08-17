@@ -1,9 +1,6 @@
 # Development
 
-Use `uv`, never `pip`. The active project has no mandatory runtime dependencies;
-development dependencies are locked in `uv.lock`.
-
-## Verification
+Use Python 3.12 or newer and `uv`.
 
 ```console
 uv sync --frozen
@@ -13,19 +10,14 @@ uv run --frozen mypy
 git diff --check
 ```
 
-Ordinary development is offline and CPU-only. Tests use temporary directories
-for outputs. They must not inspect or modify the user-owned `external/prime-rl`
-checkout, retained historical evidence, provider state, models, or GPUs.
+The package has no mandatory runtime dependencies. Ordinary tests are offline and
+CPU-only, use temporary output directories, and must not access provider state,
+models, GPUs, or the user-owned `external/prime-rl` checkout.
 
-## Research workflow
+For research changes:
 
-1. Express the question in a small analysis or test.
-2. Reuse `redco.contracts`, `redco.algo`, and `redco.env` rather than creating a
-   versioned protocol stack.
-3. Keep exploratory output under ignored `runs/` or `.artifacts/` paths.
-4. Promote only the compact result needed to support the current research claim.
-5. Delete abandoned analyses from the active tree; Git retains them.
-
-A new experiment should not add readiness builders, authorization schemas,
-terminal evidence codecs, or campaign-specific test frameworks unless the user
-explicitly asks for production-grade operational assurance.
+1. State the question and failure criterion first.
+2. Add the smallest analysis or test that can answer it.
+3. Reuse `redco.contracts`, `redco.algo`, and `redco.env`.
+4. Keep full outputs ignored and promote only compact results.
+5. Remove abandoned experiment code; recover it from Git if needed later.
