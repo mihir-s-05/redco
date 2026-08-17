@@ -94,9 +94,11 @@ def _select(rows: Sequence[dict[str, Any]]) -> tuple[dict[str, Any] | None, int,
             groups.setdefault(identity, []).append(row)
     consistent: list[dict[str, Any]] = []
     collapsed = 0
+    conflicts = 0
     for group in groups.values():
         if len({_projection(row) for row in group}) != 1:
-            raise StageFailure("availability_duplicate_conflict")
+            conflicts += 1
+            continue
         consistent.append(group[0])
         collapsed += len(group) - 1
     eligible = [row for row in consistent if _warm_eligible(row)]
@@ -107,7 +109,7 @@ def _select(rows: Sequence[dict[str, Any]]) -> tuple[dict[str, Any] | None, int,
             str(row["cloudId"]),
         )
     )
-    return (eligible[0] if eligible else None), collapsed, 0
+    return (eligible[0] if eligible else None), collapsed, conflicts
 
 
 def _balance(wallet: Any) -> float:
@@ -405,13 +407,17 @@ def _run_once() -> int:
     before_balance = _balance(wallet)
     if before_balance < MIN_WALLET_USD:
         raise StageFailure("wallet_reserve")
-    selected, collapsed, _conflicts = _select(
+    selected, collapsed, conflicts = _select(
         [*_fetch(api, "/availability/gpus"), *_fetch(api, "/availability/multi-node")]
     )
     if selected is None:
         print(
             json.dumps(
-                {"collapsed_duplicate_rows": collapsed, "state": "no_capacity"},
+                {
+                    "collapsed_duplicate_rows": collapsed,
+                    "conflicts": conflicts,
+                    "state": "no_capacity",
+                },
                 sort_keys=True,
             )
         )

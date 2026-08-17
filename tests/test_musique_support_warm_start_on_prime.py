@@ -90,12 +90,36 @@ def test_selection_collapses_only_identical_duplicate_projection() -> None:
     assert collapsed == 1
     assert conflicts == 0
 
-    with pytest.raises(StageFailure, match="availability_duplicate_conflict"):
-        _select([_row("cloud-a", rate=1.0), _row("cloud-a", rate=1.5)])
-    with pytest.raises(StageFailure, match="availability_duplicate_conflict"):
-        _select([_row("cloud-a"), _row("cloud-a", spot=None)])
-    with pytest.raises(StageFailure, match="availability_duplicate_conflict"):
-        _select([_row("cloud-a"), {**_row("cloud-a"), "gpuType": "H100"}])
+
+@pytest.mark.parametrize(
+    "conflicting",
+    [
+        _row("cloud-a", spot=None),
+        {**_row("cloud-a"), "gpuType": "H100"},
+    ],
+)
+def test_sole_conflicting_identity_is_excluded(
+    conflicting: dict[str, Any],
+) -> None:
+    selected, collapsed, conflicts = _select([_row("cloud-a"), conflicting])
+    assert selected is None
+    assert collapsed == 0
+    assert conflicts == 1
+
+
+def test_consistent_eligible_identity_survives_other_conflict() -> None:
+    selected, collapsed, conflicts = _select(
+        [
+            _row("conflict"),
+            {**_row("conflict"), "gpuType": "H100"},
+            _row("usable", rate=1.5),
+            _row("usable", rate=1.5),
+        ]
+    )
+    assert selected is not None
+    assert selected["cloudId"] == "usable"
+    assert collapsed == 1
+    assert conflicts == 1
 
 
 def test_selection_rejects_unknown_spot_and_non_available_rows() -> None:
