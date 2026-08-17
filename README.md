@@ -83,98 +83,54 @@ uv run --offline --frozen python -m redco.analysis.credit_confusion \
 Its canonical payload SHA-256 is
 `a8ed7400ade493fc7c7808c28f0bba61431f8b209e4514135d006c4112bcfa2e`.
 
-### QASPER model pilot
+### Completed model experiments
 
-The first model-scale experiment is a two-decision QASPER evidence-retrieval
-task. The policy first chooses one of four paper paragraphs, then chooses the
-complete evidence span from that paragraph. The 32-task dataset is rebuilt from
-the pre-cleanup Git archive into a 24/8 train/evaluation split. Each training
-update gives both arms exactly ten policy calls: trajectory LOO samples five
-complete episodes, while the tested ReDCO-Lite allocation samples two complete
-episodes and six additional span continuations from one committed paragraph.
-ReDCO-Lite therefore estimates paragraph credit from only two complete rewards and
-span credit from seven alternatives including the original span. Both actions
-are constrained to one label token, and the objective is normalized by policy
-decisions.
+The retired QASPER campaigns tested a shallow two-decision evidence-retrieval
+task with Qwen3-4B-Instruct-2507 and rank-8 LoRA. A one-seed pilot established the
+model-scale path but not an accuracy advantage. A five-seed matched matrix found
+the same mean exact-evidence score for trajectory LOO and the tested ReDCO-Lite
+allocation. The final allocation sweep exposed the more useful result: spending
+more calls on conditioned span continuations improved conditional span accuracy
+while reducing upstream paragraph accuracy. This is an allocation frontier, not
+algorithmic superiority. See the compact [pilot](results/qasper-evidence-pilot-v1.json),
+[matrix](results/qasper-evidence-matrix-v1.json), and
+[allocation-sweep](results/qasper-allocation-sweep-v1.json) records.
 
-Validate the frozen dataset and pilot configuration without importing Torch:
+The completed MuSiQue gates established that the tested models could not reliably
+produce ordered four-hop support paths, so no credit-learning comparison was
+warranted. See the compact [capability](results/musique-ans-capability-gate-v1.json),
+[candidate-scoring](results/musique-ans-candidate-scoring-v1.json), and
+[Qwen3.5 matrix](results/musique-ans-qwen35-matrix-v1.json) records.
 
-```console
-uv run --offline --frozen python scripts/build_qasper_evidence_pilot.py --check
-uv run --offline --frozen python scripts/run_qasper_evidence_pilot.py --check
-```
+The campaign-specific launchers, frozen task snapshots, configs, model adapters,
+and one-shot tests have been retired from the active checkout. Their exact source
+remains recoverable from Git; the normalized compact results above remain as the
+reviewable scientific record.
 
-The GPU configuration pins Qwen3-4B-Instruct-2507, rank-8 LoRA, 24 updates per
-arm, a three-hour absolute runtime ceiling, and a $6 total cost ceiling. The
-live run uses one ephemeral Prime GPU and always downloads the compact report
-and adapters before terminating the pod.
+## Completed routing investigation
 
-The bounded Prime run completed on 2026-08-12 for $0.7788. Both arms improved
-exact evidence selection from 4/8 to 5/8 evaluation tasks, so this seed does not
-show a ReDCO-Lite accuracy advantage. ReDCO-Lite had lower mean and maximum gradient norms
-but also lower sampled training reward. This is a useful pilot result: the
-model-scale path works, while a convincing algorithm comparison now needs more
-evaluation tasks and multiple matched seeds rather than a larger model. The
-compact normalized result is
-[`results/qasper-evidence-pilot-v1.json`](results/qasper-evidence-pilot-v1.json).
+**Status: closed after a negative cost-matched CPU gate.** The MuSiQue campaign is
+retired from the active tree, and no sequential, LLM, or Prime routing experiment
+is pending.
 
-The matched follow-up used five seeds and expanded evaluation to 24
-paper-disjoint tasks. Both arms averaged 12.8/24 exact evidence matches after
-training from the common 11/24 baseline. Per-seed ReDCO-Lite-minus-trajectory counts
-were `[0, 2, -1, 1, -2]`, with mean and median zero. This is a null for the
-shallow task and the tested ReDCO-Lite `2+6` allocation, not for recursive
-counterfactual credit generally.
+Typed interchange successfully measures how declared artifacts and ambient context
+contribute to current reward. It does not predict which exchangeable redundant
+channel will survive an unseen asymmetric failure. In the fragile shortcut mode,
+the normal table `(0, 1, 1, 1)` is invariant to swapping artifact and context, so
+every channel-equivariant objective must value them equally. The resulting typed
+policy approaches the analytical held-out value `7/8`; ordinary route LOO
+approaches `5/6`, and route-independent scalar controls approach `7/12`.
 
-The more informative decomposition is that conditional span accuracy given a
-correct paragraph increased from 55/75 (73.3%) to 64/69 (92.8%) for trajectory
-LOO and 64/70 (91.4%) for ReDCO-Lite, while paragraph accuracy fell in both arms.
-The run therefore measured strong span learning alongside upstream paragraph
-drift. It cost $0.4425 on one A100, retained no adapters, and left zero Prime
-pods. See
-[`results/qasper-evidence-matrix-v1.json`](results/qasper-evidence-matrix-v1.json).
+The earlier condition called typed interchange directly evaluated the held-out
+failure and was therefore an oracle shift penalty. At equal reward-call budgets it
+ties uniform corruption. The corrected typed objective reaches `0.874997`, below
+uniform corruption at `0.999927` despite using more evaluations. This closes the
+current routing objective, not the broader study of information flow.
 
-The allocation follow-up kept the ten-call update budget fixed and compared
-trajectory LOO against three branch-credit splits: `4+2`, `3+4`, and `2+6`
-complete-root/conditioned-span calls. It used the same five matched seeds but
-expanded evaluation to 96 paper-disjoint tasks per seed. Among the branch arms,
-more span continuations produced a clear descriptive frontier: mean paragraph
-counts fell from 52.4 to 51.8 to 50.6, while conditional span accuracy rose
-from 79.2% to 89.0% to 94.5% and exact-evidence counts rose from 41.4 to 46.2
-to 47.8. The `2+6` arm nearly tied trajectory LOO on exact evidence (47.8
-versus 47.4 of 96), with 3.3 percentage points higher mean conditional span
-accuracy and 1.4 fewer correct paragraphs. With five seeds this is evidence of
-an allocation trade-off, not superiority. The one-A100 run cost $0.6819 and
-left zero Prime pods. See
-[`results/qasper-allocation-sweep-v1.json`](results/qasper-allocation-sweep-v1.json).
-
-## Current research direction
-
-The full MuSiQue warm-start run is paused. Better task capability would not by
-itself distinguish ReDCO-Lite from nearby counterfactual-credit methods.
-
-The next question is whether policies can learn when to expose information through
-declared, provenance-bearing artifacts rather than fragile ambient prompt context.
-The first gate is deliberately CPU-only and contains no training: execute all four
-original/alternative combinations of a declared-artifact channel and an ambient
-context channel, verify the factorial decomposition on planted artifact-only,
-context-only, redundant, and synergistic cases, and reject the direction if those
-interventions are invalid or unstable. See [research direction](docs/research-direction.md).
-
-The deterministic measurement gate passed. The first 64-seed tabular probe then
-showed a positive robustness signal, but a follow-up audit found that the condition
-called typed interchange directly evaluated the held-out failure and used twice
-the reward information. It is now classified as an oracle held-out-shift penalty.
-
-Cost-matched CPU controls remove the apparent advantage: at 1,920 reward calls the
-oracle penalty beats uniform corruption by only `0.0000223`, and at 3,840 calls
-they are effectively tied. A genuine `phi_A`/`phi_C`/interaction route objective
-reaches `0.874997` held-out reward, below uniform corruption (`0.999927`) and a
-noisy non-oracle state-risk baseline (`0.999999991`) despite using more reward
-evaluations. Four-cell attribution recognizes redundancy but cannot say which
-redundant channel will remain reliable under a future shift. No sequential,
-LLM, or Prime routing experiment is justified. See
-[`results/routing-controls-v2.json`](results/routing-controls-v2.json) and the
-[research-direction memo](docs/research-direction.md).
+ReDCO-Lite remains a baseline, dependency-sliced replay remains a systems substrate,
+and typed interchange plus information provenance remain auditing instruments.
+See the [completed investigation](docs/research-direction.md), compact
+[`result`](results/routing-controls-v2.json), and [pivot brief](docs/pivot-brief.md).
 
 ## Historical work
 
@@ -188,6 +144,13 @@ recovery index: it records every pre-cleanup file's Git blob, raw SHA-256, byte
 count, role, format, and safe schema metadata without rewriting the original
 bytes. See [provenance](docs/provenance.md) for recovery instructions.
 
+The retired `redco-implementation-plan.md` is explicitly superseded as of August
+2026: later literature review invalidated its broad novelty positioning, and its
+context-routing implication failed the corrected cost-matched CPU gate. The plan's
+exact historical bytes remain indexed in `provenance/history-v1.jsonl` at Git blob
+`6a4521bb093482899f8879289e8223a3a17bd275`; it is project history, not active
+guidance.
+
 The concise guides are [architecture](docs/architecture.md),
 [development](docs/development.md), [research direction](docs/research-direction.md),
-and [provenance](docs/provenance.md).
+[pivot brief](docs/pivot-brief.md), and [provenance](docs/provenance.md).

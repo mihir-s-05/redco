@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from typing import cast
 
 import pytest
 
@@ -65,22 +66,23 @@ def test_mixed_cells_record_prompt_geometry_without_claiming_token_counts() -> N
 
 def test_report_passes_only_the_deterministic_measurement_gate() -> None:
     report = build_report()
-    payload = report["payload"]
+    payload = cast(dict[str, object], report["payload"])
 
     assert payload["passed"] is True
     assert payload["training_performed"] is False
-    assert "not evidence that an LLM learns" in payload["interpretation"]
-    assert set(payload["gates"].values()) == {True}
+    assert "not evidence that an LLM learns" in cast(str, payload["interpretation"])
+    assert set(cast(dict[str, bool], payload["gates"]).values()) == {True}
 
     compact = compact_result(
         report,
         source_path="runs/channel-interchange-kill-test-v1/report.json",
         source_raw_sha256="a" * 64,
     )
-    compact_payload = compact["payload"]
+    compact_payload = cast(dict[str, object], compact["payload"])
     assert compact_payload["passed"] is True
-    assert len(compact_payload["probes"]) == 4
-    assert all("cells" not in probe for probe in compact_payload["probes"])
+    probes = cast(list[dict[str, object]], compact_payload["probes"])
+    assert len(probes) == 4
+    assert all("cells" not in probe for probe in probes)
 
 
 @pytest.mark.parametrize(
