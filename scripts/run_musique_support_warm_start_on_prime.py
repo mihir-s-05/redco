@@ -87,8 +87,9 @@ def _disk_size(row: Mapping[str, object]) -> int:
 
 
 def _select(rows: Sequence[dict[str, Any]]) -> tuple[dict[str, Any] | None, int, int]:
+    eligible_rows = [row for row in rows if _warm_eligible(row)]
     groups: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
+    for row in eligible_rows:
         identity = row.get("cloudId")
         if type(identity) is str and identity:
             groups.setdefault(identity, []).append(row)
@@ -101,15 +102,14 @@ def _select(rows: Sequence[dict[str, Any]]) -> tuple[dict[str, Any] | None, int,
             continue
         consistent.append(group[0])
         collapsed += len(group) - 1
-    eligible = [row for row in consistent if _warm_eligible(row)]
-    eligible.sort(
+    consistent.sort(
         key=lambda row: (
             0 if row["isSpot"] is False else 1,
             _price(row),
             str(row["cloudId"]),
         )
     )
-    return (eligible[0] if eligible else None), collapsed, conflicts
+    return (consistent[0] if consistent else None), collapsed, conflicts
 
 
 def _balance(wallet: Any) -> float:

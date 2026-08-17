@@ -91,17 +91,30 @@ def test_selection_collapses_only_identical_duplicate_projection() -> None:
     assert conflicts == 0
 
 
-@pytest.mark.parametrize(
-    "conflicting",
-    [
-        _row("cloud-a", spot=None),
-        {**_row("cloud-a"), "gpuType": "H100"},
-    ],
-)
-def test_sole_conflicting_identity_is_excluded(
-    conflicting: dict[str, Any],
-) -> None:
-    selected, collapsed, conflicts = _select([_row("cloud-a"), conflicting])
+def test_ineligible_unknown_spot_sibling_does_not_conflict() -> None:
+    selected, collapsed, conflicts = _select(
+        [_row("cloud-a"), _row("cloud-a", spot=None)]
+    )
+    assert selected is not None
+    assert selected["cloudId"] == "cloud-a"
+    assert collapsed == 0
+    assert conflicts == 0
+
+
+def test_ineligible_wrong_hardware_sibling_does_not_conflict() -> None:
+    selected, collapsed, conflicts = _select(
+        [_row("cloud-a"), {**_row("cloud-a"), "gpuType": "H100"}]
+    )
+    assert selected is not None
+    assert selected["cloudId"] == "cloud-a"
+    assert collapsed == 0
+    assert conflicts == 0
+
+
+def test_two_eligible_projections_conflict_and_are_excluded() -> None:
+    selected, collapsed, conflicts = _select(
+        [_row("cloud-a", rate=1.0), _row("cloud-a", rate=1.5)]
+    )
     assert selected is None
     assert collapsed == 0
     assert conflicts == 1
@@ -110,8 +123,8 @@ def test_sole_conflicting_identity_is_excluded(
 def test_consistent_eligible_identity_survives_other_conflict() -> None:
     selected, collapsed, conflicts = _select(
         [
-            _row("conflict"),
-            {**_row("conflict"), "gpuType": "H100"},
+            _row("conflict", rate=1.0),
+            _row("conflict", rate=1.5),
             _row("usable", rate=1.5),
             _row("usable", rate=1.5),
         ]
@@ -120,6 +133,13 @@ def test_consistent_eligible_identity_survives_other_conflict() -> None:
     assert selected["cloudId"] == "usable"
     assert collapsed == 1
     assert conflicts == 1
+
+
+def test_no_eligible_rows_have_zero_domain_counts() -> None:
+    selected, collapsed, conflicts = _select([])
+    assert selected is None
+    assert collapsed == 0
+    assert conflicts == 0
 
 
 def test_selection_rejects_unknown_spot_and_non_available_rows() -> None:
