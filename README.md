@@ -1,5 +1,10 @@
 # ReDCO-Lite
 
+> **Status: closed (August 22, 2026).** This research project is complete. The
+> repository is preserved as a tested baseline, replay substrate, and record of
+> its CPU-gated results; no further algorithm development or scale-up runs are
+> planned.
+
 ReDCO-Lite is a small research implementation of local counterfactual credit
 assignment for multi-step agents. It records an execution as an event graph,
 branches from a selected policy decision, replays only the affected suffix, and
@@ -94,3 +99,5 @@ See [architecture](docs/architecture.md), [development](docs/development.md), an
   routing objective failed a cost-matched CPU gate.
 - **2026-08-17:** Campaign-specific code was retired, leaving the current lean
   baseline, replay system, tests, and compact results.
+- **2026-08-22:** The project was closed after its follow-up algorithmic
+  hypotheses failed their preregistered CPU gates.
